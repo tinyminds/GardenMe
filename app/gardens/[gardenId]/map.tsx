@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle, Defs, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
+import * as Sharing from "expo-sharing";
+import { captureRef } from "react-native-view-shot";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/state/queryClient";
 import { makeId } from "@/utils/id";
@@ -115,7 +118,10 @@ export default function GardenMapEditorScreen() {
   const [isEditingRectWidth, setIsEditingRectWidth] = useState(false);
   const [viewport, setViewport] = useState({ width: 320, height: 220 });
   const [canvas, setCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
+  const [isExportingImage, setIsExportingImage] = useState(false);
+  const [isExportRenderMode, setIsExportRenderMode] = useState(false);
   const gestureStartRef = useRef<{ distance: number; angle: number; zoom: number; rotation: number } | null>(null);
+  const exportCanvasRef = useRef<View | null>(null);
   const rectLengthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rectWidthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [didNormalizeLegacyCalibration, setDidNormalizeLegacyCalibration] = useState(false);
@@ -475,6 +481,54 @@ export default function GardenMapEditorScreen() {
     undoPoint();
   };
 
+  const exportPlannerImage = async () => {
+    if (Platform.OS === "web") {
+      Alert.alert("Not available on web", "Image export currently works on iOS and Android.");
+      return;
+    }
+    if (!exportCanvasRef.current) {
+      Alert.alert("Export unavailable", "Canvas was not ready. Try again in a moment.");
+      return;
+    }
+
+    const prevZoom = zoom;
+    const prevRotation = viewRotationDeg;
+    try {
+      setIsExportingImage(true);
+      setIsExportRenderMode(true);
+      setZoom(1);
+      setViewRotationDeg(0);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const aspectRatio = BASE_CANVAS_HEIGHT / BASE_CANVAS_WIDTH;
+      const exportWidth = 5600;
+      const exportHeight = Math.max(1200, Math.round(exportWidth * aspectRatio));
+      const uri = await captureRef(exportCanvasRef.current, {
+        format: "png",
+        quality: 1,
+        result: "tmpfile",
+        width: exportWidth,
+        height: exportHeight,
+      });
+      const sharingAvailable = await Sharing.isAvailableAsync();
+      if (!sharingAvailable) {
+        Alert.alert("Sharing unavailable", "This device does not support file sharing.");
+        return;
+      }
+      await Sharing.shareAsync(uri, {
+        mimeType: "image/png",
+        dialogTitle: "Export Garden Map",
+        UTI: "public.png",
+      });
+    } catch (error) {
+      Alert.alert("Export failed", error instanceof Error ? error.message : "Could not export image.");
+    } finally {
+      setZoom(prevZoom);
+      setViewRotationDeg(prevRotation);
+      setIsExportRenderMode(false);
+      setIsExportingImage(false);
+    }
+  };
+
   const gestureResponder = useMemo(
     () =>
       PanResponder.create({
@@ -633,6 +687,7 @@ export default function GardenMapEditorScreen() {
 
   const area = polygonArea(draftPoints);
   const showBaseImage = showImageLayer;
+  const annotationScale = isExportRenderMode ? 0.68 : 1;
   const gridVerticalLines = showGridLayer
     ? buildGridSeries(boundaryMinX, boundaryMaxX, gridStepX).map((x) => x * canvas.width)
     : [];
@@ -892,6 +947,15 @@ export default function GardenMapEditorScreen() {
             >
               <Text style={[styles.secondaryButtonText, canvasMode === "pan" && styles.secondaryButtonTextActive]}>Pan</Text>
             </Pressable>
+            <Pressable
+              style={[styles.secondaryButton, isExportingImage && styles.secondaryButtonReady]}
+              onPress={() => void exportPlannerImage()}
+              disabled={isExportingImage}
+            >
+              <Text style={[styles.secondaryButtonText, isExportingImage && styles.secondaryButtonTextReady]}>
+                {isExportingImage ? "Exporting..." : "Export Image"}
+              </Text>
+            </Pressable>
           </View>
           <Text style={styles.infoText}>
             Mode: {canvasMode === "draw" ? "Draw/edit points." : "Pan/zoom/twist canvas."}
@@ -912,6 +976,7 @@ export default function GardenMapEditorScreen() {
                 scrollEnabled={canvasMode === "pan" && zoom > 1.01}
               >
                 <View
+                  ref={exportCanvasRef}
                   style={[
                     styles.canvasContainer,
                     { width: zoomedWidth, height: zoomedHeight, transform: [{ rotate: `${viewRotationDeg}deg` }] },
@@ -973,7 +1038,7 @@ export default function GardenMapEditorScreen() {
                         y={measurement.y}
                         textAnchor="middle"
                         alignmentBaseline="middle"
-                        fontSize={11}
+                        fontSize={11 * annotationScale}
                         fontWeight="700"
                         fill="#173A29"
                         transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
@@ -1026,7 +1091,7 @@ export default function GardenMapEditorScreen() {
                               y={measurement.y}
                               textAnchor="middle"
                               alignmentBaseline="middle"
-                              fontSize={11}
+                              fontSize={11 * annotationScale}
                               fontWeight="700"
                               fill="#1B3D2B"
                               transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
@@ -1040,7 +1105,7 @@ export default function GardenMapEditorScreen() {
                               y={bedLabel.y}
                               textAnchor="middle"
                               alignmentBaseline="middle"
-                              fontSize={bedLabel.fontSize}
+                              fontSize={bedLabel.fontSize * annotationScale}
                               fontWeight="800"
                               fill="#000000"
                             >
@@ -1089,7 +1154,7 @@ export default function GardenMapEditorScreen() {
                             y={measurement.y}
                             textAnchor="middle"
                             alignmentBaseline="middle"
-                            fontSize={11}
+                            fontSize={11 * annotationScale}
                             fontWeight="700"
                             fill="#1B3D2B"
                             transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}

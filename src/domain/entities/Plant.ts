@@ -31,3 +31,20 @@ export interface GardenCropWishlistItemView extends GardenCropWishlistItem {
   plant: PlantCatalogEntry;
   bedName?: string;
 }
+
+export type PlantingEndState = "harvested" | "done" | "dead";
+
+export interface GardenCropPlantingHistoryItem {
+  id: string;
+  entryId: string;
+  gardenId: string;
+  bedId?: string;
+  bedName?: string;
+  plantedAt: string;
+  endedAt?: string;
+  endState?: PlantingEndState;
+  createdAt: string;
+  updatedAt: string;
+  plant: PlantCatalogEntry;
+  varietyName?: string;
+}

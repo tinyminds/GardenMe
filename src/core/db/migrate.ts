@@ -246,6 +246,79 @@ const migrations: Migration[] = [
       PRAGMA foreign_keys=ON;
     `,
   },
+  {
+    version: "0010_crop_plantings_history",
+    sql: `
+      CREATE TABLE IF NOT EXISTS garden_crop_plantings (
+        id TEXT PRIMARY KEY NOT NULL,
+        entry_id TEXT NOT NULL,
+        garden_id TEXT NOT NULL,
+        bed_id TEXT,
+        planted_at TEXT NOT NULL,
+        ended_at TEXT,
+        end_state TEXT CHECK (end_state IN ('harvested', 'done', 'dead')),
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (entry_id) REFERENCES garden_crop_entries(id) ON DELETE CASCADE,
+        FOREIGN KEY (garden_id) REFERENCES gardens(id) ON DELETE CASCADE,
+        FOREIGN KEY (bed_id) REFERENCES beds(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_crop_plantings_entry ON garden_crop_plantings(entry_id);
+      CREATE INDEX IF NOT EXISTS idx_crop_plantings_garden ON garden_crop_plantings(garden_id);
+      CREATE INDEX IF NOT EXISTS idx_crop_plantings_bed ON garden_crop_plantings(bed_id);
+      CREATE INDEX IF NOT EXISTS idx_crop_plantings_ended ON garden_crop_plantings(ended_at);
+    `,
+  },
+  {
+    version: "0011_companion_relationships",
+    sql: `
+      CREATE TABLE IF NOT EXISTS companion_relationships (
+        id TEXT PRIMARY KEY NOT NULL,
+        plant_name TEXT NOT NULL,
+        companion_name TEXT NOT NULL,
+        relation TEXT NOT NULL CHECK (relation IN ('good', 'avoid')),
+        reason TEXT,
+        source_url TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_companion_unique
+        ON companion_relationships(plant_name, companion_name, relation);
+      CREATE INDEX IF NOT EXISTS idx_companion_plant_name
+        ON companion_relationships(plant_name);
+      CREATE INDEX IF NOT EXISTS idx_companion_companion_name
+        ON companion_relationships(companion_name);
+
+      INSERT OR IGNORE INTO companion_relationships (id, plant_name, companion_name, relation, reason, source_url, created_at, updated_at) VALUES
+        ('comp_001', 'tomato', 'basil', 'good', 'Often used together for pest confusion and pollinator draw.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_002', 'tomato', 'marigold', 'good', 'Commonly paired to deter some pests.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_003', 'carrot', 'onion', 'good', 'Classic pairing for reciprocal pest distraction.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_004', 'carrot', 'leek', 'good', 'Often paired for complementary pest pressure reduction.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_005', 'cucumber', 'dill', 'good', 'Can attract beneficial insects around cucurbits.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_006', 'cucumber', 'radish', 'good', 'Often used as a trap/distraction companion.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_007', 'corn', 'bean', 'good', 'Part of the Three Sisters style support pairing.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_008', 'corn', 'squash', 'good', 'Part of the Three Sisters ground-cover pairing.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_009', 'pepper', 'basil', 'good', 'Common aromatic companion for peppers.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_010', 'lettuce', 'radish', 'good', 'Short-cycle pairing with space/time complementarity.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_011', 'cabbage', 'dill', 'good', 'Flowering dill can attract beneficial insects.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_012', 'beet', 'onion', 'good', 'Frequently listed as a compatible pairing.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_013', 'asparagus', 'tomato', 'good', 'Traditional reciprocal companion pairing.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_014', 'spinach', 'strawberry', 'good', 'Often listed as a compatible mixed planting.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_015', 'tomato', 'potato', 'avoid', 'Both are Solanaceae and can share diseases/blight pressure.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_016', 'tomato', 'corn', 'avoid', 'Can share some pest pressure in warm seasons.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_017', 'bean', 'onion', 'avoid', 'Alliums are commonly listed as antagonistic to beans.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_018', 'bean', 'garlic', 'avoid', 'Alliums are commonly listed as antagonistic to beans.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_019', 'cabbage', 'strawberry', 'avoid', 'Often listed as an unfavorable pairing.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_020', 'carrot', 'dill', 'avoid', 'Mature dill can suppress carrot growth in close planting.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_021', 'cucumber', 'potato', 'avoid', 'Frequently listed as an unfavorable pairing.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_022', 'fennel', 'tomato', 'avoid', 'Fennel is frequently considered allelopathic to many crops.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_023', 'fennel', 'bean', 'avoid', 'Fennel is frequently considered allelopathic to many crops.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ('comp_024', 'sunflower', 'potato', 'avoid', 'Can be listed as a problematic pairing in some guides.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+    `,
+  },
 ];
 
 export async function runMigrations(db: AppDatabase): Promise<void> {

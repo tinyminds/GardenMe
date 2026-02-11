@@ -107,7 +107,7 @@ export default function PlanTabScreen() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Planting</Text>
             <Link href={`/gardens/${selectedGarden.id}/grow`} style={styles.primaryLink}>Grow List</Link>
-            <Link href={`/gardens/${selectedGarden.id}/beds`} style={styles.secondaryLink}>Beds</Link>
+            <Link href={`/gardens/${selectedGarden.id}/beds`} style={styles.primaryLink}>Beds</Link>
           </View>
         </>
       )}
@@ -146,16 +146,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#245A3E",
     color: "#FFFFFF",
     fontWeight: "800",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    overflow: "hidden",
-    textAlign: "center",
-  },
-  secondaryLink: {
-    backgroundColor: "#DFEADF",
-    color: "#1F3F2B",
-    fontWeight: "700",
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
