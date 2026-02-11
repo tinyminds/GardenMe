@@ -77,6 +77,85 @@ const migrations: Migration[] = [
       ALTER TABLE beds ADD COLUMN has_irrigation INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: "0005_plants_and_wishlist",
+    sql: `
+      CREATE TABLE IF NOT EXISTS plant_catalog_cache (
+        id TEXT PRIMARY KEY NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('trefle', 'manual')),
+        external_id TEXT,
+        common_name TEXT NOT NULL,
+        scientific_name TEXT,
+        family_name TEXT,
+        image_url TEXT,
+        meta_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_plant_catalog_source_external
+        ON plant_catalog_cache(source, external_id);
+      CREATE INDEX IF NOT EXISTS idx_plant_catalog_common_name
+        ON plant_catalog_cache(common_name);
+
+      CREATE TABLE IF NOT EXISTS garden_crop_wishlist (
+        id TEXT PRIMARY KEY NOT NULL,
+        garden_id TEXT NOT NULL,
+        plant_catalog_id TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (garden_id) REFERENCES gardens(id) ON DELETE CASCADE,
+        FOREIGN KEY (plant_catalog_id) REFERENCES plant_catalog_cache(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wishlist_garden ON garden_crop_wishlist(garden_id);
+      CREATE INDEX IF NOT EXISTS idx_wishlist_catalog ON garden_crop_wishlist(plant_catalog_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_wishlist_garden_catalog
+        ON garden_crop_wishlist(garden_id, plant_catalog_id);
+    `,
+  },
+  {
+    version: "0006_crop_entries",
+    sql: `
+      CREATE TABLE IF NOT EXISTS garden_crop_entries (
+        id TEXT PRIMARY KEY NOT NULL,
+        garden_id TEXT NOT NULL,
+        plant_catalog_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('wanted','already_growing')),
+        bed_id TEXT,
+        is_perennial INTEGER NOT NULL DEFAULT 0,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (garden_id) REFERENCES gardens(id) ON DELETE CASCADE,
+        FOREIGN KEY (plant_catalog_id) REFERENCES plant_catalog_cache(id) ON DELETE CASCADE,
+        FOREIGN KEY (bed_id) REFERENCES beds(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_crop_entries_garden ON garden_crop_entries(garden_id);
+      CREATE INDEX IF NOT EXISTS idx_crop_entries_plant ON garden_crop_entries(plant_catalog_id);
+      CREATE INDEX IF NOT EXISTS idx_crop_entries_bed ON garden_crop_entries(bed_id);
+      CREATE INDEX IF NOT EXISTS idx_crop_entries_status ON garden_crop_entries(status);
+
+      INSERT INTO garden_crop_entries (
+        id, garden_id, plant_catalog_id, status, bed_id, is_perennial, notes, created_at, updated_at
+      )
+      SELECT
+        id, garden_id, plant_catalog_id, 'wanted', NULL, 0, notes, created_at, updated_at
+      FROM garden_crop_wishlist
+      WHERE NOT EXISTS (
+        SELECT 1 FROM garden_crop_entries existing WHERE existing.id = garden_crop_wishlist.id
+      );
+    `,
+  },
+  {
+    version: "0007_crop_entry_variety_support",
+    sql: `
+      ALTER TABLE garden_crop_entries ADD COLUMN variety_name TEXT;
+      ALTER TABLE garden_crop_entries ADD COLUMN support_needed INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export async function runMigrations(db: AppDatabase): Promise<void> {
@@ -107,6 +186,9 @@ export async function runMigrations(db: AppDatabase): Promise<void> {
         await db.execAsync("ALTER TABLE beds ADD COLUMN perennial_plants_csv TEXT;").catch(() => undefined);
         await db.execAsync("ALTER TABLE beds ADD COLUMN is_raised_bed INTEGER NOT NULL DEFAULT 0;").catch(() => undefined);
         await db.execAsync("ALTER TABLE beds ADD COLUMN has_irrigation INTEGER NOT NULL DEFAULT 0;").catch(() => undefined);
+      } else if (migration.version === "0007_crop_entry_variety_support") {
+        await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN variety_name TEXT;").catch(() => undefined);
+        await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN support_needed INTEGER NOT NULL DEFAULT 0;").catch(() => undefined);
       } else {
         await db.execAsync(migration.sql);
       }

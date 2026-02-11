@@ -40,7 +40,7 @@ export default function DashboardScreen() {
         <Text style={styles.cardTitle}>Quick Actions</Text>
         <Link href="/gardens/new" style={styles.primaryLink}>+ New Garden</Link>
         <Link href="/(tabs)/gardens" style={styles.secondaryLink}>Open Gardens</Link>
-        <Link href="/(tabs)/planner" style={styles.secondaryLink}>Open Planner</Link>
+        <Link href="/(tabs)/plan" style={styles.secondaryLink}>Open Plan</Link>
       </View>
 
       <View style={styles.card}>

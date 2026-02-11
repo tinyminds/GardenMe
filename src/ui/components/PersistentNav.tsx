@@ -10,7 +10,7 @@ export function PersistentNav() {
       <View style={styles.row}>
         <Link href="/(tabs)" style={styles.link}><Text style={styles.text}>Home</Text></Link>
         <Link href="/(tabs)/gardens" style={styles.link}><Text style={styles.text}>Gardens</Text></Link>
-        <Link href="/(tabs)/planner" style={styles.link}><Text style={styles.text}>Planner</Text></Link>
+        <Link href="/(tabs)/plan" style={styles.link}><Text style={styles.text}>Plan</Text></Link>
         <Link href="/(tabs)/tasks" style={styles.link}><Text style={styles.text}>Tasks</Text></Link>
         <Link href="/(tabs)/settings" style={styles.link}><Text style={styles.text}>Settings</Text></Link>
       </View>

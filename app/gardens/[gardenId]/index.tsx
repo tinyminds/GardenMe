@@ -4,10 +4,12 @@ import { StyleSheet, Text, View } from "react-native";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
+import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 
 const gardenRepository = new SqliteGardenRepository();
 const bedRepository = new SqliteBedRepository();
 const featureRepository = new SqliteGardenFeatureRepository();
+const wishlistRepository = new SqliteGardenCropWishlistRepository();
 
 type StepStatus = "done" | "in_progress" | "start" | "blocked";
 
@@ -42,9 +44,19 @@ export default function GardenDetailScreen() {
     },
   });
 
+  const wishlistQuery = useQuery({
+    queryKey: ["garden-grow-list", gardenId],
+    enabled: Boolean(gardenId),
+    queryFn: async () => {
+      if (!gardenId) return [];
+      return wishlistRepository.listByGarden(gardenId);
+    },
+  });
+
   const garden = gardenQuery.data;
   const bedCount = bedsQuery.data?.length ?? 0;
   const featureCount = featuresQuery.data?.length ?? 0;
+  const wishlistCount = wishlistQuery.data?.length ?? 0;
   const hasSetup = Boolean(garden?.scaleCalibration);
   const hasMappedContent = bedCount + featureCount > 0;
 
@@ -70,6 +82,12 @@ export default function GardenDetailScreen() {
           helper: bedCount > 0 ? `${bedCount} beds ready to review` : "No beds yet",
           status: bedCount > 0 ? ("in_progress" as StepStatus) : hasMappedContent ? ("start" as StepStatus) : ("blocked" as StepStatus),
         },
+        {
+          href: `/gardens/${gardenId}/grow`,
+          title: "Grow List",
+          helper: wishlistCount > 0 ? `${wishlistCount} plants shortlisted` : "Choose crops to grow this season",
+          status: wishlistCount > 0 ? ("in_progress" as StepStatus) : hasSetup ? ("start" as StepStatus) : ("blocked" as StepStatus),
+        },
       ]
     : [];
 
@@ -91,6 +109,7 @@ export default function GardenDetailScreen() {
                   Area {garden.scaleCalibration?.boundaryAreaSqM ? `${garden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
                   {" · "}Beds {bedCount}
                   {" · "}Features {featureCount}
+                  {" · "}Grow list {wishlistCount}
                 </Text>
               </View>
             )}

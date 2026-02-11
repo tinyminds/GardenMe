@@ -93,8 +93,6 @@ export default function GardenMapEditorScreen() {
   const [name, setName] = useState("Bed 1");
   const [sunExposure, setSunExposure] = useState<SunExposure>(SunExposure.FULL_SUN);
   const [drainage, setDrainage] = useState<Drainage>(Drainage.GOOD);
-  const [containsPerennials, setContainsPerennials] = useState(false);
-  const [perennialPlantsCsv, setPerennialPlantsCsv] = useState("");
   const [isRaisedBed, setIsRaisedBed] = useState(false);
   const [hasIrrigation, setHasIrrigation] = useState(false);
   const [draftPoints, setDraftPoints] = useState<Point2D[]>([]);
@@ -196,8 +194,6 @@ export default function GardenMapEditorScreen() {
   useEffect(() => {
     if (editingZoneId) return;
     if (activeType !== GardenFeatureType.BED) return;
-    setContainsPerennials(false);
-    setPerennialPlantsCsv("");
     setIsRaisedBed(false);
     setHasIrrigation(false);
   }, [activeType, editingZoneId]);
@@ -313,13 +309,9 @@ export default function GardenMapEditorScreen() {
     if (zone.source === "bed") {
       setSunExposure(zone.sunExposure ?? SunExposure.FULL_SUN);
       setDrainage(zone.drainage ?? Drainage.GOOD);
-      setContainsPerennials(zone.containsPerennials ?? false);
-      setPerennialPlantsCsv(zone.perennialPlantsCsv ?? "");
       setIsRaisedBed(zone.isRaisedBed ?? false);
       setHasIrrigation(zone.hasIrrigation ?? false);
     } else {
-      setContainsPerennials(false);
-      setPerennialPlantsCsv("");
       setIsRaisedBed(false);
       setHasIrrigation(false);
     }
@@ -578,19 +570,21 @@ export default function GardenMapEditorScreen() {
       }
 
       if (activeType === GardenFeatureType.BED) {
-        const perennialCsv = perennialPlantsCsv.trim();
+        const existingBed = editingZoneId
+          ? (bedsQuery.data ?? []).find((bed) => bed.id === editingZoneId)
+          : null;
         const bedPayloadBase = {
           gardenId,
           name: trimmedName,
           polygon: draftPoints,
           sunExposure,
           drainage,
-          containsPerennials,
+          containsPerennials: existingBed?.containsPerennials ?? false,
           isRaisedBed,
           hasIrrigation,
           createdAt: now,
           updatedAt: now,
-          ...(containsPerennials && perennialCsv ? { perennialPlantsCsv: perennialCsv } : {}),
+          ...(existingBed?.perennialPlantsCsv ? { perennialPlantsCsv: existingBed.perennialPlantsCsv } : {}),
         };
         if (editingZoneId) {
           await bedRepository.update({
@@ -1252,30 +1246,6 @@ export default function GardenMapEditorScreen() {
                 selected={hasIrrigation ? "yes" : "no"}
                 onSelect={(value) => setHasIrrigation(value === "yes")}
               />
-              <PickerRow
-                title="Contains Perennials"
-                options={["yes", "no"]}
-                selected={containsPerennials ? "yes" : "no"}
-                onSelect={(value) => {
-                  const next = value === "yes";
-                  setContainsPerennials(next);
-                  if (!next) {
-                    setPerennialPlantsCsv("");
-                  }
-                }}
-              />
-              {containsPerennials && (
-                <View style={styles.perennialWrap}>
-                  <Text style={styles.infoText}>List perennial plants separated by commas, e.g. lavender, salvia, echinacea.</Text>
-                  <TextInput
-                    value={perennialPlantsCsv}
-                    onChangeText={setPerennialPlantsCsv}
-                    placeholder="Perennials in this bed (comma-separated)"
-                    style={styles.nameInput}
-                    multiline
-                  />
-                </View>
-              )}
               {canPrecisionEditBed && (
                 <View style={styles.precisionCard}>
                   <Text style={styles.precisionTitle}>Precision Controls (Beds)</Text>
@@ -2243,7 +2213,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   metaRow: { marginTop: 8, gap: 8 },
-  perennialWrap: { gap: 6 },
   precisionCard: {
     marginTop: 6,
     padding: 10,
