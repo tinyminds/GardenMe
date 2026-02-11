@@ -4,11 +4,13 @@ import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native
 import { useGardensQuery } from "@/features/gardens/hooks/useGardensQuery";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { queryClient } from "@/state/queryClient";
+import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 
 const repository = new SqliteGardenRepository();
 
 export default function GardensTabScreen() {
   const { data, isLoading, isError } = useGardensQuery();
+  const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => repository.delete(id),
@@ -37,7 +39,12 @@ export default function GardensTabScreen() {
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Link href={`/gardens/${item.id}`} asChild>
-              <Pressable style={styles.cardMain}>
+              <Pressable
+                style={styles.cardMain}
+                onPress={() => {
+                  setSelectedGardenId(item.id);
+                }}
+              >
                 <Text style={styles.name}>{item.name}</Text>
                 <Text>{item.locationLabel ?? `${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}`}</Text>
               </Pressable>

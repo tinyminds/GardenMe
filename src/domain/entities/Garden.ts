@@ -17,6 +17,7 @@ export interface GardenScaleCalibration {
   manualWidthM?: number;
   orientationDegrees?: number;
   showBaseImage?: boolean;
+  showGridOverlay?: boolean;
 }
 
 export interface Garden {

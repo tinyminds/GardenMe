@@ -16,7 +16,7 @@ import {
   type GestureResponderEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Circle, ClipPath, Defs, Line, Path, Polygon } from "react-native-svg";
+import Svg, { Circle, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/state/queryClient";
 import { makeId } from "@/utils/id";
@@ -26,7 +26,7 @@ import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/Sqlit
 import { Drainage, SunExposure, type Bed, type Point2D } from "@/domain/entities/Bed";
 import { GardenFeatureType, type GardenFeature } from "@/domain/entities/GardenFeature";
 import type { GardenScaleCalibration } from "@/domain/entities/Garden";
-import { isPointInsidePolygon, polygonArea } from "@/features/garden-mapping/utils/geometry";
+import { clipLineToPolygon, isPointInsidePolygon, polygonArea } from "@/features/garden-mapping/utils/geometry";
 
 const gardenRepository = new SqliteGardenRepository();
 const bedRepository = new SqliteBedRepository();
@@ -222,6 +222,17 @@ export default function GardenMapEditorScreen() {
     }
   }, [shapeDraftMode]);
 
+  useEffect(() => {
+    if (!gardenQuery.isFetched) return;
+    setShowImageLayer(calibration?.showBaseImage ?? true);
+    setShowGridLayer(calibration?.showGridOverlay ?? false);
+  }, [
+    gardenId,
+    gardenQuery.isFetched,
+    calibration?.showBaseImage,
+    calibration?.showGridOverlay,
+  ]);
+
   const zoomedWidth = Math.max(1, Math.round(viewport.width * zoom));
   const zoomedHeight = Math.max(1, Math.round(viewport.height * zoom));
 
@@ -285,12 +296,19 @@ export default function GardenMapEditorScreen() {
   const startEditZone = (zone: ZonePreview) => {
     setIsEditingCanvas(true);
     setCanvasMode("draw");
-    setShapeDraftMode("points");
-    setPresetShape(null);
+    const inferredPreset = inferPresetShapeFromZone(zone);
+    if (inferredPreset) {
+      setShapeDraftMode(inferredPreset.kind === "line" ? "line" : inferredPreset.kind);
+      setPresetShape(inferredPreset);
+      setDraftPoints(pointsFromPresetShape(inferredPreset));
+    } else {
+      setShapeDraftMode("points");
+      setPresetShape(null);
+      setDraftPoints(zone.polygon.map((p) => ({ ...p })));
+    }
     setEditingZoneId(zone.id);
     setActiveType(zone.type);
     setName(zone.name);
-    setDraftPoints(zone.polygon.map((p) => ({ ...p })));
     setIsClosed(true);
     setSelectedPointIndex(null);
 
@@ -764,9 +782,21 @@ export default function GardenMapEditorScreen() {
     : null;
   const saveDisabled = draftPoints.length < 3 || !name.trim();
 
+  const persistCanvasViewSettings = async (nextShowImage: boolean, nextShowGrid: boolean) => {
+    if (!gardenId || !calibration) return;
+    const nextCalibration: typeof calibration = {
+      ...calibration,
+      showBaseImage: nextShowImage,
+      showGridOverlay: nextShowGrid,
+    };
+    await gardenRepository.updateScaleCalibration(gardenId, nextCalibration);
+    await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
+    await queryClient.invalidateQueries({ queryKey: ["gardens"] });
+  };
+
   useEffect(() => {
     if (!gardenId || !calibration || didNormalizeLegacyCalibration) return;
-    const needsNormalize = calibration.showBaseImage === false;
+    const needsNormalize = (calibration.orientationDegrees ?? 0) !== 0;
     if (!needsNormalize) {
       setDidNormalizeLegacyCalibration(true);
       return;
@@ -774,7 +804,6 @@ export default function GardenMapEditorScreen() {
 
     const nextCalibration: typeof calibration = {
       ...calibration,
-      showBaseImage: true,
       orientationDegrees: 0,
     };
 
@@ -869,6 +898,25 @@ export default function GardenMapEditorScreen() {
             </View>
           </View>
           <View style={styles.toolbarRow}>
+            <ToggleSwitch
+              label="Image"
+              value={showImageLayer}
+              onToggle={(next) => {
+                setShowImageLayer(next);
+                void persistCanvasViewSettings(next, showGridLayer);
+              }}
+            />
+            <ToggleSwitch
+              label="Grid"
+              value={showGridLayer}
+              disabled={!calibration}
+              onToggle={(next) => {
+                setShowGridLayer(next);
+                void persistCanvasViewSettings(showImageLayer, next);
+              }}
+            />
+          </View>
+          <View style={styles.toolbarRow}>
             <Pressable
               style={[styles.secondaryButton, canvasMode === "draw" && styles.secondaryButtonActive]}
               onPress={() => setCanvasMode("draw")}
@@ -923,18 +971,6 @@ export default function GardenMapEditorScreen() {
                   disabled={!isEditingCanvas || canvasMode === "pan"}
                 >
                   <Svg width="100%" height="100%">
-                    <Defs>
-                      {existingZones.map((zone) => (
-                        <ClipPath key={`zone-clip-${zone.id}`} id={`zone-clip-${zone.id}`}>
-                          <Polygon points={toSvgPoints(zone.polygon, canvas)} />
-                        </ClipPath>
-                      ))}
-                      {draftPoints.length >= 3 && (
-                        <ClipPath id="draft-clip">
-                          <Polygon points={toSvgPoints(draftPoints, canvas)} />
-                        </ClipPath>
-                      )}
-                    </Defs>
                     {showGridLayer && gridVerticalLines.map((x, index) => (
                       <Line
                         key={`grid-v-${index.toString()}`}
@@ -978,6 +1014,12 @@ export default function GardenMapEditorScreen() {
                       const hatchLines = stripeSpec
                         ? buildHatchLines(canvas.width, canvas.height, stripeSpec.spacingPx, stripeSpec.angleDeg)
                         : [];
+                      const clippedHatchLines = stripeSpec
+                        ? clipHatchLinesToPolygon(hatchLines, zone.polygon, canvas.width, canvas.height)
+                        : [];
+                      const bedLabel = zone.source === "bed"
+                        ? getPolygonLabelPlacement(zone.polygon, canvas.width, canvas.height)
+                        : null;
 
                       return (
                         <Fragment key={zone.id}>
@@ -987,7 +1029,7 @@ export default function GardenMapEditorScreen() {
                             stroke={isEditingThis ? "#E85D2A" : color.stroke}
                             strokeWidth={isEditingThis ? 4 : 2}
                           />
-                          {stripeSpec && hatchLines.map((line, index) => (
+                          {stripeSpec && clippedHatchLines.map((line, index) => (
                             <Line
                               key={`zone-stripe-${zone.id}-${index.toString()}`}
                               x1={line.x1}
@@ -997,9 +1039,21 @@ export default function GardenMapEditorScreen() {
                               stroke={stripeSpec.color}
                               strokeWidth={1}
                               opacity={stripeSpec.opacity}
-                              clipPath={`url(#zone-clip-${zone.id})`}
                             />
                           ))}
+                          {bedLabel && (
+                            <SvgText
+                              x={bedLabel.x}
+                              y={bedLabel.y}
+                              textAnchor="middle"
+                              alignmentBaseline="middle"
+                              fontSize={bedLabel.fontSize}
+                              fontWeight="800"
+                              fill="#000000"
+                            >
+                              {truncateLabel(zone.name, 20)}
+                            </SvgText>
+                          )}
                         </Fragment>
                       );
                     })}
@@ -1013,11 +1067,16 @@ export default function GardenMapEditorScreen() {
                           strokeWidth={3}
                           {...(!isClosed ? { strokeDasharray: [10, 5] } : {})}
                         />
-                        {isClosed && getStripeSpecForType(activeType) && buildHatchLines(
+                        {isClosed && getStripeSpecForType(activeType) && clipHatchLinesToPolygon(
+                          buildHatchLines(
+                            canvas.width,
+                            canvas.height,
+                            getStripeSpecForType(activeType)!.spacingPx,
+                            getStripeSpecForType(activeType)!.angleDeg
+                          ),
+                          draftPoints,
                           canvas.width,
-                          canvas.height,
-                          getStripeSpecForType(activeType)!.spacingPx,
-                          getStripeSpecForType(activeType)!.angleDeg
+                          canvas.height
                         ).map((line, index) => (
                           <Line
                             key={`draft-stripe-${index.toString()}`}
@@ -1028,7 +1087,6 @@ export default function GardenMapEditorScreen() {
                             stroke={getStripeSpecForType(activeType)!.color}
                             strokeWidth={1}
                             opacity={getStripeSpecForType(activeType)!.opacity}
-                            clipPath="url(#draft-clip)"
                           />
                         ))}
                       </>
@@ -1094,23 +1152,6 @@ export default function GardenMapEditorScreen() {
           <View style={styles.toolbarRow}>
             <Pressable style={styles.secondaryButton} onPress={pickPhoto}>
               <Text style={styles.secondaryButtonText}>Photo</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.secondaryButton, showImageLayer && styles.secondaryButtonActive]}
-              onPress={() => setShowImageLayer((prev) => !prev)}
-            >
-              <Text style={[styles.secondaryButtonText, showImageLayer && styles.secondaryButtonTextActive]}>
-                Image {showImageLayer ? "On" : "Off"}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[styles.secondaryButton, showGridLayer && styles.secondaryButtonActive]}
-              onPress={() => setShowGridLayer((prev) => !prev)}
-              disabled={!calibration}
-            >
-              <Text style={[styles.secondaryButtonText, showGridLayer && styles.secondaryButtonTextActive]}>
-                Grid {showGridLayer ? "On" : "Off"}
-              </Text>
             </Pressable>
             <Pressable
               style={[styles.secondaryButton, snapToGrid && styles.secondaryButtonActive]}
@@ -1319,6 +1360,28 @@ function VertexHandle(props: {
         },
       ]}
     />
+  );
+}
+
+function ToggleSwitch(props: {
+  label: string;
+  value: boolean;
+  onToggle: (nextValue: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      style={[styles.switchRow, props.disabled && styles.switchRowDisabled]}
+      onPress={() => {
+        if (props.disabled) return;
+        props.onToggle(!props.value);
+      }}
+    >
+      <Text style={styles.switchLabel}>{props.label}</Text>
+      <View style={[styles.switchTrack, props.value && styles.switchTrackActive]}>
+        <View style={[styles.switchThumb, props.value && styles.switchThumbActive]} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -1539,6 +1602,33 @@ function buildHatchLines(
   return lines;
 }
 
+function clipHatchLinesToPolygon(
+  lines: Array<{ x1: number; y1: number; x2: number; y2: number }>,
+  polygon: Point2D[],
+  width: number,
+  height: number
+): Array<{ x1: number; y1: number; x2: number; y2: number }> {
+  if (polygon.length < 3 || width <= 0 || height <= 0 || lines.length === 0) return [];
+  const pixelPolygon = polygon.map((point) => ({ x: point.x * width, y: point.y * height }));
+  const clipped: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  for (const line of lines) {
+    const segments = clipLineToPolygon(
+      { x: line.x1, y: line.y1 },
+      { x: line.x2, y: line.y2 },
+      pixelPolygon
+    );
+    for (const segment of segments) {
+      clipped.push({
+        x1: segment.start.x,
+        y1: segment.start.y,
+        x2: segment.end.x,
+        y2: segment.end.y,
+      });
+    }
+  }
+  return clipped;
+}
+
 function buildGridSeries(start: number, end: number, step: number): number[] {
   if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(step) || step <= 0) {
     return [];
@@ -1559,6 +1649,92 @@ function buildGridSeries(start: number, end: number, step: number): number[] {
   return lines;
 }
 
+function inferPresetShapeFromZone(zone: ZonePreview): PresetShapeDraft | null {
+  const points = zone.polygon.filter(isFinitePoint);
+  if (points.length < 3) return null;
+  const options = getShapeOptionsForType(zone.type);
+  const canLine = options.some((option) => option.mode === "line");
+  const canEllipse = options.some((option) => option.mode === "ellipse");
+  const canRectangle = options.some((option) => option.mode === "rectangle");
+
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const width = clamp(maxX - minX, 0.02, 1.8);
+  const height = clamp(maxY - minY, 0.02, 1.8);
+  const center: Point2D = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  const aspect = Math.max(width, height) / Math.max(Math.min(width, height), 1e-6);
+
+  if (canLine && points.length === 4 && aspect >= 3) {
+    const longest = getLongestEdge(points);
+    const angleDeg = (Math.atan2(longest.dy, longest.dx) * 180) / Math.PI;
+    return {
+      kind: "line",
+      center,
+      width: clamp(longest.length, 0.08, 1.8),
+      height: clamp(Math.min(width, height), 0.012, 0.08),
+      angleDeg,
+    };
+  }
+
+  if (canEllipse && (points.length >= 8 || zone.type === GardenFeatureType.TREE || zone.type === GardenFeatureType.SHRUB)) {
+    if (isLikelyEllipse(points, center, width, height) || zone.type === GardenFeatureType.TREE || zone.type === GardenFeatureType.SHRUB) {
+      const forceCircle = zone.type === GardenFeatureType.TREE || zone.type === GardenFeatureType.SHRUB;
+      const size = Math.max(width, height);
+      return {
+        kind: "ellipse",
+        center,
+        width: forceCircle ? size : width,
+        height: forceCircle ? size : height,
+        forceCircle,
+        ...(zone.type === GardenFeatureType.TREE ? { variant: "tree" as const } : {}),
+        ...(zone.type === GardenFeatureType.SHRUB ? { variant: "shrub" as const } : {}),
+      };
+    }
+  }
+
+  if (canRectangle && points.length === 4 && aspect < 3) {
+    return {
+      kind: "rectangle",
+      center,
+      width,
+      height,
+    };
+  }
+
+  return null;
+}
+
+function getLongestEdge(points: Point2D[]): { dx: number; dy: number; length: number } {
+  let best = { dx: 1, dy: 0, length: 0.001 };
+  for (let i = 0; i < points.length; i += 1) {
+    const current = points[i];
+    const next = points[(i + 1) % points.length];
+    if (!current || !next) continue;
+    const dx = next.x - current.x;
+    const dy = next.y - current.y;
+    const length = Math.hypot(dx, dy);
+    if (length > best.length) {
+      best = { dx, dy, length };
+    }
+  }
+  return best;
+}
+
+function isLikelyEllipse(points: Point2D[], center: Point2D, width: number, height: number): boolean {
+  const halfW = Math.max(width / 2, 1e-6);
+  const halfH = Math.max(height / 2, 1e-6);
+  const radii = points.map((p) => Math.hypot((p.x - center.x) / halfW, (p.y - center.y) / halfH));
+  if (radii.length < 5) return false;
+  const mean = radii.reduce((sum, value) => sum + value, 0) / radii.length;
+  const variance = radii.reduce((sum, value) => sum + (value - mean) * (value - mean), 0) / radii.length;
+  const stdDev = Math.sqrt(variance);
+  return stdDev < 0.22;
+}
+
 function getPresetResizeHandlePoint(shape: PresetShapeDraft): Point2D {
   if (shape.kind === "line") {
     const angle = ((shape.angleDeg ?? 0) * Math.PI) / 180;
@@ -1572,6 +1748,34 @@ function getPresetResizeHandlePoint(shape: PresetShapeDraft): Point2D {
     x: clamp(shape.center.x + shape.width / 2, 0, 1),
     y: clamp(shape.center.y + shape.height / 2, 0, 1),
   };
+}
+
+function getPolygonLabelPlacement(
+  polygon: Point2D[],
+  width: number,
+  height: number
+): { x: number; y: number; fontSize: number } | null {
+  if (polygon.length < 3 || width <= 0 || height <= 0) return null;
+  const centroid = polygon.reduce(
+    (acc, point) => ({ x: acc.x + point.x / polygon.length, y: acc.y + point.y / polygon.length }),
+    { x: 0, y: 0 }
+  );
+  const xs = polygon.map((point) => point.x * width);
+  const ys = polygon.map((point) => point.y * height);
+  const bboxWidth = Math.max(1, Math.max(...xs) - Math.min(...xs));
+  const bboxHeight = Math.max(1, Math.max(...ys) - Math.min(...ys));
+  const fontSize = clamp(Math.min(bboxWidth * 0.12, bboxHeight * 0.28), 9, 16);
+  return {
+    x: clamp(centroid.x, 0, 1) * width,
+    y: clamp(centroid.y, 0, 1) * height,
+    fontSize,
+  };
+}
+
+function truncateLabel(value: string, maxChars: number): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
 function pointsFromPresetShape(shape: PresetShapeDraft): Point2D[] {
@@ -1740,6 +1944,34 @@ const styles = StyleSheet.create({
   zoomButton: { backgroundColor: "#DFEADF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   zoomButtonText: { fontSize: 18, fontWeight: "700", color: "#23412E" },
   zoomText: { minWidth: 52, textAlign: "center", fontWeight: "700", color: "#375947" },
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#EAF2E7",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  switchRowDisabled: { opacity: 0.45 },
+  switchLabel: { color: "#1F3F2B", fontWeight: "700" },
+  switchTrack: {
+    width: 40,
+    height: 22,
+    borderRadius: 999,
+    backgroundColor: "#BFD1BC",
+    justifyContent: "center",
+    paddingHorizontal: 2,
+  },
+  switchTrackActive: { backgroundColor: "#2D6A49" },
+  switchThumb: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    alignSelf: "flex-start",
+  },
+  switchThumbActive: { alignSelf: "flex-end" },
   infoText: { color: "#587063", fontWeight: "600" },
   rotationRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
   rotationInput: {
