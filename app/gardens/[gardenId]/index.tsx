@@ -1,6 +1,5 @@
 ﻿import { Link, useLocalSearchParams } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
-import { PersistentNav } from "@/ui/components/PersistentNav";
 
 export default function GardenDetailScreen() {
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
@@ -21,7 +20,6 @@ export default function GardenDetailScreen() {
           <Text style={styles.errorText}>Missing garden id</Text>
         )}
       </View>
-      <PersistentNav />
     </View>
   );
 }

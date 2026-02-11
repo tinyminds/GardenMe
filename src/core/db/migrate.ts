@@ -30,6 +30,10 @@ const migrations: Migration[] = [
         polygon_json TEXT NOT NULL,
         sun_exposure TEXT NOT NULL CHECK (sun_exposure IN ('full_sun','part_sun','shade')),
         drainage TEXT NOT NULL CHECK (drainage IN ('good','medium','poor')),
+        contains_perennials INTEGER NOT NULL DEFAULT 0,
+        perennial_plants_csv TEXT,
+        is_raised_bed INTEGER NOT NULL DEFAULT 0,
+        has_irrigation INTEGER NOT NULL DEFAULT 0,
         soil_notes TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -64,6 +68,15 @@ const migrations: Migration[] = [
       ALTER TABLE gardens ADD COLUMN scale_calibration_json TEXT;
     `,
   },
+  {
+    version: "0004_bed_details",
+    sql: `
+      ALTER TABLE beds ADD COLUMN contains_perennials INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE beds ADD COLUMN perennial_plants_csv TEXT;
+      ALTER TABLE beds ADD COLUMN is_raised_bed INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE beds ADD COLUMN has_irrigation INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export async function runMigrations(db: AppDatabase): Promise<void> {
@@ -89,6 +102,11 @@ export async function runMigrations(db: AppDatabase): Promise<void> {
       if (migration.version === "0003_garden_scale") {
         await db.execAsync("ALTER TABLE gardens ADD COLUMN image_source_type TEXT;").catch(() => undefined);
         await db.execAsync("ALTER TABLE gardens ADD COLUMN scale_calibration_json TEXT;").catch(() => undefined);
+      } else if (migration.version === "0004_bed_details") {
+        await db.execAsync("ALTER TABLE beds ADD COLUMN contains_perennials INTEGER NOT NULL DEFAULT 0;").catch(() => undefined);
+        await db.execAsync("ALTER TABLE beds ADD COLUMN perennial_plants_csv TEXT;").catch(() => undefined);
+        await db.execAsync("ALTER TABLE beds ADD COLUMN is_raised_bed INTEGER NOT NULL DEFAULT 0;").catch(() => undefined);
+        await db.execAsync("ALTER TABLE beds ADD COLUMN has_irrigation INTEGER NOT NULL DEFAULT 0;").catch(() => undefined);
       } else {
         await db.execAsync(migration.sql);
       }

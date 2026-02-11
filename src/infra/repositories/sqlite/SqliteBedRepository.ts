@@ -10,6 +10,10 @@ type BedRow = {
   polygon_json: string;
   sun_exposure: SunExposure;
   drainage: Drainage;
+  contains_perennials: number;
+  perennial_plants_csv: string | null;
+  is_raised_bed: number;
+  has_irrigation: number;
   soil_notes: string | null;
   created_at: string;
   updated_at: string;
@@ -30,9 +34,16 @@ export class SqliteBedRepository implements BedRepository {
         polygon: JSON.parse(row.polygon_json),
         sunExposure: row.sun_exposure,
         drainage: row.drainage,
+        containsPerennials: row.contains_perennials === 1,
+        isRaisedBed: row.is_raised_bed === 1,
+        hasIrrigation: row.has_irrigation === 1,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
+
+      if (row.perennial_plants_csv) {
+        bed.perennialPlantsCsv = row.perennial_plants_csv;
+      }
 
       if (row.soil_notes) {
         bed.soilNotes = row.soil_notes;
@@ -44,8 +55,11 @@ export class SqliteBedRepository implements BedRepository {
 
   async create(bed: Bed): Promise<void> {
     await getDatabase().runAsync(
-      `INSERT INTO beds (id, garden_id, name, polygon_json, sun_exposure, drainage, soil_notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO beds (
+         id, garden_id, name, polygon_json, sun_exposure, drainage,
+         contains_perennials, perennial_plants_csv, is_raised_bed, has_irrigation,
+         soil_notes, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         bed.id,
         bed.gardenId,
@@ -53,6 +67,10 @@ export class SqliteBedRepository implements BedRepository {
         JSON.stringify(bed.polygon),
         bed.sunExposure,
         bed.drainage,
+        bed.containsPerennials ? 1 : 0,
+        bed.perennialPlantsCsv ?? null,
+        bed.isRaisedBed ? 1 : 0,
+        bed.hasIrrigation ? 1 : 0,
         bed.soilNotes ?? null,
         bed.createdAt,
         bed.updatedAt,
@@ -63,13 +81,19 @@ export class SqliteBedRepository implements BedRepository {
   async update(bed: Bed): Promise<void> {
     await getDatabase().runAsync(
       `UPDATE beds
-       SET name = ?, polygon_json = ?, sun_exposure = ?, drainage = ?, soil_notes = ?, updated_at = ?
+       SET name = ?, polygon_json = ?, sun_exposure = ?, drainage = ?,
+           contains_perennials = ?, perennial_plants_csv = ?, is_raised_bed = ?, has_irrigation = ?,
+           soil_notes = ?, updated_at = ?
        WHERE id = ? AND garden_id = ?`,
       [
         bed.name,
         JSON.stringify(bed.polygon),
         bed.sunExposure,
         bed.drainage,
+        bed.containsPerennials ? 1 : 0,
+        bed.perennialPlantsCsv ?? null,
+        bed.isRaisedBed ? 1 : 0,
+        bed.hasIrrigation ? 1 : 0,
         bed.soilNotes ?? null,
         bed.updatedAt,
         bed.id,

@@ -6,6 +6,7 @@ export interface GardenRepository {
   create(garden: Garden): Promise<void>;
   delete(id: string): Promise<void>;
   updatePhoto(id: string, photoUri: string, sourceType?: "photo" | "satellite"): Promise<void>;
+  clearPhoto(id: string): Promise<void>;
   updateScaleCalibration(
     id: string,
     calibration: NonNullable<Garden["scaleCalibration"]>

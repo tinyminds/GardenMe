@@ -60,6 +60,13 @@ export class SqliteGardenRepository implements GardenRepository {
     );
   }
 
+  async clearPhoto(id: string): Promise<void> {
+    await getDatabase().runAsync(
+      "UPDATE gardens SET photo_uri = NULL, image_source_type = NULL, updated_at = ? WHERE id = ?",
+      [new Date().toISOString(), id]
+    );
+  }
+
   async updateScaleCalibration(id: string, calibration: GardenScaleCalibration): Promise<void> {
     await getDatabase().runAsync(
       "UPDATE gardens SET scale_calibration_json = ?, updated_at = ? WHERE id = ?",

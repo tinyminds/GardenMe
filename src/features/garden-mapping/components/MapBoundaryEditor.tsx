@@ -3,6 +3,7 @@ import type { ComponentType } from "react";
 import type { MapBoundaryEditorProps } from "./MapBoundaryEditor.web";
 
 export type { LatLngPoint, MapBoundaryEditorProps } from "./MapBoundaryEditor.web";
+export type { MapSnapshotResult } from "./MapBoundaryEditor.web";
 
 const NativeEditor = Platform.OS === "web"
   ? require("./MapBoundaryEditor.web").default
@@ -11,4 +12,3 @@ const NativeEditor = Platform.OS === "web"
 const MapBoundaryEditor = NativeEditor as ComponentType<MapBoundaryEditorProps>;
 
 export default MapBoundaryEditor;
-

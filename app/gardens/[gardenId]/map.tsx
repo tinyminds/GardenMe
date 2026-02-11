@@ -1,9 +1,8 @@
 ﻿import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import { Link, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Image,
   PanResponder,
@@ -17,17 +16,17 @@ import {
   type GestureResponderEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Circle, Path, Polygon } from "react-native-svg";
+import Svg, { Circle, ClipPath, Defs, Line, Path, Polygon } from "react-native-svg";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/state/queryClient";
 import { makeId } from "@/utils/id";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
-import { Drainage, SunExposure, type Point2D } from "@/domain/entities/Bed";
-import { GardenFeatureType } from "@/domain/entities/GardenFeature";
+import { Drainage, SunExposure, type Bed, type Point2D } from "@/domain/entities/Bed";
+import { GardenFeatureType, type GardenFeature } from "@/domain/entities/GardenFeature";
+import type { GardenScaleCalibration } from "@/domain/entities/Garden";
 import { isPointInsidePolygon, polygonArea } from "@/features/garden-mapping/utils/geometry";
-import { PersistentNav } from "@/ui/components/PersistentNav";
 
 const gardenRepository = new SqliteGardenRepository();
 const bedRepository = new SqliteBedRepository();
@@ -48,17 +47,17 @@ const featureTypes: GardenFeatureType[] = [
 ];
 
 const typeColors: Record<GardenFeatureType, { fill: string; stroke: string }> = {
-  bed: { fill: "rgba(53,130,82,0.35)", stroke: "#226744" },
-  lawn: { fill: "rgba(104,168,81,0.28)", stroke: "#4B8E35" },
-  tree: { fill: "rgba(45,120,73,0.25)", stroke: "#1D6E43" },
-  shrub: { fill: "rgba(88,146,93,0.25)", stroke: "#34784B" },
-  hedge: { fill: "rgba(54,110,73,0.26)", stroke: "#2C6D49" },
-  path: { fill: "rgba(167,139,92,0.28)", stroke: "#8A6A3A" },
-  wall: { fill: "rgba(130,130,130,0.28)", stroke: "#666666" },
-  fence: { fill: "rgba(170,152,118,0.28)", stroke: "#8A7754" },
-  trellis: { fill: "rgba(121,166,127,0.28)", stroke: "#5A8A5B" },
-  patio: { fill: "rgba(153,121,95,0.3)", stroke: "#7E5E45" },
-  deck: { fill: "rgba(140,103,66,0.3)", stroke: "#704A28" },
+  bed: { fill: "rgba(53,130,82,0.3)", stroke: "#101010" },
+  lawn: { fill: "rgba(111,171,95,0.22)", stroke: "#101010" },
+  tree: { fill: "rgba(33,108,60,0.3)", stroke: "#1A5C35" },
+  shrub: { fill: "rgba(96,168,95,0.28)", stroke: "#3B7F45" },
+  hedge: { fill: "rgba(63,130,73,0.26)", stroke: "#2D7A40" },
+  path: { fill: "rgba(154,154,154,0.28)", stroke: "#7A7A7A" },
+  wall: { fill: "rgba(118,118,118,0.35)", stroke: "#4D4D4D" },
+  fence: { fill: "rgba(145,106,74,0.3)", stroke: "#7F5738" },
+  trellis: { fill: "rgba(187,171,76,0.3)", stroke: "#9F8D2E" },
+  patio: { fill: "rgba(148,148,148,0.32)", stroke: "#6A6A6A" },
+  deck: { fill: "rgba(147,103,62,0.32)", stroke: "#7A4E2B" },
 };
 
 type ZonePreview = {
@@ -69,8 +68,31 @@ type ZonePreview = {
   source: "bed" | "feature";
   sunExposure?: SunExposure;
   drainage?: Drainage;
+  containsPerennials?: boolean;
+  perennialPlantsCsv?: string;
+  isRaisedBed?: boolean;
+  hasIrrigation?: boolean;
 };
 type CanvasMode = "draw" | "pan";
+type ShapeDraftMode = "points" | "rectangle" | "ellipse" | "line";
+type PresetShapeDraft = {
+  kind: "rectangle" | "ellipse" | "line";
+  center: Point2D;
+  width: number;
+  height: number;
+  angleDeg?: number;
+  variant?: "tree" | "shrub";
+  forceCircle?: boolean;
+};
+type PlannerUndoSnapshot = {
+  photoUri?: string;
+  imageSourceType?: "photo" | "satellite";
+  calibration?: GardenScaleCalibration;
+  beds: Bed[];
+  features: GardenFeature[];
+  draftPoints: Point2D[];
+  viewRotationDeg: number;
+};
 
 const BASE_CANVAS_WIDTH = 1000;
 const BASE_CANVAS_HEIGHT = 700;
@@ -84,16 +106,28 @@ export default function GardenMapEditorScreen() {
   const [name, setName] = useState("Bed 1");
   const [sunExposure, setSunExposure] = useState<SunExposure>(SunExposure.FULL_SUN);
   const [drainage, setDrainage] = useState<Drainage>(Drainage.GOOD);
+  const [containsPerennials, setContainsPerennials] = useState(false);
+  const [perennialPlantsCsv, setPerennialPlantsCsv] = useState("");
+  const [isRaisedBed, setIsRaisedBed] = useState(false);
+  const [hasIrrigation, setHasIrrigation] = useState(false);
   const [draftPoints, setDraftPoints] = useState<Point2D[]>([]);
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [isClosed, setIsClosed] = useState(false);
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
+  const [isEditingCanvas, setIsEditingCanvas] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("draw");
-  const [rotationInput, setRotationInput] = useState("0");
-  const [applyingRotation, setApplyingRotation] = useState(false);
+  const [shapeDraftMode, setShapeDraftMode] = useState<ShapeDraftMode>("points");
+  const [presetShape, setPresetShape] = useState<PresetShapeDraft | null>(null);
+  const [snapToGrid, setSnapToGrid] = useState(false);
+  const [viewRotationDeg, setViewRotationDeg] = useState(0);
+  const [showImageLayer, setShowImageLayer] = useState(true);
+  const [showGridLayer, setShowGridLayer] = useState(false);
+  const [undoStack, setUndoStack] = useState<PlannerUndoSnapshot[]>([]);
   const [viewport, setViewport] = useState({ width: 320, height: 220 });
   const [canvas, setCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
+  const gestureStartRef = useRef<{ distance: number; angle: number; zoom: number; rotation: number } | null>(null);
+  const [didNormalizeLegacyCalibration, setDidNormalizeLegacyCalibration] = useState(false);
 
   const gardenQuery = useQuery({
     queryKey: ["garden", gardenId],
@@ -131,6 +165,10 @@ export default function GardenMapEditorScreen() {
       source: "bed" as const,
       sunExposure: bed.sunExposure,
       drainage: bed.drainage,
+      containsPerennials: bed.containsPerennials,
+      isRaisedBed: bed.isRaisedBed,
+      hasIrrigation: bed.hasIrrigation,
+      ...(bed.perennialPlantsCsv ? { perennialPlantsCsv: bed.perennialPlantsCsv } : {}),
     }));
 
     const features = (featuresQuery.data ?? []).map((feature) => ({
@@ -144,13 +182,57 @@ export default function GardenMapEditorScreen() {
     return [...features, ...beds];
   }, [bedsQuery.data, featuresQuery.data]);
 
+  const calibration = gardenQuery.data?.scaleCalibration;
+  const gardenBoundary = getBoundaryOrDefault(calibration?.boundaryPolygon);
+  const boundaryXs = gardenBoundary.map((p) => p.x);
+  const boundaryYs = gardenBoundary.map((p) => p.y);
+  const boundaryMinX = boundaryXs.length > 0 ? Math.min(...boundaryXs) : 0;
+  const boundaryMaxX = boundaryXs.length > 0 ? Math.max(...boundaryXs) : 1;
+  const boundaryMinY = boundaryYs.length > 0 ? Math.min(...boundaryYs) : 0;
+  const boundaryMaxY = boundaryYs.length > 0 ? Math.max(...boundaryYs) : 1;
+  const gridStepX = calibration ? 1 / Math.max(calibration.metersPerPixel * calibration.baseWidth, 1e-6) : 0;
+  const gridStepY = calibration ? 1 / Math.max(calibration.metersPerPixel * calibration.baseHeight, 1e-6) : 0;
+  const shapeOptions = getShapeOptionsForType(activeType);
+  const defaultShapeMode = shapeOptions[0]?.mode ?? "points";
+
   useEffect(() => {
     if (editingZoneId) return;
-    setName(activeType === GardenFeatureType.BED ? nextBedName(existingZones) : "");
+    setName(nextZoneName(activeType, existingZones));
   }, [activeType, existingZones, editingZoneId]);
+
+  useEffect(() => {
+    if (editingZoneId) return;
+    if (activeType !== GardenFeatureType.BED) return;
+    setContainsPerennials(false);
+    setPerennialPlantsCsv("");
+    setIsRaisedBed(false);
+    setHasIrrigation(false);
+  }, [activeType, editingZoneId]);
+
+  useEffect(() => {
+    if (!shapeOptions.some((option) => option.mode === shapeDraftMode)) {
+      setShapeDraftMode(defaultShapeMode);
+      setPresetShape(null);
+    }
+  }, [defaultShapeMode, shapeDraftMode, shapeOptions]);
+
+  useEffect(() => {
+    if (shapeDraftMode === "points") {
+      setPresetShape(null);
+    }
+  }, [shapeDraftMode]);
 
   const zoomedWidth = Math.max(1, Math.round(viewport.width * zoom));
   const zoomedHeight = Math.max(1, Math.round(viewport.height * zoom));
+
+  useEffect(() => {
+    setCanvas((prev) => {
+      if (prev.width === zoomedWidth && prev.height === zoomedHeight) {
+        return prev;
+      }
+      return { width: zoomedWidth, height: zoomedHeight };
+    });
+  }, [zoomedHeight, zoomedWidth]);
 
   const onCanvasLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -182,6 +264,7 @@ export default function GardenMapEditorScreen() {
     setSelectedPointIndex(null);
     setIsClosed(false);
     setEditingZoneId(null);
+    setPresetShape(null);
   };
 
   const undoPoint = () => {
@@ -200,6 +283,10 @@ export default function GardenMapEditorScreen() {
   };
 
   const startEditZone = (zone: ZonePreview) => {
+    setIsEditingCanvas(true);
+    setCanvasMode("draw");
+    setShapeDraftMode("points");
+    setPresetShape(null);
     setEditingZoneId(zone.id);
     setActiveType(zone.type);
     setName(zone.name);
@@ -210,15 +297,92 @@ export default function GardenMapEditorScreen() {
     if (zone.source === "bed") {
       setSunExposure(zone.sunExposure ?? SunExposure.FULL_SUN);
       setDrainage(zone.drainage ?? Drainage.GOOD);
+      setContainsPerennials(zone.containsPerennials ?? false);
+      setPerennialPlantsCsv(zone.perennialPlantsCsv ?? "");
+      setIsRaisedBed(zone.isRaisedBed ?? false);
+      setHasIrrigation(zone.hasIrrigation ?? false);
+    } else {
+      setContainsPerennials(false);
+      setPerennialPlantsCsv("");
+      setIsRaisedBed(false);
+      setHasIrrigation(false);
     }
   };
 
-  const onCanvasPress = (event: GestureResponderEvent) => {
-    if (canvasMode !== "draw") return;
+  const snapPoint = (point: Point2D): Point2D => {
+    if (!snapToGrid || !calibration || gridStepX <= 0 || gridStepY <= 0) {
+      return point;
+    }
+    return {
+      x: snapValueToGrid(point.x, boundaryMinX, gridStepX),
+      y: snapValueToGrid(point.y, boundaryMinY, gridStepY),
+    };
+  };
 
-    const tapPoint = getNormalizedTapPoint(event, canvas);
+  const applyPresetShape = (candidate: PresetShapeDraft): boolean => {
+    const points = pointsFromPresetShape(candidate);
+    if (!Array.isArray(points) || points.length < 3 || points.some((point) => !isFinitePoint(point))) {
+      return false;
+    }
+    try {
+      if (!Array.isArray(gardenBoundary) || gardenBoundary.length < 3) return false;
+      if (points.some((point) => !isPointInsidePolygon(point, gardenBoundary))) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+    setPresetShape(candidate);
+    setDraftPoints(points);
+    setSelectedPointIndex(null);
+    setIsClosed(true);
+    return true;
+  };
+
+  const createDefaultPresetShape = (
+    kind: "rectangle" | "ellipse" | "line",
+    center: Point2D,
+    forceCircle: boolean
+  ): PresetShapeDraft => {
+    const defaultWidth = clamp(Math.max(gridStepX * 4, 0.12), 0.08, 0.9);
+    const defaultHeight =
+      kind === "line" ? clamp(Math.max(gridStepY * 0.75, 0.02), 0.015, 0.08) : clamp(Math.max(gridStepY * 4, 0.12), 0.08, 0.9);
+    const variant = activeType === GardenFeatureType.TREE ? "tree" : activeType === GardenFeatureType.SHRUB ? "shrub" : null;
+    return {
+      kind,
+      center,
+      width: forceCircle ? Math.max(defaultWidth, defaultHeight) : defaultWidth,
+      height: forceCircle ? Math.max(defaultWidth, defaultHeight) : defaultHeight,
+      angleDeg: 0,
+      ...(variant ? { variant } : {}),
+      forceCircle,
+    };
+  };
+
+  const onCanvasPress = (event: GestureResponderEvent) => {
+    if (!isEditingCanvas || canvasMode !== "draw") return;
+
+    const tapPointRaw = getNormalizedTapPoint(event, canvas);
+    if (!tapPointRaw) return;
+    const tapPoint = snapPoint(tapPointRaw);
     if (!tapPoint) return;
     if (!isPointInsidePolygon(tapPoint, gardenBoundary)) {
+      return;
+    }
+
+    if (shapeDraftMode !== "points") {
+      const kind: PresetShapeDraft["kind"] =
+        shapeDraftMode === "rectangle" ? "rectangle" : shapeDraftMode === "line" ? "line" : "ellipse";
+      const forceCircle = activeType === GardenFeatureType.TREE || activeType === GardenFeatureType.SHRUB;
+      if (!presetShape || presetShape.kind !== kind) {
+        const seeded = createDefaultPresetShape(kind, tapPoint, forceCircle);
+        void applyPresetShape(seeded);
+        return;
+      }
+      void applyPresetShape({
+        ...presetShape,
+        center: tapPoint,
+      });
       return;
     }
 
@@ -261,6 +425,130 @@ export default function GardenMapEditorScreen() {
     addPoint(tapPoint);
   };
 
+  const movePresetShape = (nextCenter: Point2D) => {
+    if (!presetShape) return;
+    const snappedCenter = snapPoint(nextCenter);
+    void applyPresetShape({
+      ...presetShape,
+      center: snappedCenter,
+    });
+  };
+
+  const resizePresetShapeFromHandle = (handlePoint: Point2D) => {
+    if (!presetShape) return;
+    const snappedHandle = snapPoint(handlePoint);
+    const dx = snappedHandle.x - presetShape.center.x;
+    const dy = snappedHandle.y - presetShape.center.y;
+    const halfW = Math.max(Math.abs(dx), 0.02);
+    const halfH = Math.max(Math.abs(dy), 0.02);
+    const forceCircle = Boolean(presetShape.forceCircle);
+    const size = forceCircle ? Math.max(halfW, halfH) * 2 : 0;
+    if (presetShape.kind === "line") {
+      const halfLength = Math.max(Math.hypot(dx, dy), 0.03);
+      const nextShape: PresetShapeDraft = {
+        ...presetShape,
+        width: clamp(halfLength * 2, 0.08, 1.8),
+        height: clamp(presetShape.height, 0.012, 0.08),
+        angleDeg: (Math.atan2(dy, dx) * 180) / Math.PI,
+      };
+      void applyPresetShape(nextShape);
+      return;
+    }
+    const nextShape: PresetShapeDraft = {
+      ...presetShape,
+      width: forceCircle ? size : clamp(halfW * 2, 0.04, 1.6),
+      height: forceCircle ? size : clamp(halfH * 2, 0.04, 1.6),
+    };
+    void applyPresetShape(nextShape);
+  };
+
+  const captureUndoSnapshot = async () => {
+    if (!gardenId) return;
+    const garden = gardenQuery.data ?? (await gardenRepository.getById(gardenId));
+    if (!garden) return;
+    const beds = bedsQuery.data ?? (await bedRepository.listByGarden(gardenId));
+    const features = featuresQuery.data ?? (await featureRepository.listByGarden(gardenId));
+
+    const snapshot: PlannerUndoSnapshot = {
+      beds: beds.map(cloneBed),
+      features: features.map(cloneFeature),
+      draftPoints: draftPoints.map((p) => ({ ...p })),
+      viewRotationDeg,
+    };
+    if (garden.photoUri) snapshot.photoUri = garden.photoUri;
+    if (garden.imageSourceType) snapshot.imageSourceType = garden.imageSourceType;
+    if (garden.scaleCalibration) snapshot.calibration = cloneCalibration(garden.scaleCalibration);
+
+    setUndoStack((prev) => [snapshot, ...prev].slice(0, 20));
+  };
+
+  const undoLastChange = async () => {
+    if (!gardenId) return;
+    const snapshot = undoStack[0];
+    if (!snapshot) {
+      Alert.alert("Nothing to undo", "No previous planner changes recorded.");
+      return;
+    }
+
+    setUndoStack((prev) => prev.slice(1));
+    try {
+      if (snapshot.photoUri) {
+        await gardenRepository.updatePhoto(
+          gardenId,
+          snapshot.photoUri,
+          snapshot.imageSourceType === "satellite" ? "satellite" : "photo"
+        );
+      } else {
+        await gardenRepository.clearPhoto(gardenId);
+      }
+
+      if (snapshot.calibration) {
+        await gardenRepository.updateScaleCalibration(gardenId, snapshot.calibration);
+      }
+
+      const currentBeds = await bedRepository.listByGarden(gardenId);
+      const snapshotBeds = new Map(snapshot.beds.map((bed) => [bed.id, bed]));
+      for (const bed of currentBeds) {
+        if (!snapshotBeds.has(bed.id)) {
+          await bedRepository.delete(bed.id, gardenId);
+        }
+      }
+      for (const bed of snapshot.beds) {
+        const exists = currentBeds.some((current) => current.id === bed.id);
+        if (exists) {
+          await bedRepository.update(bed);
+        } else {
+          await bedRepository.create(bed);
+        }
+      }
+
+      const currentFeatures = await featureRepository.listByGarden(gardenId);
+      const snapshotFeatures = new Map(snapshot.features.map((feature) => [feature.id, feature]));
+      for (const feature of currentFeatures) {
+        if (!snapshotFeatures.has(feature.id)) {
+          await featureRepository.delete(feature.id, gardenId);
+        }
+      }
+      for (const feature of snapshot.features) {
+        const exists = currentFeatures.some((current) => current.id === feature.id);
+        if (exists) {
+          await featureRepository.update(feature);
+        } else {
+          await featureRepository.create(feature);
+        }
+      }
+
+      setDraftPoints(snapshot.draftPoints.map((p) => ({ ...p })));
+      setViewRotationDeg(snapshot.viewRotationDeg);
+      await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["garden-features", gardenId] });
+      Alert.alert("Undo complete", "Reverted the last planner change.");
+    } catch (error) {
+      Alert.alert("Undo failed", error instanceof Error ? error.message : "Could not undo.");
+    }
+  };
+
   const pickPhoto = async () => {
     if (!gardenId) return;
 
@@ -280,78 +568,69 @@ export default function GardenMapEditorScreen() {
 
     const firstAsset = result.assets[0];
     if (!firstAsset?.uri) return;
+    await captureUndoSnapshot();
 
-    await gardenRepository.updatePhoto(gardenId, firstAsset.uri);
+    const calibration = gardenQuery.data?.scaleCalibration;
+    let finalPhotoUri = firstAsset.uri;
+
+    if (calibration?.boundaryPolygon && calibration.boundaryPolygon.length >= 3) {
+      const cropResult = await cropImageToBoundary(firstAsset.uri, calibration.boundaryPolygon);
+      finalPhotoUri = cropResult.uri;
+
+      const previousBoundaryArea = polygonArea(calibration.boundaryPolygon);
+      const nextBoundaryArea = polygonArea(cropResult.remappedBoundary);
+
+      const nextCalibration: typeof calibration = {
+        ...calibration,
+        boundaryPolygon: cropResult.remappedBoundary,
+      };
+
+      if (previousBoundaryArea > 0 && nextBoundaryArea > 0) {
+        nextCalibration.metersPerPixel =
+          calibration.metersPerPixel * Math.sqrt(previousBoundaryArea / nextBoundaryArea);
+      }
+
+      await gardenRepository.updateScaleCalibration(gardenId, nextCalibration);
+    }
+
+    await gardenRepository.updatePhoto(gardenId, finalPhotoUri);
     await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
   };
 
-  const applyPlannerRotation = async () => {
-    if (!gardenId) return;
-    const rotationDegrees = Number(rotationInput);
-    if (!Number.isFinite(rotationDegrees) || Math.abs(rotationDegrees) < 0.1) {
-      Alert.alert("Rotation needed", "Enter a non-zero rotation in degrees.");
-      return;
-    }
+  const gestureResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: (event) => isEditingCanvas && canvasMode === "pan" && event.nativeEvent.touches.length >= 2,
+        onMoveShouldSetPanResponder: (event) => isEditingCanvas && canvasMode === "pan" && event.nativeEvent.touches.length >= 2,
+        onPanResponderGrant: (event) => {
+          const metrics = getGestureMetrics(event.nativeEvent.touches);
+          if (!metrics) {
+            gestureStartRef.current = null;
+            return;
+          }
+          gestureStartRef.current = {
+            distance: metrics.distance,
+            angle: metrics.angle,
+            zoom,
+            rotation: viewRotationDeg,
+          };
+        },
+        onPanResponderMove: (event) => {
+          const start = gestureStartRef.current;
+          if (!start) return;
+          const metrics = getGestureMetrics(event.nativeEvent.touches);
+          if (!metrics) return;
 
-    const garden = gardenQuery.data;
-    if (!garden?.photoUri) {
-      Alert.alert("No image", "Set a planner image first before rotating.");
-      return;
-    }
+          const zoomFactor = metrics.distance / Math.max(start.distance, 1);
+          const nextZoom = clamp(start.zoom * zoomFactor, 0.2, 15);
+          const angleDelta = metrics.angle - start.angle;
 
-    setApplyingRotation(true);
-    try {
-      const rotatedImage = await ImageManipulator.manipulateAsync(
-        garden.photoUri,
-        [{ rotate: rotationDegrees }],
-        { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
-      );
-
-      const now = new Date().toISOString();
-      const boundary = garden.scaleCalibration?.boundaryPolygon;
-      if (garden.scaleCalibration && boundary && boundary.length >= 3) {
-        await gardenRepository.updateScaleCalibration(gardenId, {
-          ...garden.scaleCalibration,
-          boundaryPolygon: boundary.map((point) => rotatePoint(point, rotationDegrees)),
-        });
-      }
-
-      const beds = bedsQuery.data ?? [];
-      for (const bed of beds) {
-        await bedRepository.update({
-          ...bed,
-          polygon: bed.polygon.map((point) => rotatePoint(point, rotationDegrees)),
-          updatedAt: now,
-        });
-      }
-
-      const features = featuresQuery.data ?? [];
-      for (const feature of features) {
-        await featureRepository.update({
-          ...feature,
-          polygon: feature.polygon.map((point) => rotatePoint(point, rotationDegrees)),
-          updatedAt: now,
-        });
-      }
-
-      setDraftPoints((prev) => prev.map((point) => rotatePoint(point, rotationDegrees)));
-
-      await gardenRepository.updatePhoto(
-        gardenId,
-        rotatedImage.uri,
-        garden.imageSourceType === "satellite" ? "satellite" : "photo"
-      );
-      await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["garden-features", gardenId] });
-      setRotationInput("0");
-      Alert.alert("Rotation applied", `Rotated by ${rotationDegrees.toFixed(1)} degrees.`);
-    } catch (error) {
-      Alert.alert("Rotation failed", error instanceof Error ? error.message : "Could not rotate planner image.");
-    } finally {
-      setApplyingRotation(false);
-    }
-  };
+          setZoom(nextZoom);
+          setViewRotationDeg(normalizeDegrees(start.rotation + angleDelta));
+        },
+      }),
+    [canvasMode, isEditingCanvas, viewRotationDeg, zoom]
+  );
 
   const deleteZone = async (zone: ZonePreview) => {
     if (!gardenId) return;
@@ -413,27 +692,29 @@ export default function GardenMapEditorScreen() {
       }
 
       if (activeType === GardenFeatureType.BED) {
+        const perennialCsv = perennialPlantsCsv.trim();
+        const bedPayloadBase = {
+          gardenId,
+          name: trimmedName,
+          polygon: draftPoints,
+          sunExposure,
+          drainage,
+          containsPerennials,
+          isRaisedBed,
+          hasIrrigation,
+          createdAt: now,
+          updatedAt: now,
+          ...(containsPerennials && perennialCsv ? { perennialPlantsCsv: perennialCsv } : {}),
+        };
         if (editingZoneId) {
           await bedRepository.update({
+            ...bedPayloadBase,
             id: editingZoneId,
-            gardenId,
-            name: trimmedName,
-            polygon: draftPoints,
-            sunExposure,
-            drainage,
-            createdAt: now,
-            updatedAt: now,
           });
         } else {
           await bedRepository.create({
+            ...bedPayloadBase,
             id: makeId("bed"),
-            gardenId,
-            name: trimmedName,
-            polygon: draftPoints,
-            sunExposure,
-            drainage,
-            createdAt: now,
-            updatedAt: now,
           });
         }
         await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
@@ -471,24 +752,54 @@ export default function GardenMapEditorScreen() {
   };
 
   const area = polygonArea(draftPoints);
-  const calibration = gardenQuery.data?.scaleCalibration;
-  const gardenBoundary = getBoundaryOrDefault(calibration?.boundaryPolygon);
+  const showBaseImage = showImageLayer;
+  const gridVerticalLines = showGridLayer
+    ? buildGridSeries(boundaryMinX, boundaryMaxX, gridStepX).map((x) => x * canvas.width)
+    : [];
+  const gridHorizontalLines = showGridLayer
+    ? buildGridSeries(boundaryMinY, boundaryMaxY, gridStepY).map((y) => y * canvas.height)
+    : [];
   const areaSqM = calibration
     ? normalizedAreaToSqM(area, calibration.metersPerPixel, calibration.baseWidth, calibration.baseHeight)
     : null;
   const saveDisabled = draftPoints.length < 3 || !name.trim();
 
+  useEffect(() => {
+    if (!gardenId || !calibration || didNormalizeLegacyCalibration) return;
+    const needsNormalize = calibration.showBaseImage === false;
+    if (!needsNormalize) {
+      setDidNormalizeLegacyCalibration(true);
+      return;
+    }
+
+    const nextCalibration: typeof calibration = {
+      ...calibration,
+      showBaseImage: true,
+      orientationDegrees: 0,
+    };
+
+    void gardenRepository
+      .updateScaleCalibration(gardenId, nextCalibration)
+      .then(async () => {
+        await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
+        setDidNormalizeLegacyCalibration(true);
+      })
+      .catch(() => {
+        setDidNormalizeLegacyCalibration(true);
+      });
+  }, [calibration, didNormalizeLegacyCalibration, gardenId]);
+
   const guidanceText = (() => {
     if (editingZoneId) return "Editing mode: drag points, update details, then tap Update.";
-    if (draftPoints.length === 0) return "Tap canvas to start a new area. Tap an existing area to edit.";
+    if (draftPoints.length === 0) return "Pan/zoom to frame the map, switch to Draw, then tap to start an area.";
     if (!isClosed) return "Keep adding points. Tap near the first point or tap Finish Shape.";
     return "Shape ready. Add details and tap Save.";
   })();
 
   return (
     <View style={styles.page}>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.scrollContent} scrollEnabled={canvasMode === "draw"}>
+      <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+        <ScrollView contentContainerStyle={styles.scrollContent} scrollEnabled={!isEditingCanvas || canvasMode === "draw"}>
         <View style={styles.header}>
           <Text style={styles.title}>Garden Mapper</Text>
           <Text style={styles.subtitle}>Map beds and spaces quickly with tap-to-draw and tap-to-edit.</Text>
@@ -517,7 +828,10 @@ export default function GardenMapEditorScreen() {
                       return;
                     }
                     setActiveType(type);
-                    setName(type === GardenFeatureType.BED ? nextBedName(existingZones) : "");
+                    const nextOptions = getShapeOptionsForType(type);
+                    setShapeDraftMode(nextOptions[0]?.mode ?? "points");
+                    setPresetShape(null);
+                    setName(nextZoneName(type, existingZones));
                   }}
                   style={[styles.typeChip, selected && styles.typeChipActive]}
                 >
@@ -526,65 +840,55 @@ export default function GardenMapEditorScreen() {
               );
             })}
           </ScrollView>
+          <View style={styles.toolbarRow}>
+            {shapeOptions.map((option) => (
+              <Pressable
+                key={option.mode}
+                style={[styles.secondaryButton, shapeDraftMode === option.mode && styles.secondaryButtonActive]}
+                onPress={() => setShapeDraftMode(option.mode)}
+              >
+                <Text style={[styles.secondaryButtonText, shapeDraftMode === option.mode && styles.secondaryButtonTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
 
         <View style={styles.sectionCard}>
           <View style={styles.sectionTitleRow}>
-            <Text style={styles.sectionTitle}>2. Draw On Photo</Text>
+            <Text style={styles.sectionTitle}>2. Planner Canvas</Text>
             <View style={styles.zoomRow}>
-              <Pressable style={styles.zoomButton} onPress={() => setZoom((z) => clamp(z - 0.25, 1, 10))}>
+              <Pressable style={styles.zoomButton} onPress={() => setZoom((z) => clamp(z - 0.25, 0.2, 15))}>
                 <Text style={styles.zoomButtonText}>-</Text>
               </Pressable>
               <Text style={styles.zoomText}>{Math.round(zoom * 100)}%</Text>
-              <Pressable style={styles.zoomButton} onPress={() => setZoom((z) => clamp(z + 0.25, 1, 10))}>
+              <Pressable style={styles.zoomButton} onPress={() => setZoom((z) => clamp(z + 0.25, 0.2, 15))}>
                 <Text style={styles.zoomButtonText}>+</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.secondaryButton, canvasMode === "pan" && styles.secondaryButtonActive]}
-                onPress={() => setCanvasMode((mode) => (mode === "draw" ? "pan" : "draw"))}
-              >
-                <Text style={[styles.secondaryButtonText, canvasMode === "pan" && styles.secondaryButtonTextActive]}>
-                  {canvasMode === "draw" ? "Pan Canvas" : "Draw"}
-                </Text>
               </Pressable>
             </View>
           </View>
-          <Text style={styles.infoText}>
-            Mode: {canvasMode === "draw" ? "Draw/edit points and scroll page." : "Pan/zoom canvas without point edits."}
-          </Text>
-          <Text style={styles.infoText}>Rotate image + zones together if map snapshot orientation is off.</Text>
-          <View style={styles.rotationRow}>
-            <TextInput
-              value={rotationInput}
-              onChangeText={setRotationInput}
-              keyboardType="decimal-pad"
-              style={styles.rotationInput}
-              placeholder="Degrees"
-            />
+          <View style={styles.toolbarRow}>
             <Pressable
-              style={styles.secondaryButton}
-              onPress={() => {
-                const current = Number(rotationInput);
-                const next = Number.isFinite(current) ? current - 5 : -5;
-                setRotationInput(next.toString());
-              }}
+              style={[styles.secondaryButton, canvasMode === "draw" && styles.secondaryButtonActive]}
+              onPress={() => setCanvasMode("draw")}
             >
-              <Text style={styles.secondaryButtonText}>-5deg</Text>
+              <Text style={[styles.secondaryButtonText, canvasMode === "draw" && styles.secondaryButtonTextActive]}>Draw</Text>
             </Pressable>
             <Pressable
-              style={styles.secondaryButton}
+              style={[styles.secondaryButton, canvasMode === "pan" && styles.secondaryButtonActive]}
               onPress={() => {
-                const current = Number(rotationInput);
-                const next = Number.isFinite(current) ? current + 5 : 5;
-                setRotationInput(next.toString());
+                setCanvasMode("pan");
+                setSelectedPointIndex(null);
               }}
             >
-              <Text style={styles.secondaryButtonText}>+5deg</Text>
-            </Pressable>
-            <Pressable style={styles.secondaryButton} onPress={() => void applyPlannerRotation()} disabled={applyingRotation}>
-              {applyingRotation ? <ActivityIndicator size="small" color="#1F3F2B" /> : <Text style={styles.secondaryButtonText}>Apply</Text>}
+              <Text style={[styles.secondaryButtonText, canvasMode === "pan" && styles.secondaryButtonTextActive]}>Pan</Text>
             </Pressable>
           </View>
+          <Text style={styles.infoText}>
+            Mode: {canvasMode === "draw" ? "Draw/edit points." : "Pan/zoom/twist canvas."}
+          </Text>
+          <Text style={styles.infoText}>View rotation: {viewRotationDeg.toFixed(1)}deg</Text>
 
           <View style={styles.canvasViewport} onLayout={onViewportLayout}>
             <ScrollView
@@ -600,56 +904,134 @@ export default function GardenMapEditorScreen() {
                 scrollEnabled={canvasMode === "pan" && zoom > 1.01}
               >
                 <View
-                  style={[styles.canvasContainer, { width: zoomedWidth, height: zoomedHeight }]}
+                  style={[
+                    styles.canvasContainer,
+                    { width: zoomedWidth, height: zoomedHeight, transform: [{ rotate: `${viewRotationDeg}deg` }] },
+                  ]}
                   onLayout={onCanvasLayout}
+                  {...(canvasMode === "pan" ? gestureResponder.panHandlers : {})}
                 >
-                {gardenQuery.data?.photoUri ? (
-                  <Image source={{ uri: gardenQuery.data.photoUri }} style={styles.canvasImage} resizeMode="contain" />
+                {showBaseImage && gardenQuery.data?.photoUri ? (
+                  <Image source={{ uri: gardenQuery.data.photoUri }} style={styles.canvasImage} resizeMode="stretch" />
                 ) : (
-                  <View style={[styles.canvasImage, styles.placeholder]}>
-                    <Text style={styles.placeholderText}>No image yet. Using configured garden outline.</Text>
-                  </View>
+                  <View style={[styles.canvasImage, styles.placeholder]} />
                 )}
 
-                <Pressable style={StyleSheet.absoluteFill} onPress={onCanvasPress} disabled={canvasMode === "pan"}>
+                <Pressable
+                  style={StyleSheet.absoluteFill}
+                  onPress={onCanvasPress}
+                  disabled={!isEditingCanvas || canvasMode === "pan"}
+                >
                   <Svg width="100%" height="100%">
+                    <Defs>
+                      {existingZones.map((zone) => (
+                        <ClipPath key={`zone-clip-${zone.id}`} id={`zone-clip-${zone.id}`}>
+                          <Polygon points={toSvgPoints(zone.polygon, canvas)} />
+                        </ClipPath>
+                      ))}
+                      {draftPoints.length >= 3 && (
+                        <ClipPath id="draft-clip">
+                          <Polygon points={toSvgPoints(draftPoints, canvas)} />
+                        </ClipPath>
+                      )}
+                    </Defs>
+                    {showGridLayer && gridVerticalLines.map((x, index) => (
+                      <Line
+                        key={`grid-v-${index.toString()}`}
+                        x1={x}
+                        y1={0}
+                        x2={x}
+                        y2={canvas.height}
+                        stroke="rgba(20,67,46,0.3)"
+                        strokeWidth={1}
+                      />
+                    ))}
+                    {showGridLayer && gridHorizontalLines.map((y, index) => (
+                      <Line
+                        key={`grid-h-${index.toString()}`}
+                        x1={0}
+                        y1={y}
+                        x2={canvas.width}
+                        y2={y}
+                        stroke="rgba(20,67,46,0.3)"
+                        strokeWidth={1}
+                      />
+                    ))}
                     {!isBoundaryRect(gardenBoundary) && (
                       <Path
                         d={`${rectPath(canvas.width, canvas.height)} ${polygonPath(gardenBoundary, canvas.width, canvas.height)}`}
-                        fill="rgba(255,255,255,0.45)"
+                        fill="#E7EFE5"
                         fillRule="evenodd"
                       />
                     )}
                     <Polygon
                       points={toSvgPoints(gardenBoundary, canvas)}
-                      fill={gardenQuery.data?.photoUri ? "transparent" : "rgba(39,98,66,0.12)"}
+                      fill={showBaseImage && gardenQuery.data?.photoUri ? "transparent" : "rgba(39,98,66,0.12)"}
                       stroke="#2D6A49"
-                      strokeWidth={3}
+                      strokeWidth={showBaseImage && gardenQuery.data?.photoUri ? 3 : 4}
                     />
                     {existingZones.map((zone) => {
                       const points = toSvgPoints(zone.polygon, canvas);
                       const color = typeColors[zone.type];
                       const isEditingThis = editingZoneId === zone.id;
+                      const stripeSpec = getStripeSpecForType(zone.type);
+                      const hatchLines = stripeSpec
+                        ? buildHatchLines(canvas.width, canvas.height, stripeSpec.spacingPx, stripeSpec.angleDeg)
+                        : [];
 
                       return (
-                        <Polygon
-                          key={zone.id}
-                          points={points}
-                          fill={color.fill}
-                          stroke={isEditingThis ? "#E85D2A" : color.stroke}
-                          strokeWidth={isEditingThis ? 4 : 2}
-                        />
+                        <Fragment key={zone.id}>
+                          <Polygon
+                            points={points}
+                            fill={color.fill}
+                            stroke={isEditingThis ? "#E85D2A" : color.stroke}
+                            strokeWidth={isEditingThis ? 4 : 2}
+                          />
+                          {stripeSpec && hatchLines.map((line, index) => (
+                            <Line
+                              key={`zone-stripe-${zone.id}-${index.toString()}`}
+                              x1={line.x1}
+                              y1={line.y1}
+                              x2={line.x2}
+                              y2={line.y2}
+                              stroke={stripeSpec.color}
+                              strokeWidth={1}
+                              opacity={stripeSpec.opacity}
+                              clipPath={`url(#zone-clip-${zone.id})`}
+                            />
+                          ))}
+                        </Fragment>
                       );
                     })}
 
                     {draftPoints.length >= 2 && (
-                      <Polygon
-                        points={toSvgPoints(draftPoints, canvas)}
-                        fill={isClosed ? typeColors[activeType].fill : "rgba(0,0,0,0.06)"}
-                        stroke={typeColors[activeType].stroke}
-                        strokeWidth={3}
-                        {...(!isClosed ? { strokeDasharray: [10, 5] } : {})}
-                      />
+                      <>
+                        <Polygon
+                          points={toSvgPoints(draftPoints, canvas)}
+                          fill={isClosed ? typeColors[activeType].fill : "rgba(0,0,0,0.06)"}
+                          stroke={typeColors[activeType].stroke}
+                          strokeWidth={3}
+                          {...(!isClosed ? { strokeDasharray: [10, 5] } : {})}
+                        />
+                        {isClosed && getStripeSpecForType(activeType) && buildHatchLines(
+                          canvas.width,
+                          canvas.height,
+                          getStripeSpecForType(activeType)!.spacingPx,
+                          getStripeSpecForType(activeType)!.angleDeg
+                        ).map((line, index) => (
+                          <Line
+                            key={`draft-stripe-${index.toString()}`}
+                            x1={line.x1}
+                            y1={line.y1}
+                            x2={line.x2}
+                            y2={line.y2}
+                            stroke={getStripeSpecForType(activeType)!.color}
+                            strokeWidth={1}
+                            opacity={getStripeSpecForType(activeType)!.opacity}
+                            clipPath="url(#draft-clip)"
+                          />
+                        ))}
+                      </>
                     )}
 
                     {draftPoints.filter(isFinitePoint).map((point, index) => (
@@ -665,7 +1047,25 @@ export default function GardenMapEditorScreen() {
                     ))}
                   </Svg>
 
-                  {canvasMode === "draw" &&
+                  {isEditingCanvas && canvasMode === "draw" && presetShape &&
+                    <>
+                      <VertexHandle
+                        point={presetShape.center}
+                        width={canvas.width}
+                        height={canvas.height}
+                        onSelect={() => setSelectedPointIndex(null)}
+                        onDrag={movePresetShape}
+                      />
+                      <VertexHandle
+                        point={getPresetResizeHandlePoint(presetShape)}
+                        width={canvas.width}
+                        height={canvas.height}
+                        onSelect={() => setSelectedPointIndex(null)}
+                        onDrag={resizePresetShapeFromHandle}
+                      />
+                    </>}
+
+                  {isEditingCanvas && canvasMode === "draw" && !presetShape &&
                     draftPoints.filter(isFinitePoint).map((point, index) => (
                     <VertexHandle
                       key={`handle-${index.toString()}`}
@@ -674,10 +1074,11 @@ export default function GardenMapEditorScreen() {
                       height={canvas.height}
                       onSelect={() => setSelectedPointIndex(index)}
                       onDrag={(nextPoint) => {
-                        if (!isPointInsidePolygon(nextPoint, gardenBoundary)) {
+                        const snappedPoint = snapPoint(nextPoint);
+                        if (!isPointInsidePolygon(snappedPoint, gardenBoundary)) {
                           return;
                         }
-                        setDraftPoints((prev) => prev.map((p, i) => (i === index ? nextPoint : p)));
+                        setDraftPoints((prev) => prev.map((p, i) => (i === index ? snappedPoint : p)));
                       }}
                     />
                     ))}
@@ -689,10 +1090,53 @@ export default function GardenMapEditorScreen() {
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>3. Editing Tools</Text>
+          <Text style={styles.sectionTitle}>3. Tools</Text>
           <View style={styles.toolbarRow}>
             <Pressable style={styles.secondaryButton} onPress={pickPhoto}>
               <Text style={styles.secondaryButtonText}>Photo</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.secondaryButton, showImageLayer && styles.secondaryButtonActive]}
+              onPress={() => setShowImageLayer((prev) => !prev)}
+            >
+              <Text style={[styles.secondaryButtonText, showImageLayer && styles.secondaryButtonTextActive]}>
+                Image {showImageLayer ? "On" : "Off"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.secondaryButton, showGridLayer && styles.secondaryButtonActive]}
+              onPress={() => setShowGridLayer((prev) => !prev)}
+              disabled={!calibration}
+            >
+              <Text style={[styles.secondaryButtonText, showGridLayer && styles.secondaryButtonTextActive]}>
+                Grid {showGridLayer ? "On" : "Off"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.secondaryButton, snapToGrid && styles.secondaryButtonActive]}
+              onPress={() => setSnapToGrid((prev) => !prev)}
+              disabled={!calibration}
+            >
+              <Text style={[styles.secondaryButtonText, snapToGrid && styles.secondaryButtonTextActive]}>
+                Snap {snapToGrid ? "On" : "Off"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={() => {
+                setPresetShape(null);
+                setShapeDraftMode("points");
+              }}
+              disabled={!presetShape}
+            >
+              <Text style={styles.secondaryButtonText}>Fix Shape</Text>
+            </Pressable>
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={() => void undoLastChange()}
+              disabled={undoStack.length === 0}
+            >
+              <Text style={styles.secondaryButtonText}>Undo Last</Text>
             </Pressable>
             <Pressable style={styles.secondaryButton} onPress={undoPoint}>
               <Text style={styles.secondaryButtonText}>Undo</Text>
@@ -707,6 +1151,15 @@ export default function GardenMapEditorScreen() {
               <Text style={styles.secondaryButtonText}>{editingZoneId ? "Cancel Edit" : "Reset"}</Text>
             </Pressable>
           </View>
+          <Text style={styles.infoText}>Twist and zoom in Pan mode for easier drawing alignment.</Text>
+          {showGridLayer && calibration && <Text style={styles.infoText}>Grid spacing: 1 meter.</Text>}
+          {presetShape && (
+            <Text style={styles.infoText}>
+              {presetShape.kind === "line"
+                ? "Drag center handle to move and end handle to rotate/lengthen, then tap Fix Shape."
+                : "Drag center handle to move, corner handle to resize, then tap Fix Shape."}
+            </Text>
+          )}
         </View>
 
         <View style={styles.sectionCard}>
@@ -732,12 +1185,58 @@ export default function GardenMapEditorScreen() {
                 selected={drainage}
                 onSelect={(value) => setDrainage(value as Drainage)}
               />
+              <PickerRow
+                title="Raised Bed"
+                options={["yes", "no"]}
+                selected={isRaisedBed ? "yes" : "no"}
+                onSelect={(value) => setIsRaisedBed(value === "yes")}
+              />
+              <PickerRow
+                title="Irrigation"
+                options={["yes", "no"]}
+                selected={hasIrrigation ? "yes" : "no"}
+                onSelect={(value) => setHasIrrigation(value === "yes")}
+              />
+              <PickerRow
+                title="Contains Perennials"
+                options={["yes", "no"]}
+                selected={containsPerennials ? "yes" : "no"}
+                onSelect={(value) => {
+                  const next = value === "yes";
+                  setContainsPerennials(next);
+                  if (!next) {
+                    setPerennialPlantsCsv("");
+                  }
+                }}
+              />
+              {containsPerennials && (
+                <View style={styles.perennialWrap}>
+                  <Text style={styles.infoText}>List perennial plants separated by commas, e.g. lavender, salvia, echinacea.</Text>
+                  <TextInput
+                    value={perennialPlantsCsv}
+                    onChangeText={setPerennialPlantsCsv}
+                    placeholder="Perennials in this bed (comma-separated)"
+                    style={styles.nameInput}
+                    multiline
+                  />
+                </View>
+              )}
             </View>
           )}
         </View>
 
+        <View style={styles.saveCard}>
+          <Text style={styles.sectionTitle}>5. Save Current Area</Text>
+          <Text style={styles.infoText}>
+            {saveDisabled ? "Add at least 3 points and a name to enable save." : "Ready to save."}
+          </Text>
+          <Pressable style={[styles.primarySaveButton, saveDisabled && styles.primarySaveButtonDisabled]} onPress={saveZone} disabled={saveDisabled}>
+            <Text style={styles.primarySaveButtonText}>{editingZoneId ? `Update ${activeType}` : `Save ${activeType}`}</Text>
+          </Pressable>
+        </View>
+
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>5. Saved Areas</Text>
+          <Text style={styles.sectionTitle}>6. Saved Areas</Text>
           {existingZones.length === 0 && <Text style={styles.emptyText}>No saved areas yet.</Text>}
           {existingZones.map((zone) => (
             <View key={zone.id} style={styles.zoneRow}>
@@ -774,13 +1273,9 @@ export default function GardenMapEditorScreen() {
             {areaSqM !== null ? ` · ~${areaSqM.toFixed(1)} sqm` : ""}
             {" · "}Saved zones: {existingZones.length}
           </Text>
-          <Pressable style={[styles.saveButton, saveDisabled && styles.saveButtonDisabled]} onPress={saveZone} disabled={saveDisabled}>
-            <Text style={styles.saveButtonText}>{editingZoneId ? `Update ${activeType}` : `Save ${activeType}`}</Text>
-          </Pressable>
         </View>
         </ScrollView>
       </SafeAreaView>
-      <PersistentNav />
     </View>
   );
 }
@@ -851,37 +1346,146 @@ function PickerRow(props: {
   );
 }
 
+async function cropImageToBoundary(
+  uri: string,
+  boundary: Point2D[]
+): Promise<{ uri: string; remappedBoundary: Point2D[]; remapPoint: (point: Point2D) => Point2D }> {
+  if (boundary.length < 3) {
+    return {
+      uri,
+      remappedBoundary: boundary,
+      remapPoint: (point) => point,
+    };
+  }
+
+  const xs = boundary.map((p) => p.x);
+  const ys = boundary.map((p) => p.y);
+
+  const minX = clamp(Math.min(...xs), 0, 1);
+  const maxX = clamp(Math.max(...xs), 0, 1);
+  const minY = clamp(Math.min(...ys), 0, 1);
+  const maxY = clamp(Math.max(...ys), 0, 1);
+
+  const imageSize = await getImageSize(uri);
+  const originX = Math.floor(minX * imageSize.width);
+  const originY = Math.floor(minY * imageSize.height);
+  const width = Math.max(1, Math.floor((maxX - minX) * imageSize.width));
+  const height = Math.max(1, Math.floor((maxY - minY) * imageSize.height));
+
+  const result = await ImageManipulator.manipulateAsync(
+    uri,
+    [{ crop: { originX, originY, width, height } }],
+    { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
+  );
+
+  const remapPoint = (p: Point2D): Point2D => ({
+    x: clamp((p.x - minX) / Math.max(maxX - minX, 1e-6), 0, 1),
+    y: clamp((p.y - minY) / Math.max(maxY - minY, 1e-6), 0, 1),
+  });
+  const remappedBoundary = boundary.map(remapPoint);
+
+  return { uri: result.uri, remappedBoundary, remapPoint };
+}
+
+function getImageSize(uri: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    Image.getSize(
+      uri,
+      (width, height) => resolve({ width, height }),
+      (error) => reject(error)
+    );
+  });
+}
+
+function cloneCalibration(calibration: GardenScaleCalibration): GardenScaleCalibration {
+  return JSON.parse(JSON.stringify(calibration)) as GardenScaleCalibration;
+}
+
+function cloneBed(bed: Bed): Bed {
+  return {
+    ...bed,
+    polygon: bed.polygon.map((point) => ({ ...point })),
+  };
+}
+
+function cloneFeature(feature: GardenFeature): GardenFeature {
+  return {
+    ...feature,
+    polygon: feature.polygon.map((point) => ({ ...point })),
+  };
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function rotatePoint(point: Point2D, degrees: number): Point2D {
-  const radians = (degrees * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  const dx = point.x - 0.5;
-  const dy = point.y - 0.5;
+function normalizeDegrees(value: number): number {
+  let deg = value;
+  while (deg > 180) deg -= 360;
+  while (deg < -180) deg += 360;
+  return deg;
+}
 
-  return {
-    x: clamp(0.5 + dx * cos - dy * sin, 0, 1),
-    y: clamp(0.5 + dx * sin + dy * cos, 0, 1),
-  };
+function getGestureMetrics(
+  touches: readonly { pageX: number; pageY: number }[]
+): { distance: number; angle: number } | null {
+  if (touches.length < 2) return null;
+  const a = touches[0];
+  const b = touches[1];
+  if (!a || !b) return null;
+  const dx = b.pageX - a.pageX;
+  const dy = b.pageY - a.pageY;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 1) return null;
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return { distance, angle };
 }
 
 function normalizeName(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function nextBedName(zones: ZonePreview[]): string {
+function getShapeOptionsForType(type: GardenFeatureType): Array<{ mode: ShapeDraftMode; label: string }> {
+  switch (type) {
+    case GardenFeatureType.BED:
+    case GardenFeatureType.LAWN:
+      return [
+        { mode: "points", label: "Points" },
+        { mode: "rectangle", label: "Rectangle" },
+        { mode: "ellipse", label: "Ellipse" },
+      ];
+    case GardenFeatureType.TREE:
+      return [{ mode: "ellipse", label: "Tree" }];
+    case GardenFeatureType.SHRUB:
+      return [{ mode: "ellipse", label: "Shrub" }];
+    case GardenFeatureType.FENCE:
+    case GardenFeatureType.WALL:
+    case GardenFeatureType.HEDGE:
+    case GardenFeatureType.PATH:
+    case GardenFeatureType.TRELLIS:
+      return [{ mode: "line", label: "Line" }];
+    case GardenFeatureType.PATIO:
+    case GardenFeatureType.DECK:
+      return [
+        { mode: "rectangle", label: "Rectangle" },
+        { mode: "points", label: "Points" },
+      ];
+    default:
+      return [{ mode: "points", label: "Points" }];
+  }
+}
+
+function nextZoneName(type: GardenFeatureType, zones: ZonePreview[]): string {
+  const label = type.charAt(0).toUpperCase() + type.slice(1);
   const maxNumber = zones.reduce((max, zone) => {
-    if (zone.type !== GardenFeatureType.BED) return max;
-    const match = /^bed\s+(\d+)$/i.exec(zone.name.trim());
+    if (zone.type !== type) return max;
+    const match = new RegExp(`^${type}\\s+(\\d+)$`, "i").exec(zone.name.trim());
     if (!match) return max;
     const numeric = Number(match[1]);
     return Number.isFinite(numeric) ? Math.max(max, numeric) : max;
   }, 0);
 
-  return `Bed ${maxNumber + 1}`;
+  return `${label} ${maxNumber + 1}`;
 }
 
 function normalizedAreaToSqM(
@@ -891,6 +1495,140 @@ function normalizedAreaToSqM(
   baseHeight: number
 ): number {
   return normalizedArea * baseWidth * baseHeight * metersPerPixel * metersPerPixel;
+}
+
+function getStripeSpecForType(
+  type: GardenFeatureType
+): { spacingPx: number; angleDeg: number; color: string; opacity: number } | null {
+  switch (type) {
+    case GardenFeatureType.LAWN:
+      return { spacingPx: 22, angleDeg: -22, color: "#4D8A55", opacity: 0.22 };
+    case GardenFeatureType.DECK:
+      return { spacingPx: 12, angleDeg: -18, color: "#6F4B2F", opacity: 0.24 };
+    default:
+      return null;
+  }
+}
+
+function buildHatchLines(
+  width: number,
+  height: number,
+  spacingPx: number,
+  angleDeg: number
+): Array<{ x1: number; y1: number; x2: number; y2: number }> {
+  if (width <= 0 || height <= 0 || spacingPx <= 0) return [];
+  const angle = (angleDeg * Math.PI) / 180;
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
+  const normalX = -dirY;
+  const normalY = dirX;
+  const diagonal = Math.hypot(width, height);
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  for (let offset = -diagonal; offset <= diagonal; offset += spacingPx) {
+    const baseX = centerX + normalX * offset;
+    const baseY = centerY + normalY * offset;
+    lines.push({
+      x1: baseX - dirX * diagonal,
+      y1: baseY - dirY * diagonal,
+      x2: baseX + dirX * diagonal,
+      y2: baseY + dirY * diagonal,
+    });
+  }
+  return lines;
+}
+
+function buildGridSeries(start: number, end: number, step: number): number[] {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(step) || step <= 0) {
+    return [];
+  }
+  if (end <= start) {
+    return [];
+  }
+
+  const lines: number[] = [];
+  const maxSteps = 5000;
+  let index = 0;
+  while (index < maxSteps) {
+    const value = start + index * step;
+    if (value > end + 1e-9) break;
+    lines.push(value);
+    index += 1;
+  }
+  return lines;
+}
+
+function getPresetResizeHandlePoint(shape: PresetShapeDraft): Point2D {
+  if (shape.kind === "line") {
+    const angle = ((shape.angleDeg ?? 0) * Math.PI) / 180;
+    const halfW = Math.max(shape.width / 2, 0.02);
+    return {
+      x: clamp(shape.center.x + Math.cos(angle) * halfW, 0, 1),
+      y: clamp(shape.center.y + Math.sin(angle) * halfW, 0, 1),
+    };
+  }
+  return {
+    x: clamp(shape.center.x + shape.width / 2, 0, 1),
+    y: clamp(shape.center.y + shape.height / 2, 0, 1),
+  };
+}
+
+function pointsFromPresetShape(shape: PresetShapeDraft): Point2D[] {
+  const cx = Number.isFinite(shape.center?.x) ? shape.center.x : 0.5;
+  const cy = Number.isFinite(shape.center?.y) ? shape.center.y : 0.5;
+  const width = Math.max(Number.isFinite(shape.width) ? shape.width : 0.2, 0.02);
+  const height = Math.max(shape.forceCircle ? width : Number.isFinite(shape.height) ? shape.height : 0.2, 0.02);
+  const halfW = width / 2;
+  const halfH = height / 2;
+  if (shape.kind === "rectangle") {
+    return [
+      { x: clamp(cx - halfW, 0, 1), y: clamp(cy - halfH, 0, 1) },
+      { x: clamp(cx + halfW, 0, 1), y: clamp(cy - halfH, 0, 1) },
+      { x: clamp(cx + halfW, 0, 1), y: clamp(cy + halfH, 0, 1) },
+      { x: clamp(cx - halfW, 0, 1), y: clamp(cy + halfH, 0, 1) },
+    ];
+  }
+
+  if (shape.kind === "line") {
+    const halfW = width / 2;
+    const halfH = Math.max(height / 2, 0.01);
+    const angle = ((shape.angleDeg ?? 0) * Math.PI) / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const corners = [
+      { x: -halfW, y: -halfH },
+      { x: halfW, y: -halfH },
+      { x: halfW, y: halfH },
+      { x: -halfW, y: halfH },
+    ];
+    return corners.map((corner) => ({
+      x: clamp(cx + corner.x * cos - corner.y * sin, 0, 1),
+      y: clamp(cy + corner.x * sin + corner.y * cos, 0, 1),
+    }));
+  }
+
+  const isSpiky = shape.variant === "tree" || shape.variant === "shrub";
+  const outerSegments = shape.variant === "tree" ? 14 : shape.variant === "shrub" ? 12 : 24;
+  const segments = isSpiky ? outerSegments * 2 : outerSegments;
+  const points: Point2D[] = [];
+  for (let i = 0; i < segments; i += 1) {
+    const t = (i / segments) * Math.PI * 2;
+    const spikeFactor = isSpiky && i % 2 === 1 ? (shape.variant === "tree" ? 0.72 : 0.8) : 1;
+    points.push({
+      x: clamp(cx + Math.cos(t) * halfW * spikeFactor, 0, 1),
+      y: clamp(cy + Math.sin(t) * halfH * spikeFactor, 0, 1),
+    });
+  }
+  return points;
+}
+
+function snapValueToGrid(value: number, origin: number, step: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(origin) || !Number.isFinite(step) || step <= 0) {
+    return clamp(value, 0, 1);
+  }
+  const snapped = origin + Math.round((value - origin) / step) * step;
+  return clamp(snapped, 0, 1);
 }
 
 function getNormalizedTapPoint(
@@ -1040,6 +1778,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   metaRow: { marginTop: 8, gap: 8 },
+  perennialWrap: { gap: 6 },
   pickerRow: { gap: 6 },
   pickerTitle: { fontWeight: "700", color: "#1D3D2A" },
   pickerOptionsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
@@ -1063,6 +1802,30 @@ const styles = StyleSheet.create({
   deleteButton: { backgroundColor: "#FBE3DE", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   deleteButtonText: { color: "#9A3B2B", fontWeight: "700" },
   emptyText: { color: "#60766A" },
+  saveCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 2,
+    borderColor: "#C4D8C8",
+    gap: 8,
+  },
+  primarySaveButton: {
+    backgroundColor: "#1E6A42",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  primarySaveButtonDisabled: {
+    backgroundColor: "#A0B2A4",
+  },
+  primarySaveButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 16,
+    textTransform: "capitalize",
+  },
   footerCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
@@ -1075,9 +1838,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   footerText: { color: "#4A6253", fontWeight: "600", flex: 1, marginRight: 10 },
-  saveButton: { backgroundColor: "#2F6F4F", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
-  saveButtonDisabled: { backgroundColor: "#9AB8A4" },
-  saveButtonText: { color: "#FFFFFF", fontWeight: "700", textTransform: "capitalize" },
   handle: {
     position: "absolute",
     width: 28,

@@ -1,6 +1,13 @@
 import { StyleSheet, Text, View } from "react-native";
 
 export type LatLngPoint = { latitude: number; longitude: number };
+export type SnapshotBoundaryPoint = { x: number; y: number };
+export type MapSnapshotResult = {
+  uri: string;
+  width: number;
+  height: number;
+  boundary: SnapshotBoundaryPoint[];
+};
 
 export type MapBoundaryEditorProps = {
   center: LatLngPoint;
@@ -10,7 +17,7 @@ export type MapBoundaryEditorProps = {
   onMapPress: (point: LatLngPoint) => void;
   onSelectPoint: (index: number) => void;
   onDragPoint: (index: number, point: LatLngPoint) => void;
-  onRequestSnapshot?: (capture: () => Promise<string>) => void;
+  onRequestSnapshot?: (capture: () => Promise<MapSnapshotResult>) => void;
 };
 
 export default function MapBoundaryEditor(_props: MapBoundaryEditorProps) {

@@ -11,6 +11,9 @@ describe("recommendation engine", () => {
       polygon: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }],
       sunExposure: SunExposure.FULL_SUN,
       drainage: Drainage.GOOD,
+      containsPerennials: false,
+      isRaisedBed: false,
+      hasIrrigation: false,
       createdAt: "2026-02-01",
       updatedAt: "2026-02-01",
     };

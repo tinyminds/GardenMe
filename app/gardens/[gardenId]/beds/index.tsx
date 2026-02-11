@@ -2,7 +2,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { FlatList, StyleSheet, Text, View } from "react-native";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
-import { PersistentNav } from "@/ui/components/PersistentNav";
 
 const repository = new SqliteBedRepository();
 
@@ -40,7 +39,6 @@ export default function BedsListScreen() {
           />
         )}
       </View>
-      <PersistentNav />
     </View>
   );
 }
