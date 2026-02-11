@@ -115,6 +115,10 @@ export class SqlitePlantCatalogRepository implements PlantCatalogRepository {
       updatedAt: now,
     };
   }
+
+  async clearAll(): Promise<void> {
+    await getDatabase().runAsync("DELETE FROM plant_catalog_cache");
+  }
 }
 
 function toPlantCatalogEntity(row: PlantCatalogRow): PlantCatalogEntry {

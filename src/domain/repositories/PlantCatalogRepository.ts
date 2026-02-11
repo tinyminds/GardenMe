@@ -14,4 +14,5 @@ export interface PlantCatalogRepository {
   searchByName(query: string, limit?: number): Promise<PlantCatalogEntry[]>;
   getBySourceExternalId(source: PlantSource, externalId: string): Promise<PlantCatalogEntry | null>;
   upsert(input: PlantCatalogUpsertInput): Promise<PlantCatalogEntry>;
+  clearAll(): Promise<void>;
 }

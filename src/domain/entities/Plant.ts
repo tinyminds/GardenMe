@@ -1,4 +1,4 @@
-export type PlantSource = "trefle" | "manual";
+export type PlantSource = "growstuff" | "manual";
 
 export interface PlantCatalogEntry {
   id: string;

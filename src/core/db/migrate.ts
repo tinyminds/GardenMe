@@ -1,4 +1,4 @@
-﻿import type { AppDatabase } from "./database";
+import type { AppDatabase } from "./database";
 
 type Migration = { version: string; sql: string };
 
@@ -82,7 +82,7 @@ const migrations: Migration[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS plant_catalog_cache (
         id TEXT PRIMARY KEY NOT NULL,
-        source TEXT NOT NULL CHECK (source IN ('trefle', 'manual')),
+        source TEXT NOT NULL CHECK (source IN ('growstuff', 'manual')),
         external_id TEXT,
         common_name TEXT NOT NULL,
         scientific_name TEXT,
@@ -156,6 +156,96 @@ const migrations: Migration[] = [
       ALTER TABLE garden_crop_entries ADD COLUMN support_needed INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: "0008_expand_plant_catalog_sources",
+    sql: `
+      PRAGMA foreign_keys=OFF;
+
+      CREATE TABLE IF NOT EXISTS plant_catalog_cache_new (
+        id TEXT PRIMARY KEY NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('growstuff', 'manual')),
+        external_id TEXT,
+        common_name TEXT NOT NULL,
+        scientific_name TEXT,
+        family_name TEXT,
+        image_url TEXT,
+        meta_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT OR IGNORE INTO plant_catalog_cache_new (
+        id, source, external_id, common_name, scientific_name, family_name, image_url, meta_json, created_at, updated_at
+      )
+      SELECT
+        id,
+        CASE WHEN source = 'growstuff' THEN 'growstuff' ELSE 'manual' END,
+        external_id,
+        common_name,
+        scientific_name,
+        family_name,
+        image_url,
+        meta_json,
+        created_at,
+        updated_at
+      FROM plant_catalog_cache;
+
+      DROP TABLE plant_catalog_cache;
+      ALTER TABLE plant_catalog_cache_new RENAME TO plant_catalog_cache;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_plant_catalog_source_external
+        ON plant_catalog_cache(source, external_id);
+      CREATE INDEX IF NOT EXISTS idx_plant_catalog_common_name
+        ON plant_catalog_cache(common_name);
+
+      PRAGMA foreign_keys=ON;
+    `,
+  },
+  {
+    version: "0009_restrict_plant_catalog_sources",
+    sql: `
+      PRAGMA foreign_keys=OFF;
+
+      CREATE TABLE IF NOT EXISTS plant_catalog_cache_new (
+        id TEXT PRIMARY KEY NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('growstuff', 'manual')),
+        external_id TEXT,
+        common_name TEXT NOT NULL,
+        scientific_name TEXT,
+        family_name TEXT,
+        image_url TEXT,
+        meta_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT OR IGNORE INTO plant_catalog_cache_new (
+        id, source, external_id, common_name, scientific_name, family_name, image_url, meta_json, created_at, updated_at
+      )
+      SELECT
+        id,
+        CASE WHEN source = 'growstuff' THEN 'growstuff' ELSE 'manual' END,
+        external_id,
+        common_name,
+        scientific_name,
+        family_name,
+        image_url,
+        meta_json,
+        created_at,
+        updated_at
+      FROM plant_catalog_cache;
+
+      DROP TABLE plant_catalog_cache;
+      ALTER TABLE plant_catalog_cache_new RENAME TO plant_catalog_cache;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_plant_catalog_source_external
+        ON plant_catalog_cache(source, external_id);
+      CREATE INDEX IF NOT EXISTS idx_plant_catalog_common_name
+        ON plant_catalog_cache(common_name);
+
+      PRAGMA foreign_keys=ON;
+    `,
+  },
 ];
 
 export async function runMigrations(db: AppDatabase): Promise<void> {
@@ -189,6 +279,53 @@ export async function runMigrations(db: AppDatabase): Promise<void> {
       } else if (migration.version === "0007_crop_entry_variety_support") {
         await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN variety_name TEXT;").catch(() => undefined);
         await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN support_needed INTEGER NOT NULL DEFAULT 0;").catch(() => undefined);
+      } else if (
+        migration.version === "0008_expand_plant_catalog_sources" ||
+        migration.version === "0009_restrict_plant_catalog_sources"
+      ) {
+        await db.execAsync("PRAGMA foreign_keys=OFF;");
+        await db.execAsync(`
+          CREATE TABLE IF NOT EXISTS plant_catalog_cache_new (
+            id TEXT PRIMARY KEY NOT NULL,
+            source TEXT NOT NULL CHECK (source IN ('growstuff', 'manual')),
+            external_id TEXT,
+            common_name TEXT NOT NULL,
+            scientific_name TEXT,
+            family_name TEXT,
+            image_url TEXT,
+            meta_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+        `);
+        await db.execAsync(`
+          INSERT OR IGNORE INTO plant_catalog_cache_new (
+            id, source, external_id, common_name, scientific_name, family_name, image_url, meta_json, created_at, updated_at
+          )
+          SELECT
+            id,
+            CASE WHEN source = 'growstuff' THEN 'growstuff' ELSE 'manual' END,
+            external_id,
+            common_name,
+            scientific_name,
+            family_name,
+            image_url,
+            meta_json,
+            created_at,
+            updated_at
+          FROM plant_catalog_cache;
+        `);
+        await db.execAsync("DROP TABLE plant_catalog_cache;");
+        await db.execAsync("ALTER TABLE plant_catalog_cache_new RENAME TO plant_catalog_cache;");
+        await db.execAsync(`
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_plant_catalog_source_external
+            ON plant_catalog_cache(source, external_id);
+        `);
+        await db.execAsync(`
+          CREATE INDEX IF NOT EXISTS idx_plant_catalog_common_name
+            ON plant_catalog_cache(common_name);
+        `);
+        await db.execAsync("PRAGMA foreign_keys=ON;");
       } else {
         await db.execAsync(migration.sql);
       }
@@ -200,4 +337,3 @@ export async function runMigrations(db: AppDatabase): Promise<void> {
     });
   }
 }
-
