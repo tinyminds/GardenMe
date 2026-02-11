@@ -111,9 +111,15 @@ export default function GardenMapEditorScreen() {
   const [showImageLayer, setShowImageLayer] = useState(true);
   const [showGridLayer, setShowGridLayer] = useState(false);
   const [showBedMeasurementsLayer, setShowBedMeasurementsLayer] = useState(false);
+  const [rectLengthMInput, setRectLengthMInput] = useState("");
+  const [rectWidthMInput, setRectWidthMInput] = useState("");
+  const [isEditingRectLength, setIsEditingRectLength] = useState(false);
+  const [isEditingRectWidth, setIsEditingRectWidth] = useState(false);
   const [viewport, setViewport] = useState({ width: 320, height: 220 });
   const [canvas, setCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
   const gestureStartRef = useRef<{ distance: number; angle: number; zoom: number; rotation: number } | null>(null);
+  const rectLengthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rectWidthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [didNormalizeLegacyCalibration, setDidNormalizeLegacyCalibration] = useState(false);
 
   const gardenQuery = useQuery({
@@ -650,6 +656,35 @@ export default function GardenMapEditorScreen() {
   const canDeletePoint = selectedPointIndex !== null;
   const canCancelEdit = Boolean(editingZoneId);
   const shapeActionLabel = presetShape ? "Apply Shape" : "Close Shape";
+  const zonesToRender = editingZoneId ? existingZones.filter((zone) => zone.id !== editingZoneId) : existingZones;
+  const canPrecisionEditBed = activeType === GardenFeatureType.BED && Boolean(calibration) && isClosed && draftPoints.length >= 3;
+  const draftBedMeasurementLabels = canPrecisionEditBed
+    ? getBedMeasurementLabels(draftPoints, canvas.width, canvas.height, calibration)
+    : [];
+  const draftBedEdgeLengths = canPrecisionEditBed
+    ? getPolygonEdgeLengthsMeters(draftPoints, calibration)
+    : [];
+  const isDraftBedRectangle = canPrecisionEditBed && draftPoints.length === 4 && isRectangleLikePolygon(draftPoints);
+
+  useEffect(() => {
+    if (!isDraftBedRectangle) return;
+    const length = draftBedEdgeLengths[0];
+    const width = draftBedEdgeLengths[1];
+    if (!isEditingRectLength && length !== undefined && Number.isFinite(length) && length > 0) {
+      setRectLengthMInput(length >= 10 ? `${length.toFixed(1)}` : `${length.toFixed(2)}`);
+    }
+    if (!isEditingRectWidth && width !== undefined && Number.isFinite(width) && width > 0) {
+      setRectWidthMInput(width >= 10 ? `${width.toFixed(1)}` : `${width.toFixed(2)}`);
+    }
+  }, [draftBedEdgeLengths, isDraftBedRectangle, isEditingRectLength, isEditingRectWidth]);
+
+  useEffect(
+    () => () => {
+      if (rectLengthTimerRef.current) clearTimeout(rectLengthTimerRef.current);
+      if (rectWidthTimerRef.current) clearTimeout(rectWidthTimerRef.current);
+    },
+    []
+  );
 
   const persistCanvasViewSettings = async (
     nextShowImage: boolean,
@@ -666,6 +701,54 @@ export default function GardenMapEditorScreen() {
     await gardenRepository.updateScaleCalibration(gardenId, nextCalibration);
     await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
     await queryClient.invalidateQueries({ queryKey: ["gardens"] });
+  };
+
+  const applyRectangleDimension = (edgeIndex: 0 | 1, valueRaw: string) => {
+    if (!canPrecisionEditBed || !calibration || !isDraftBedRectangle) return;
+    const nextLength = Number(valueRaw);
+    if (!Number.isFinite(nextLength) || nextLength <= 0) {
+      Alert.alert("Invalid length", "Enter a positive size in meters.");
+      return;
+    }
+    const currentLength = draftBedEdgeLengths[0];
+    const currentWidth = draftBedEdgeLengths[1];
+    if (currentLength === undefined || currentWidth === undefined) return;
+    const nextPoints = setRectangleDimensionsMeters(
+      draftPoints,
+      calibration,
+      edgeIndex === 0 ? nextLength : currentLength,
+      edgeIndex === 1 ? nextLength : currentWidth
+    );
+    if (!nextPoints) {
+      Alert.alert("Cannot apply", "Could not set that size.");
+      return;
+    }
+    if (nextPoints.some((point) => !isPointInsidePolygon(point, gardenBoundary))) {
+      Alert.alert("Outside boundary", "That size would push the bed outside the garden boundary.");
+      return;
+    }
+    setDraftPoints(nextPoints);
+    const nextPreset = rectanglePresetFromPolygon(nextPoints);
+    if (nextPreset) {
+      setShapeDraftMode("rectangle");
+      setPresetShape(nextPreset);
+    }
+  };
+
+  const handleRectLengthChange = (value: string) => {
+    setRectLengthMInput(value);
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    if (rectLengthTimerRef.current) clearTimeout(rectLengthTimerRef.current);
+    rectLengthTimerRef.current = setTimeout(() => applyRectangleDimension(0, value), 350);
+  };
+
+  const handleRectWidthChange = (value: string) => {
+    setRectWidthMInput(value);
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    if (rectWidthTimerRef.current) clearTimeout(rectWidthTimerRef.current);
+    rectWidthTimerRef.current = setTimeout(() => applyRectangleDimension(1, value), 350);
   };
 
   useEffect(() => {
@@ -904,7 +987,7 @@ export default function GardenMapEditorScreen() {
                         {measurement.label}
                       </SvgText>
                     ))}
-                    {existingZones.map((zone) => {
+                    {zonesToRender.map((zone) => {
                       const points = toSvgPoints(zone.polygon, canvas);
                       const color = typeColors[zone.type];
                       const isEditingThis = editingZoneId === zone.id;
@@ -1004,6 +1087,21 @@ export default function GardenMapEditorScreen() {
                             strokeWidth={1}
                             opacity={getStripeSpecForType(activeType)!.opacity}
                           />
+                        ))}
+                        {draftBedMeasurementLabels.map((measurement, index) => (
+                          <SvgText
+                            key={`draft-bed-measure-${index.toString()}`}
+                            x={measurement.x}
+                            y={measurement.y}
+                            textAnchor="middle"
+                            alignmentBaseline="middle"
+                            fontSize={11}
+                            fontWeight="700"
+                            fill="#1B3D2B"
+                            transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
+                          >
+                            {measurement.label}
+                          </SvgText>
                         ))}
                       </>
                     )}
@@ -1176,6 +1274,56 @@ export default function GardenMapEditorScreen() {
                     style={styles.nameInput}
                     multiline
                   />
+                </View>
+              )}
+              {canPrecisionEditBed && (
+                <View style={styles.precisionCard}>
+                  <Text style={styles.precisionTitle}>Precision Controls (Beds)</Text>
+                  <Text style={styles.infoText}>Drag updates values. Editing values updates bed size.</Text>
+                  {isDraftBedRectangle ? (
+                    <View style={styles.precisionDualRow}>
+                      <View style={styles.precisionField}>
+                        <Text style={styles.pickerTitle}>Length (m)</Text>
+                        <TextInput
+                          value={rectLengthMInput}
+                          onChangeText={handleRectLengthChange}
+                          onFocus={() => setIsEditingRectLength(true)}
+                          onBlur={() => {
+                            setIsEditingRectLength(false);
+                            if (rectLengthTimerRef.current) clearTimeout(rectLengthTimerRef.current);
+                            const parsed = Number(rectLengthMInput);
+                            if (Number.isFinite(parsed) && parsed > 0) {
+                              applyRectangleDimension(0, rectLengthMInput);
+                            }
+                          }}
+                          placeholder="Length (m)"
+                          keyboardType="decimal-pad"
+                          style={styles.nameInput}
+                        />
+                      </View>
+                      <View style={styles.precisionField}>
+                        <Text style={styles.pickerTitle}>Width (m)</Text>
+                        <TextInput
+                          value={rectWidthMInput}
+                          onChangeText={handleRectWidthChange}
+                          onFocus={() => setIsEditingRectWidth(true)}
+                          onBlur={() => {
+                            setIsEditingRectWidth(false);
+                            if (rectWidthTimerRef.current) clearTimeout(rectWidthTimerRef.current);
+                            const parsed = Number(rectWidthMInput);
+                            if (Number.isFinite(parsed) && parsed > 0) {
+                              applyRectangleDimension(1, rectWidthMInput);
+                            }
+                          }}
+                          placeholder="Width (m)"
+                          keyboardType="decimal-pad"
+                          style={styles.nameInput}
+                        />
+                      </View>
+                    </View>
+                  ) : (
+                    <Text style={styles.infoText}>Point/ellipse beds: resize directly on the map.</Text>
+                  )}
                 </View>
               )}
             </View>
@@ -1674,6 +1822,27 @@ function pointsFromPresetShape(shape: PresetShapeDraft): Point2D[] {
   return points;
 }
 
+function rectanglePresetFromPolygon(polygon: Point2D[]): PresetShapeDraft | null {
+  if (polygon.length < 4) return null;
+  const xs = polygon.map((point) => point.x);
+  const ys = polygon.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const width = Math.max(0.02, maxX - minX);
+  const height = Math.max(0.02, maxY - minY);
+  return {
+    kind: "rectangle",
+    center: {
+      x: clamp((minX + maxX) / 2, 0, 1),
+      y: clamp((minY + maxY) / 2, 0, 1),
+    },
+    width,
+    height,
+  };
+}
+
 function snapValueToGrid(value: number, origin: number, step: number): number {
   if (!Number.isFinite(value) || !Number.isFinite(origin) || !Number.isFinite(step) || step <= 0) {
     return clamp(value, 0, 1);
@@ -1813,6 +1982,80 @@ function getBedMeasurementLabels(
     return getPolygonEdgeMeasurementLabels(polygon, width, height, calibration, [0, 1]);
   }
   return getPolygonEdgeMeasurementLabels(polygon, width, height, calibration);
+}
+
+function getPolygonEdgeLengthsMeters(
+  polygon: Point2D[],
+  calibration: { metersPerPixel: number; baseWidth: number; baseHeight: number } | null | undefined
+): number[] {
+  if (!calibration || polygon.length < 2) return [];
+  return polygon.map((point, index) => {
+    const next = polygon[(index + 1) % polygon.length]!;
+    const dx = next.x - point.x;
+    const dy = next.y - point.y;
+    const pixelLength = Math.hypot(dx * calibration.baseWidth, dy * calibration.baseHeight);
+    return pixelLength * calibration.metersPerPixel;
+  });
+}
+
+function setRectangleDimensionsMeters(
+  polygon: Point2D[],
+  calibration: { metersPerPixel: number; baseWidth: number; baseHeight: number },
+  lengthMeters: number,
+  widthMeters: number
+): Point2D[] | null {
+  if (polygon.length !== 4) return null;
+  if (!Number.isFinite(lengthMeters) || !Number.isFinite(widthMeters) || lengthMeters <= 0 || widthMeters <= 0) {
+    return null;
+  }
+
+  const toPixels = (point: Point2D) => ({
+    x: point.x * calibration.baseWidth,
+    y: point.y * calibration.baseHeight,
+  });
+  const toNormalized = (point: { x: number; y: number }): Point2D => ({
+    x: point.x / calibration.baseWidth,
+    y: point.y / calibration.baseHeight,
+  });
+  const p0 = toPixels(polygon[0]!);
+  const p1 = toPixels(polygon[1]!);
+  const p2 = toPixels(polygon[2]!);
+  const p3 = toPixels(polygon[3]!);
+  const center = {
+    x: (p0.x + p1.x + p2.x + p3.x) / 4,
+    y: (p0.y + p1.y + p2.y + p3.y) / 4,
+  };
+  const ux = p1.x - p0.x;
+  const uy = p1.y - p0.y;
+  const vx = p2.x - p1.x;
+  const vy = p2.y - p1.y;
+  const uLen = Math.hypot(ux, uy);
+  const vLen = Math.hypot(vx, vy);
+  if (uLen < 1e-6 || vLen < 1e-6) return null;
+
+  const u = { x: ux / uLen, y: uy / uLen };
+  const v = { x: vx / vLen, y: vy / vLen };
+  const halfLenPx = lengthMeters / calibration.metersPerPixel / 2;
+  const halfWidPx = widthMeters / calibration.metersPerPixel / 2;
+
+  const n0 = {
+    x: center.x - u.x * halfLenPx - v.x * halfWidPx,
+    y: center.y - u.y * halfLenPx - v.y * halfWidPx,
+  };
+  const n1 = {
+    x: center.x + u.x * halfLenPx - v.x * halfWidPx,
+    y: center.y + u.y * halfLenPx - v.y * halfWidPx,
+  };
+  const n2 = {
+    x: center.x + u.x * halfLenPx + v.x * halfWidPx,
+    y: center.y + u.y * halfLenPx + v.y * halfWidPx,
+  };
+  const n3 = {
+    x: center.x - u.x * halfLenPx + v.x * halfWidPx,
+    y: center.y - u.y * halfLenPx + v.y * halfWidPx,
+  };
+
+  return [toNormalized(n0), toNormalized(n1), toNormalized(n2), toNormalized(n3)];
 }
 
 function isRectangleLikePolygon(polygon: Point2D[]): boolean {
@@ -2001,6 +2244,18 @@ const styles = StyleSheet.create({
   },
   metaRow: { marginTop: 8, gap: 8 },
   perennialWrap: { gap: 6 },
+  precisionCard: {
+    marginTop: 6,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#D8E5D5",
+    backgroundColor: "#F8FCF7",
+    gap: 8,
+  },
+  precisionTitle: { color: "#1F3F2B", fontWeight: "800" },
+  precisionDualRow: { flexDirection: "row", gap: 8 },
+  precisionField: { flex: 1, gap: 4 },
   pickerRow: { gap: 6 },
   pickerTitle: { fontWeight: "700", color: "#1D3D2A" },
   pickerOptionsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
