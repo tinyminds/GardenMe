@@ -68,8 +68,10 @@ export default function PlannerTabScreen() {
 
   useEffect(() => {
     if (selectedGardenId && gardens.some((g) => g.id === selectedGardenId)) return;
-    setSelectedGardenId(gardens[0]?.id ?? null);
-  }, [gardens, selectedGardenId]);
+    const nextSelectedGardenId = gardens[0]?.id ?? null;
+    if (nextSelectedGardenId === selectedGardenId) return;
+    setSelectedGardenId(nextSelectedGardenId);
+  }, [gardens, selectedGardenId, setSelectedGardenId]);
 
   const selectedGarden = useMemo(
     () => gardens.find((garden) => garden.id === selectedGardenId) ?? null,
@@ -108,8 +110,9 @@ export default function PlannerTabScreen() {
   const features = featuresQuery.data ?? [];
 
   useEffect(() => {
+    const sourceBeds = bedsQuery.data ?? [];
     const nextDrafts: Record<string, BedDraft> = {};
-    for (const bed of beds) {
+    for (const bed of sourceBeds) {
       nextDrafts[bed.id] = {
         name: bed.name,
         sunExposure: bed.sunExposure,
@@ -120,8 +123,8 @@ export default function PlannerTabScreen() {
         hasIrrigation: bed.hasIrrigation,
       };
     }
-    setBedDrafts(nextDrafts);
-  }, [beds]);
+    setBedDrafts((previous) => (areBedDraftMapsEqual(previous, nextDrafts) ? previous : nextDrafts));
+  }, [bedsQuery.data]);
 
   const zones: ZonePreview[] = [
     ...features.map((feature) => ({
@@ -182,6 +185,13 @@ export default function PlannerTabScreen() {
   const previewBaseHeight = Math.max(180, Math.floor((previewBaseWidth * baseHeight) / Math.max(baseWidth, 1)));
   const zoomedWidth = Math.max(1, Math.round(previewBaseWidth * zoom));
   const zoomedHeight = Math.max(1, Math.round(previewBaseHeight * zoom));
+  const previewPanPadding = Math.max(72, Math.round(previewBaseWidth * 0.18));
+  const previewContentWidth = zoomedWidth + previewPanPadding * 2;
+  const previewContentHeight = zoomedHeight + previewPanPadding * 2;
+  const maxPreviewOffsetX = Math.max(0, previewContentWidth - previewBaseWidth);
+  const maxPreviewOffsetY = Math.max(0, previewContentHeight - previewBaseHeight);
+  const canPanPreview = maxPreviewOffsetX > 0 || maxPreviewOffsetY > 0;
+  const boundaryMeasurements = getBoundaryMeasurementLabels(boundary, zoomedWidth, zoomedHeight, calibration);
   const panStep = Math.max(80, Math.round(previewBaseWidth * 0.22));
   const gridVerticalLines = showGrid
     ? buildGridSeries(boundaryMinX, boundaryMaxX, gridStepX).map((x) => x * zoomedWidth)
@@ -191,16 +201,23 @@ export default function PlannerTabScreen() {
     : [];
 
   const nudgePreview = (dx: number, dy: number) => {
-    if (zoom <= 1.01) return;
-    const maxX = Math.max(0, zoomedWidth - previewBaseWidth);
-    const maxY = Math.max(0, zoomedHeight - previewBaseHeight);
-    const nextX = clamp(horizontalOffset + dx, 0, maxX);
-    const nextY = clamp(verticalOffset + dy, 0, maxY);
+    if (!canPanPreview) return;
+    const nextX = clamp(horizontalOffset + dx, 0, maxPreviewOffsetX);
+    const nextY = clamp(verticalOffset + dy, 0, maxPreviewOffsetY);
     horizontalScrollRef.current?.scrollTo({ x: nextX, animated: true });
     verticalScrollRef.current?.scrollTo({ y: nextY, animated: true });
     setHorizontalOffset(nextX);
     setVerticalOffset(nextY);
   };
+
+  useEffect(() => {
+    const targetX = clamp(previewPanPadding, 0, maxPreviewOffsetX);
+    const targetY = clamp(previewPanPadding, 0, maxPreviewOffsetY);
+    horizontalScrollRef.current?.scrollTo({ x: targetX, animated: false });
+    verticalScrollRef.current?.scrollTo({ y: targetY, animated: false });
+    setHorizontalOffset(targetX);
+    setVerticalOffset(targetY);
+  }, [selectedGardenId, zoomedWidth, zoomedHeight, previewPanPadding, maxPreviewOffsetX, maxPreviewOffsetY]);
 
   const persistPreviewViewSettings = async (nextShowImage: boolean, nextShowGrid: boolean) => {
     if (!selectedGardenId || !selectedGarden?.scaleCalibration) return;
@@ -284,20 +301,20 @@ export default function PlannerTabScreen() {
               </View>
               <View style={styles.dPadWrap}>
                 <View style={styles.dPadRow}>
-                  <Pressable style={styles.dPadButton} onPress={() => nudgePreview(0, -panStep)} disabled={zoom <= 1.01}>
+                  <Pressable style={styles.dPadButton} onPress={() => nudgePreview(0, -panStep)} disabled={!canPanPreview}>
                     <Text style={styles.dPadText}>↑</Text>
                   </Pressable>
                 </View>
                 <View style={styles.dPadRow}>
-                  <Pressable style={styles.dPadButton} onPress={() => nudgePreview(-panStep, 0)} disabled={zoom <= 1.01}>
+                  <Pressable style={styles.dPadButton} onPress={() => nudgePreview(-panStep, 0)} disabled={!canPanPreview}>
                     <Text style={styles.dPadText}>←</Text>
                   </Pressable>
-                  <Pressable style={styles.dPadButton} onPress={() => nudgePreview(panStep, 0)} disabled={zoom <= 1.01}>
+                  <Pressable style={styles.dPadButton} onPress={() => nudgePreview(panStep, 0)} disabled={!canPanPreview}>
                     <Text style={styles.dPadText}>→</Text>
                   </Pressable>
                 </View>
                 <View style={styles.dPadRow}>
-                  <Pressable style={styles.dPadButton} onPress={() => nudgePreview(0, panStep)} disabled={zoom <= 1.01}>
+                  <Pressable style={styles.dPadButton} onPress={() => nudgePreview(0, panStep)} disabled={!canPanPreview}>
                     <Text style={styles.dPadText}>↓</Text>
                   </Pressable>
                 </View>
@@ -319,22 +336,33 @@ export default function PlannerTabScreen() {
                   ref={horizontalScrollRef}
                   horizontal
                   bounces={false}
-                  scrollEnabled={zoom > 1.01}
+                  scrollEnabled={canPanPreview}
                   onScroll={(event) => setHorizontalOffset(event.nativeEvent.contentOffset.x)}
                   scrollEventThrottle={16}
                 >
                   <ScrollView
                     ref={verticalScrollRef}
                     bounces={false}
-                    scrollEnabled={zoom > 1.01}
+                    scrollEnabled={canPanPreview}
                     onScroll={(event) => setVerticalOffset(event.nativeEvent.contentOffset.y)}
                     scrollEventThrottle={16}
                   >
-                    <View style={[styles.previewInner, { width: zoomedWidth, height: zoomedHeight }]}>
-                      {showImage && selectedGarden.photoUri && (
-                        <Image source={{ uri: selectedGarden.photoUri }} style={styles.previewImage} resizeMode="stretch" />
-                      )}
-                      <Svg width={zoomedWidth} height={zoomedHeight}>
+                    <View style={[styles.previewInner, { width: previewContentWidth, height: previewContentHeight }]}>
+                      <View
+                        style={[
+                          styles.previewCanvasFrame,
+                          {
+                            width: zoomedWidth,
+                            height: zoomedHeight,
+                            left: previewPanPadding,
+                            top: previewPanPadding,
+                          },
+                        ]}
+                      >
+                        {showImage && selectedGarden.photoUri && (
+                          <Image source={{ uri: selectedGarden.photoUri }} style={styles.previewImage} resizeMode="stretch" />
+                        )}
+                        <Svg width={zoomedWidth} height={zoomedHeight}>
                         {showGrid && gridVerticalLines.map((x, index) => (
                           <Line
                             key={`grid-v-${index.toString()}`}
@@ -364,12 +392,27 @@ export default function PlannerTabScreen() {
                             fillRule="evenodd"
                           />
                         )}
-                        <Polygon
-                          points={toSvgPoints(boundary, zoomedWidth, zoomedHeight)}
-                          fill={showImage && selectedGarden.photoUri ? "transparent" : "rgba(39,98,66,0.12)"}
-                          stroke="#2D6A49"
-                          strokeWidth={3}
-                        />
+                          <Polygon
+                            points={toSvgPoints(boundary, zoomedWidth, zoomedHeight)}
+                            fill={showImage && selectedGarden.photoUri ? "transparent" : "rgba(39,98,66,0.12)"}
+                            stroke="#2D6A49"
+                            strokeWidth={3}
+                          />
+                          {boundaryMeasurements.map((measurement, index) => (
+                            <SvgText
+                              key={`boundary-measure-${index.toString()}`}
+                              x={measurement.x}
+                              y={measurement.y}
+                              textAnchor="middle"
+                              alignmentBaseline="middle"
+                              fontSize={11}
+                              fontWeight="700"
+                              fill="#173A29"
+                              transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
+                            >
+                              {measurement.label}
+                            </SvgText>
+                          ))}
                         {zones.map((zone) => {
                           const color = zoneColors[zone.type];
                           const label = zone.source === "bed"
@@ -418,7 +461,8 @@ export default function PlannerTabScreen() {
                             </Fragment>
                           );
                         })}
-                      </Svg>
+                        </Svg>
+                      </View>
                     </View>
                   </ScrollView>
                 </ScrollView>
@@ -691,6 +735,52 @@ function truncateLabel(value: string, maxChars: number): string {
   return `${trimmed.slice(0, Math.max(1, maxChars - 1))}...`;
 }
 
+function getBoundaryMeasurementLabels(
+  boundary: Point2D[],
+  width: number,
+  height: number,
+  calibration: { metersPerPixel: number; baseWidth: number; baseHeight: number } | null | undefined
+): Array<{ x: number; y: number; angle: number; label: string }> {
+  if (!calibration || boundary.length < 2 || width <= 0 || height <= 0) return [];
+  const labels: Array<{ x: number; y: number; angle: number; label: string }> = [];
+  const epsilon = 1e-6;
+  const centroid = boundary.reduce(
+    (acc, point) => ({ x: acc.x + point.x / boundary.length, y: acc.y + point.y / boundary.length }),
+    { x: 0, y: 0 }
+  );
+  for (let i = 0; i < boundary.length; i += 1) {
+    const start = boundary[i];
+    const end = boundary[(i + 1) % boundary.length];
+    if (!start || !end) continue;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const pixelLength = Math.hypot(dx * calibration.baseWidth, dy * calibration.baseHeight);
+    const meters = pixelLength * calibration.metersPerPixel;
+    if (!Number.isFinite(meters) || meters < 0.05) continue;
+    const midX = ((start.x + end.x) / 2) * width;
+    const midY = ((start.y + end.y) / 2) * height;
+    const toOutsideX = midX - centroid.x * width;
+    const toOutsideY = midY - centroid.y * height;
+    const outsideLength = Math.hypot(toOutsideX, toOutsideY);
+    const offset = 14;
+    const rawX = outsideLength > epsilon ? midX + (toOutsideX / outsideLength) * offset : midX;
+    const rawY = outsideLength > epsilon ? midY + (toOutsideY / outsideLength) * offset : midY;
+    const edgeMargin = 16;
+    const x = clamp(rawX, edgeMargin, Math.max(edgeMargin, width - edgeMargin));
+    const y = clamp(rawY, edgeMargin, Math.max(edgeMargin, height - edgeMargin));
+    let angle = (Math.atan2(dy * height, dx * width) * 180) / Math.PI;
+    if (angle > 90) angle -= 180;
+    if (angle < -90) angle += 180;
+    labels.push({
+      x,
+      y,
+      angle,
+      label: meters >= 10 ? `${Math.round(meters)}m` : `${meters.toFixed(1)}m`,
+    });
+  }
+  return labels;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -720,6 +810,32 @@ function clipHatchLinesToPolygon(
     }
   }
   return clipped;
+}
+
+function areBedDraftMapsEqual(
+  a: Record<string, BedDraft>,
+  b: Record<string, BedDraft>
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    const left = a[key];
+    const right = b[key];
+    if (!left || !right) return false;
+    if (
+      left.name !== right.name ||
+      left.sunExposure !== right.sunExposure ||
+      left.drainage !== right.drainage ||
+      left.containsPerennials !== right.containsPerennials ||
+      left.perennialPlantsCsv !== right.perennialPlantsCsv ||
+      left.isRaisedBed !== right.isRaisedBed ||
+      left.hasIrrigation !== right.hasIrrigation
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 const styles = StyleSheet.create({
@@ -759,9 +875,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#E5EDE4",
   },
   previewInner: {
+    position: "relative",
     borderRadius: 12,
     overflow: "hidden",
     backgroundColor: "#E5EDE4",
+  },
+  previewCanvasFrame: {
+    position: "absolute",
+    borderRadius: 12,
+    overflow: "hidden",
   },
   previewImage: {
     ...StyleSheet.absoluteFillObject,

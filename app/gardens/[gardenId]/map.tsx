@@ -1,6 +1,4 @@
-﻿import * as ImagePicker from "expo-image-picker";
-import * as ImageManipulator from "expo-image-manipulator";
-import { Link, useLocalSearchParams } from "expo-router";
+﻿import { Link, useLocalSearchParams } from "expo-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -16,16 +14,15 @@ import {
   type GestureResponderEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Circle, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, Defs, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/state/queryClient";
 import { makeId } from "@/utils/id";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
-import { Drainage, SunExposure, type Bed, type Point2D } from "@/domain/entities/Bed";
-import { GardenFeatureType, type GardenFeature } from "@/domain/entities/GardenFeature";
-import type { GardenScaleCalibration } from "@/domain/entities/Garden";
+import { Drainage, SunExposure, type Point2D } from "@/domain/entities/Bed";
+import { GardenFeatureType } from "@/domain/entities/GardenFeature";
 import { clipLineToPolygon, isPointInsidePolygon, polygonArea } from "@/features/garden-mapping/utils/geometry";
 
 const gardenRepository = new SqliteGardenRepository();
@@ -84,16 +81,6 @@ type PresetShapeDraft = {
   variant?: "tree" | "shrub";
   forceCircle?: boolean;
 };
-type PlannerUndoSnapshot = {
-  photoUri?: string;
-  imageSourceType?: "photo" | "satellite";
-  calibration?: GardenScaleCalibration;
-  beds: Bed[];
-  features: GardenFeature[];
-  draftPoints: Point2D[];
-  viewRotationDeg: number;
-};
-
 const BASE_CANVAS_WIDTH = 1000;
 const BASE_CANVAS_HEIGHT = 700;
 const AUTO_CLOSE_PX = 24;
@@ -123,7 +110,6 @@ export default function GardenMapEditorScreen() {
   const [viewRotationDeg, setViewRotationDeg] = useState(0);
   const [showImageLayer, setShowImageLayer] = useState(true);
   const [showGridLayer, setShowGridLayer] = useState(false);
-  const [undoStack, setUndoStack] = useState<PlannerUndoSnapshot[]>([]);
   const [viewport, setViewport] = useState({ width: 320, height: 220 });
   const [canvas, setCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
   const gestureStartRef = useRef<{ distance: number; angle: number; zoom: number; rotation: number } | null>(null);
@@ -279,11 +265,14 @@ export default function GardenMapEditorScreen() {
   };
 
   const undoPoint = () => {
-    setDraftPoints((prev) => prev.slice(0, -1));
+    setDraftPoints((prev) => {
+      const next = prev.slice(0, -1);
+      if (next.length < 3) {
+        setIsClosed(false);
+      }
+      return next;
+    });
     setSelectedPointIndex(null);
-    if (draftPoints.length <= 3) {
-      setIsClosed(false);
-    }
   };
 
   const deleteSelectedPoint = () => {
@@ -480,139 +469,9 @@ export default function GardenMapEditorScreen() {
     void applyPresetShape(nextShape);
   };
 
-  const captureUndoSnapshot = async () => {
-    if (!gardenId) return;
-    const garden = gardenQuery.data ?? (await gardenRepository.getById(gardenId));
-    if (!garden) return;
-    const beds = bedsQuery.data ?? (await bedRepository.listByGarden(gardenId));
-    const features = featuresQuery.data ?? (await featureRepository.listByGarden(gardenId));
-
-    const snapshot: PlannerUndoSnapshot = {
-      beds: beds.map(cloneBed),
-      features: features.map(cloneFeature),
-      draftPoints: draftPoints.map((p) => ({ ...p })),
-      viewRotationDeg,
-    };
-    if (garden.photoUri) snapshot.photoUri = garden.photoUri;
-    if (garden.imageSourceType) snapshot.imageSourceType = garden.imageSourceType;
-    if (garden.scaleCalibration) snapshot.calibration = cloneCalibration(garden.scaleCalibration);
-
-    setUndoStack((prev) => [snapshot, ...prev].slice(0, 20));
-  };
-
-  const undoLastChange = async () => {
-    if (!gardenId) return;
-    const snapshot = undoStack[0];
-    if (!snapshot) {
-      Alert.alert("Nothing to undo", "No previous planner changes recorded.");
-      return;
-    }
-
-    setUndoStack((prev) => prev.slice(1));
-    try {
-      if (snapshot.photoUri) {
-        await gardenRepository.updatePhoto(
-          gardenId,
-          snapshot.photoUri,
-          snapshot.imageSourceType === "satellite" ? "satellite" : "photo"
-        );
-      } else {
-        await gardenRepository.clearPhoto(gardenId);
-      }
-
-      if (snapshot.calibration) {
-        await gardenRepository.updateScaleCalibration(gardenId, snapshot.calibration);
-      }
-
-      const currentBeds = await bedRepository.listByGarden(gardenId);
-      const snapshotBeds = new Map(snapshot.beds.map((bed) => [bed.id, bed]));
-      for (const bed of currentBeds) {
-        if (!snapshotBeds.has(bed.id)) {
-          await bedRepository.delete(bed.id, gardenId);
-        }
-      }
-      for (const bed of snapshot.beds) {
-        const exists = currentBeds.some((current) => current.id === bed.id);
-        if (exists) {
-          await bedRepository.update(bed);
-        } else {
-          await bedRepository.create(bed);
-        }
-      }
-
-      const currentFeatures = await featureRepository.listByGarden(gardenId);
-      const snapshotFeatures = new Map(snapshot.features.map((feature) => [feature.id, feature]));
-      for (const feature of currentFeatures) {
-        if (!snapshotFeatures.has(feature.id)) {
-          await featureRepository.delete(feature.id, gardenId);
-        }
-      }
-      for (const feature of snapshot.features) {
-        const exists = currentFeatures.some((current) => current.id === feature.id);
-        if (exists) {
-          await featureRepository.update(feature);
-        } else {
-          await featureRepository.create(feature);
-        }
-      }
-
-      setDraftPoints(snapshot.draftPoints.map((p) => ({ ...p })));
-      setViewRotationDeg(snapshot.viewRotationDeg);
-      await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["garden-features", gardenId] });
-      Alert.alert("Undo complete", "Reverted the last planner change.");
-    } catch (error) {
-      Alert.alert("Undo failed", error instanceof Error ? error.message : "Could not undo.");
-    }
-  };
-
-  const pickPhoto = async () => {
-    if (!gardenId) return;
-
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert("Permission needed", "Enable photo access to map beds on a real garden image.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.8,
-    });
-
-    if (result.canceled || result.assets.length === 0) return;
-
-    const firstAsset = result.assets[0];
-    if (!firstAsset?.uri) return;
-    await captureUndoSnapshot();
-
-    const calibration = gardenQuery.data?.scaleCalibration;
-    let finalPhotoUri = firstAsset.uri;
-
-    if (calibration?.boundaryPolygon && calibration.boundaryPolygon.length >= 3) {
-      const cropResult = await cropImageToBoundary(firstAsset.uri, calibration.boundaryPolygon);
-      finalPhotoUri = cropResult.uri;
-
-      const previousBoundaryArea = polygonArea(calibration.boundaryPolygon);
-      const nextBoundaryArea = polygonArea(cropResult.remappedBoundary);
-
-      const nextCalibration: typeof calibration = {
-        ...calibration,
-        boundaryPolygon: cropResult.remappedBoundary,
-      };
-
-      if (previousBoundaryArea > 0 && nextBoundaryArea > 0) {
-        nextCalibration.metersPerPixel =
-          calibration.metersPerPixel * Math.sqrt(previousBoundaryArea / nextBoundaryArea);
-      }
-
-      await gardenRepository.updateScaleCalibration(gardenId, nextCalibration);
-    }
-
-    await gardenRepository.updatePhoto(gardenId, finalPhotoUri);
-    await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
+  const handleUndo = () => {
+    if (draftPoints.length === 0) return;
+    undoPoint();
   };
 
   const gestureResponder = useMemo(
@@ -777,10 +636,17 @@ export default function GardenMapEditorScreen() {
   const gridHorizontalLines = showGridLayer
     ? buildGridSeries(boundaryMinY, boundaryMaxY, gridStepY).map((y) => y * canvas.height)
     : [];
+  const boundaryMeasurements = getBoundaryMeasurementLabels(gardenBoundary, canvas.width, canvas.height, calibration);
   const areaSqM = calibration
     ? normalizedAreaToSqM(area, calibration.metersPerPixel, calibration.baseWidth, calibration.baseHeight)
     : null;
   const saveDisabled = draftPoints.length < 3 || !name.trim();
+  const canApplyShape = Boolean(presetShape);
+  const canCloseShape = !presetShape && draftPoints.length >= 3 && !isClosed;
+  const canUndo = draftPoints.length > 0;
+  const canDeletePoint = selectedPointIndex !== null;
+  const canCancelEdit = Boolean(editingZoneId);
+  const shapeActionLabel = presetShape ? "Apply Shape" : "Close Shape";
 
   const persistCanvasViewSettings = async (nextShowImage: boolean, nextShowGrid: boolean) => {
     if (!gardenId || !calibration) return;
@@ -821,7 +687,7 @@ export default function GardenMapEditorScreen() {
   const guidanceText = (() => {
     if (editingZoneId) return "Editing mode: drag points, update details, then tap Update.";
     if (draftPoints.length === 0) return "Pan/zoom to frame the map, switch to Draw, then tap to start an area.";
-    if (!isClosed) return "Keep adding points. Tap near the first point or tap Finish Shape.";
+    if (!isClosed) return "Keep adding points. Tap near the first point or tap Close Shape.";
     return "Shape ready. Add details and tap Save.";
   })();
 
@@ -1006,6 +872,21 @@ export default function GardenMapEditorScreen() {
                       stroke="#2D6A49"
                       strokeWidth={showBaseImage && gardenQuery.data?.photoUri ? 3 : 4}
                     />
+                    {boundaryMeasurements.map((measurement, index) => (
+                      <SvgText
+                        key={`boundary-measure-${index.toString()}`}
+                        x={measurement.x}
+                        y={measurement.y}
+                        textAnchor="middle"
+                        alignmentBaseline="middle"
+                        fontSize={11}
+                        fontWeight="700"
+                        fill="#173A29"
+                        transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
+                      >
+                        {measurement.label}
+                      </SvgText>
+                    ))}
                     {existingZones.map((zone) => {
                       const points = toSvgPoints(zone.polygon, canvas);
                       const color = typeColors[zone.type];
@@ -1150,55 +1031,55 @@ export default function GardenMapEditorScreen() {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>3. Tools</Text>
           <View style={styles.toolbarRow}>
-            <Pressable style={styles.secondaryButton} onPress={pickPhoto}>
-              <Text style={styles.secondaryButtonText}>Photo</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.secondaryButton, snapToGrid && styles.secondaryButtonActive]}
-              onPress={() => setSnapToGrid((prev) => !prev)}
+            <ToggleSwitch
+              label="Snap"
+              value={snapToGrid}
               disabled={!calibration}
+              onToggle={setSnapToGrid}
+            />
+            <Pressable
+              style={[styles.secondaryButton, (canApplyShape || canCloseShape) && styles.secondaryButtonReady]}
+              onPress={() => {
+                if (presetShape) {
+                  setPresetShape(null);
+                  setShapeDraftMode("points");
+                  return;
+                }
+                closePolygon();
+              }}
+              disabled={!canApplyShape && !canCloseShape}
             >
-              <Text style={[styles.secondaryButtonText, snapToGrid && styles.secondaryButtonTextActive]}>
-                Snap {snapToGrid ? "On" : "Off"}
+              <Text style={[styles.secondaryButtonText, (canApplyShape || canCloseShape) && styles.secondaryButtonTextReady]}>
+                {shapeActionLabel}
               </Text>
             </Pressable>
             <Pressable
-              style={styles.secondaryButton}
-              onPress={() => {
-                setPresetShape(null);
-                setShapeDraftMode("points");
-              }}
-              disabled={!presetShape}
+              style={[styles.secondaryButton, canUndo && styles.secondaryButtonReady]}
+              onPress={handleUndo}
+              disabled={!canUndo}
             >
-              <Text style={styles.secondaryButtonText}>Fix Shape</Text>
+              <Text style={[styles.secondaryButtonText, canUndo && styles.secondaryButtonTextReady]}>Undo</Text>
             </Pressable>
             <Pressable
-              style={styles.secondaryButton}
-              onPress={() => void undoLastChange()}
-              disabled={undoStack.length === 0}
+              style={[styles.secondaryButton, canDeletePoint && styles.secondaryButtonReady]}
+              onPress={deleteSelectedPoint}
+              disabled={!canDeletePoint}
             >
-              <Text style={styles.secondaryButtonText}>Undo Last</Text>
+              <Text style={[styles.secondaryButtonText, canDeletePoint && styles.secondaryButtonTextReady]}>Delete Point</Text>
             </Pressable>
-            <Pressable style={styles.secondaryButton} onPress={undoPoint}>
-              <Text style={styles.secondaryButtonText}>Undo</Text>
-            </Pressable>
-            <Pressable style={styles.secondaryButton} onPress={deleteSelectedPoint}>
-              <Text style={styles.secondaryButtonText}>Delete Point</Text>
-            </Pressable>
-            <Pressable style={styles.secondaryButton} onPress={closePolygon}>
-              <Text style={styles.secondaryButtonText}>Finish Shape</Text>
-            </Pressable>
-            <Pressable style={styles.secondaryButton} onPress={resetDraft}>
-              <Text style={styles.secondaryButtonText}>{editingZoneId ? "Cancel Edit" : "Reset"}</Text>
-            </Pressable>
+            {canCancelEdit && (
+              <Pressable style={[styles.secondaryButton, styles.secondaryButtonReady]} onPress={resetDraft}>
+                <Text style={[styles.secondaryButtonText, styles.secondaryButtonTextReady]}>Cancel Edit</Text>
+              </Pressable>
+            )}
           </View>
           <Text style={styles.infoText}>Twist and zoom in Pan mode for easier drawing alignment.</Text>
           {showGridLayer && calibration && <Text style={styles.infoText}>Grid spacing: 1 meter.</Text>}
           {presetShape && (
             <Text style={styles.infoText}>
               {presetShape.kind === "line"
-                ? "Drag center handle to move and end handle to rotate/lengthen, then tap Fix Shape."
-                : "Drag center handle to move, corner handle to resize, then tap Fix Shape."}
+                ? "Drag center handle to move and end handle to rotate/lengthen, then tap Apply Shape."
+                : "Drag center handle to move, corner handle to resize, then tap Apply Shape."}
             </Text>
           )}
         </View>
@@ -1407,75 +1288,6 @@ function PickerRow(props: {
       </View>
     </View>
   );
-}
-
-async function cropImageToBoundary(
-  uri: string,
-  boundary: Point2D[]
-): Promise<{ uri: string; remappedBoundary: Point2D[]; remapPoint: (point: Point2D) => Point2D }> {
-  if (boundary.length < 3) {
-    return {
-      uri,
-      remappedBoundary: boundary,
-      remapPoint: (point) => point,
-    };
-  }
-
-  const xs = boundary.map((p) => p.x);
-  const ys = boundary.map((p) => p.y);
-
-  const minX = clamp(Math.min(...xs), 0, 1);
-  const maxX = clamp(Math.max(...xs), 0, 1);
-  const minY = clamp(Math.min(...ys), 0, 1);
-  const maxY = clamp(Math.max(...ys), 0, 1);
-
-  const imageSize = await getImageSize(uri);
-  const originX = Math.floor(minX * imageSize.width);
-  const originY = Math.floor(minY * imageSize.height);
-  const width = Math.max(1, Math.floor((maxX - minX) * imageSize.width));
-  const height = Math.max(1, Math.floor((maxY - minY) * imageSize.height));
-
-  const result = await ImageManipulator.manipulateAsync(
-    uri,
-    [{ crop: { originX, originY, width, height } }],
-    { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
-  );
-
-  const remapPoint = (p: Point2D): Point2D => ({
-    x: clamp((p.x - minX) / Math.max(maxX - minX, 1e-6), 0, 1),
-    y: clamp((p.y - minY) / Math.max(maxY - minY, 1e-6), 0, 1),
-  });
-  const remappedBoundary = boundary.map(remapPoint);
-
-  return { uri: result.uri, remappedBoundary, remapPoint };
-}
-
-function getImageSize(uri: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    Image.getSize(
-      uri,
-      (width, height) => resolve({ width, height }),
-      (error) => reject(error)
-    );
-  });
-}
-
-function cloneCalibration(calibration: GardenScaleCalibration): GardenScaleCalibration {
-  return JSON.parse(JSON.stringify(calibration)) as GardenScaleCalibration;
-}
-
-function cloneBed(bed: Bed): Bed {
-  return {
-    ...bed,
-    polygon: bed.polygon.map((point) => ({ ...point })),
-  };
-}
-
-function cloneFeature(feature: GardenFeature): GardenFeature {
-  return {
-    ...feature,
-    polygon: feature.polygon.map((point) => ({ ...point })),
-  };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -1908,6 +1720,52 @@ function polygonPath(points: { x: number; y: number }[], width: number, height: 
   return `${start} ${lines} Z`;
 }
 
+function getBoundaryMeasurementLabels(
+  boundary: Point2D[],
+  width: number,
+  height: number,
+  calibration: { metersPerPixel: number; baseWidth: number; baseHeight: number } | null | undefined
+): Array<{ x: number; y: number; angle: number; label: string }> {
+  if (!calibration || boundary.length < 2 || width <= 0 || height <= 0) return [];
+  const labels: Array<{ x: number; y: number; angle: number; label: string }> = [];
+  const epsilon = 1e-6;
+  const centroid = boundary.reduce(
+    (acc, point) => ({ x: acc.x + point.x / boundary.length, y: acc.y + point.y / boundary.length }),
+    { x: 0, y: 0 }
+  );
+  for (let i = 0; i < boundary.length; i += 1) {
+    const start = boundary[i];
+    const end = boundary[(i + 1) % boundary.length];
+    if (!start || !end) continue;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const pixelLength = Math.hypot(dx * calibration.baseWidth, dy * calibration.baseHeight);
+    const meters = pixelLength * calibration.metersPerPixel;
+    if (!Number.isFinite(meters) || meters < 0.05) continue;
+    const midX = ((start.x + end.x) / 2) * width;
+    const midY = ((start.y + end.y) / 2) * height;
+    const toOutsideX = midX - centroid.x * width;
+    const toOutsideY = midY - centroid.y * height;
+    const outsideLength = Math.hypot(toOutsideX, toOutsideY);
+    const offset = 14;
+    const rawX = outsideLength > epsilon ? midX + (toOutsideX / outsideLength) * offset : midX;
+    const rawY = outsideLength > epsilon ? midY + (toOutsideY / outsideLength) * offset : midY;
+    const edgeMargin = 16;
+    const x = clamp(rawX, edgeMargin, Math.max(edgeMargin, width - edgeMargin));
+    const y = clamp(rawY, edgeMargin, Math.max(edgeMargin, height - edgeMargin));
+    let angle = (Math.atan2(dy * height, dx * width) * 180) / Math.PI;
+    if (angle > 90) angle -= 180;
+    if (angle < -90) angle += 180;
+    labels.push({
+      x,
+      y,
+      angle,
+      label: meters >= 10 ? `${Math.round(meters)}m` : `${meters.toFixed(1)}m`,
+    });
+  }
+  return labels;
+}
+
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#F0F6EE" },
   safeArea: { flex: 1, backgroundColor: "#F0F6EE" },
@@ -1998,6 +1856,8 @@ const styles = StyleSheet.create({
   toolbarRow: { marginTop: 2, flexDirection: "row", flexWrap: "wrap", gap: 8 },
   secondaryButton: { backgroundColor: "#DFEADF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   secondaryButtonText: { color: "#1F3F2B", fontWeight: "600" },
+  secondaryButtonReady: { backgroundColor: "#CDE2D2", borderWidth: 1, borderColor: "#94B9A0" },
+  secondaryButtonTextReady: { color: "#1D4A33", fontWeight: "700" },
   secondaryButtonActive: { backgroundColor: "#245A3E" },
   secondaryButtonTextActive: { color: "#FFFFFF" },
   nameInput: {
@@ -2080,3 +1940,5 @@ const styles = StyleSheet.create({
     borderColor: "#E85D2A",
   },
 });
+
+

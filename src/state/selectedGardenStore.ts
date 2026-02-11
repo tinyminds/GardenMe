@@ -7,6 +7,9 @@ type SelectedGardenState = {
 
 export const useSelectedGardenStore = create<SelectedGardenState>((set) => ({
   selectedGardenId: null,
-  setSelectedGardenId: (gardenId) => set({ selectedGardenId: gardenId }),
+  setSelectedGardenId: (gardenId) =>
+    set((state) => {
+      if (state.selectedGardenId === gardenId) return state;
+      return { selectedGardenId: gardenId };
+    }),
 }));
-
