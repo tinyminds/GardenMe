@@ -268,6 +268,7 @@ export default function GardenSetupScreen() {
       boundaryAreaSqM,
       showBaseImage: true,
       showGridOverlay: false,
+      showBedMeasurements: false,
       orientationDegrees: 0,
     };
 
@@ -317,6 +318,7 @@ export default function GardenSetupScreen() {
       manualWidthM: width,
       showBaseImage: false,
       showGridOverlay: false,
+      showBedMeasurements: false,
       orientationDegrees: 0,
     };
 

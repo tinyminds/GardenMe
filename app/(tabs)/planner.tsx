@@ -58,6 +58,7 @@ export default function PlannerTabScreen() {
   const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
   const [showImage, setShowImage] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
+  const [showBedMeasurements, setShowBedMeasurements] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [previewViewport, setPreviewViewport] = useState({ width: 320, height: 224 });
   const [bedDrafts, setBedDrafts] = useState<Record<string, BedDraft>>({});
@@ -82,10 +83,12 @@ export default function PlannerTabScreen() {
     if (!selectedGarden) return;
     setShowImage(selectedGarden.scaleCalibration?.showBaseImage ?? true);
     setShowGrid(selectedGarden.scaleCalibration?.showGridOverlay ?? false);
+    setShowBedMeasurements(selectedGarden.scaleCalibration?.showBedMeasurements ?? false);
   }, [
     selectedGarden?.id,
     selectedGarden?.scaleCalibration?.showBaseImage,
     selectedGarden?.scaleCalibration?.showGridOverlay,
+    selectedGarden?.scaleCalibration?.showBedMeasurements,
   ]);
 
   const bedsQuery = useQuery({
@@ -219,12 +222,17 @@ export default function PlannerTabScreen() {
     setVerticalOffset(targetY);
   }, [selectedGardenId, zoomedWidth, zoomedHeight, previewPanPadding, maxPreviewOffsetX, maxPreviewOffsetY]);
 
-  const persistPreviewViewSettings = async (nextShowImage: boolean, nextShowGrid: boolean) => {
+  const persistPreviewViewSettings = async (
+    nextShowImage: boolean,
+    nextShowGrid: boolean,
+    nextShowBedMeasurements: boolean
+  ) => {
     if (!selectedGardenId || !selectedGarden?.scaleCalibration) return;
     const nextCalibration = {
       ...selectedGarden.scaleCalibration,
       showBaseImage: nextShowImage,
       showGridOverlay: nextShowGrid,
+      showBedMeasurements: nextShowBedMeasurements,
     };
     await gardenRepository.updateScaleCalibration(selectedGardenId, nextCalibration);
     await queryClient.invalidateQueries({ queryKey: ["gardens"] });
@@ -278,7 +286,7 @@ export default function PlannerTabScreen() {
                 value={showImage}
                 onToggle={(next) => {
                   setShowImage(next);
-                  void persistPreviewViewSettings(next, showGrid);
+                  void persistPreviewViewSettings(next, showGrid, showBedMeasurements);
                 }}
               />
               <ToggleSwitch
@@ -287,7 +295,16 @@ export default function PlannerTabScreen() {
                 disabled={!calibration}
                 onToggle={(next) => {
                   setShowGrid(next);
-                  void persistPreviewViewSettings(showImage, next);
+                  void persistPreviewViewSettings(showImage, next, showBedMeasurements);
+                }}
+              />
+              <ToggleSwitch
+                label="Bed Sizes"
+                value={showBedMeasurements}
+                disabled={!calibration}
+                onToggle={(next) => {
+                  setShowBedMeasurements(next);
+                  void persistPreviewViewSettings(showImage, showGrid, next);
                 }}
               />
               <View style={styles.zoomRow}>
@@ -418,6 +435,9 @@ export default function PlannerTabScreen() {
                           const label = zone.source === "bed"
                             ? getPolygonLabelPlacement(zone.polygon, zoomedWidth, zoomedHeight)
                             : null;
+                          const bedMeasurementLabels = showBedMeasurements && zone.source === "bed"
+                            ? getBedMeasurementLabels(zone.polygon, zoomedWidth, zoomedHeight, calibration)
+                            : [];
                           const stripeSpec = getStripeSpecForType(zone.type);
                           const hatchLines = stripeSpec
                             ? buildHatchLines(zoomedWidth, zoomedHeight, stripeSpec.spacingPx, stripeSpec.angleDeg)
@@ -444,6 +464,21 @@ export default function PlannerTabScreen() {
                                   strokeWidth={1}
                                   opacity={stripeSpec.opacity}
                                 />
+                              ))}
+                              {bedMeasurementLabels.map((measurement, index) => (
+                                <SvgText
+                                  key={`bed-measure-${zone.id}-${index.toString()}`}
+                                  x={measurement.x}
+                                  y={measurement.y}
+                                  textAnchor="middle"
+                                  alignmentBaseline="middle"
+                                  fontSize={11}
+                                  fontWeight="700"
+                                  fill="#1B3D2B"
+                                  transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
+                                >
+                                  {measurement.label}
+                                </SvgText>
                               ))}
                               {label && (
                                 <SvgText
@@ -766,6 +801,101 @@ function getBoundaryMeasurementLabels(
     const rawX = outsideLength > epsilon ? midX + (toOutsideX / outsideLength) * offset : midX;
     const rawY = outsideLength > epsilon ? midY + (toOutsideY / outsideLength) * offset : midY;
     const edgeMargin = 16;
+    const x = clamp(rawX, edgeMargin, Math.max(edgeMargin, width - edgeMargin));
+    const y = clamp(rawY, edgeMargin, Math.max(edgeMargin, height - edgeMargin));
+    let angle = (Math.atan2(dy * height, dx * width) * 180) / Math.PI;
+    if (angle > 90) angle -= 180;
+    if (angle < -90) angle += 180;
+    labels.push({
+      x,
+      y,
+      angle,
+      label: meters >= 10 ? `${Math.round(meters)}m` : `${meters.toFixed(1)}m`,
+    });
+  }
+  return labels;
+}
+
+function getBedMeasurementLabels(
+  polygon: Point2D[],
+  width: number,
+  height: number,
+  calibration: { metersPerPixel: number; baseWidth: number; baseHeight: number } | null | undefined
+): Array<{ x: number; y: number; angle: number; label: string }> {
+  if (!calibration || polygon.length < 2 || width <= 0 || height <= 0) return [];
+  if (isLikelyEllipsePolygon(polygon)) return [];
+  if (isRectangleLikePolygon(polygon)) {
+    return getPolygonEdgeMeasurementLabels(polygon, width, height, calibration, [0, 1]);
+  }
+  return getPolygonEdgeMeasurementLabels(polygon, width, height, calibration);
+}
+
+function isRectangleLikePolygon(polygon: Point2D[]): boolean {
+  if (polygon.length !== 4) return false;
+  const vectors = polygon.map((point, index) => {
+    const next = polygon[(index + 1) % polygon.length]!;
+    return { x: next.x - point.x, y: next.y - point.y };
+  });
+  const lengths = vectors.map((vector) => Math.hypot(vector.x, vector.y));
+  if (lengths.some((length) => length < 1e-5)) return false;
+  const dot0 = Math.abs(vectors[0]!.x * vectors[1]!.x + vectors[0]!.y * vectors[1]!.y) / (lengths[0]! * lengths[1]!);
+  const dot1 = Math.abs(vectors[1]!.x * vectors[2]!.x + vectors[1]!.y * vectors[2]!.y) / (lengths[1]! * lengths[2]!);
+  return dot0 < 0.2 && dot1 < 0.2;
+}
+
+function isLikelyEllipsePolygon(polygon: Point2D[]): boolean {
+  if (polygon.length < 8) return false;
+  const xs = polygon.map((point) => point.x);
+  const ys = polygon.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const halfW = Math.max((maxX - minX) / 2, 1e-6);
+  const halfH = Math.max((maxY - minY) / 2, 1e-6);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const radii = polygon.map((point) =>
+    Math.hypot((point.x - centerX) / halfW, (point.y - centerY) / halfH)
+  );
+  const mean = radii.reduce((sum, value) => sum + value, 0) / radii.length;
+  const variance = radii.reduce((sum, value) => sum + (value - mean) * (value - mean), 0) / radii.length;
+  return Math.sqrt(variance) < 0.22;
+}
+
+function getPolygonEdgeMeasurementLabels(
+  polygon: Point2D[],
+  width: number,
+  height: number,
+  calibration: { metersPerPixel: number; baseWidth: number; baseHeight: number },
+  edgeIndexes?: number[]
+): Array<{ x: number; y: number; angle: number; label: string }> {
+  if (polygon.length < 2) return [];
+  const labels: Array<{ x: number; y: number; angle: number; label: string }> = [];
+  const indexes = edgeIndexes ?? polygon.map((_point, index) => index);
+  const centroid = polygon.reduce(
+    (acc, point) => ({ x: acc.x + point.x / polygon.length, y: acc.y + point.y / polygon.length }),
+    { x: 0, y: 0 }
+  );
+  const epsilon = 1e-6;
+  for (const index of indexes) {
+    const start = polygon[index];
+    const end = polygon[(index + 1) % polygon.length];
+    if (!start || !end) continue;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const pixelLength = Math.hypot(dx * calibration.baseWidth, dy * calibration.baseHeight);
+    const meters = pixelLength * calibration.metersPerPixel;
+    if (!Number.isFinite(meters) || meters < 0.05) continue;
+    const midX = ((start.x + end.x) / 2) * width;
+    const midY = ((start.y + end.y) / 2) * height;
+    const toOutsideX = midX - centroid.x * width;
+    const toOutsideY = midY - centroid.y * height;
+    const outsideLength = Math.hypot(toOutsideX, toOutsideY);
+    const offset = 12;
+    const rawX = outsideLength > epsilon ? midX + (toOutsideX / outsideLength) * offset : midX;
+    const rawY = outsideLength > epsilon ? midY + (toOutsideY / outsideLength) * offset : midY;
+    const edgeMargin = 14;
     const x = clamp(rawX, edgeMargin, Math.max(edgeMargin, width - edgeMargin));
     const y = clamp(rawY, edgeMargin, Math.max(edgeMargin, height - edgeMargin));
     let angle = (Math.atan2(dy * height, dx * width) * 180) / Math.PI;
