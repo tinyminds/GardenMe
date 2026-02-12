@@ -22,6 +22,7 @@ export interface GardenCropWishlistItem {
   isPerennial: boolean;
   varietyName?: string;
   supportNeeded: boolean;
+  quantity: number;
   notes?: string;
   createdAt: string;
   updatedAt: string;

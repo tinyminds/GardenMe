@@ -22,6 +22,7 @@ type CropEntryRow = {
   entry_is_perennial: number;
   entry_variety_name: string | null;
   entry_support_needed: number;
+  entry_quantity: number;
   notes: string | null;
   entry_created_at: string;
   entry_updated_at: string;
@@ -73,6 +74,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
          e.is_perennial AS entry_is_perennial,
          e.variety_name AS entry_variety_name,
          e.support_needed AS entry_support_needed,
+         e.quantity AS entry_quantity,
          e.notes AS notes,
          e.created_at AS entry_created_at,
          e.updated_at AS entry_updated_at,
@@ -100,6 +102,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
       status: row.entry_status,
       isPerennial: row.entry_is_perennial === 1,
       supportNeeded: row.entry_support_needed === 1,
+      quantity: row.entry_quantity,
       ...(row.entry_variety_name ? { varietyName: row.entry_variety_name } : {}),
       ...(row.entry_bed_id ? { bedId: row.entry_bed_id } : {}),
       ...(row.entry_bed_name ? { bedName: row.entry_bed_name } : {}),
@@ -162,10 +165,11 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
   async add(input: AddGardenCropItemInput): Promise<void> {
     const now = new Date().toISOString();
     const varietyName = input.varietyName?.trim() || null;
+    const quantity = Math.max(1, Math.floor(input.quantity ?? 1));
     await getDatabase().runAsync(
       `INSERT INTO garden_crop_entries (
-         id, garden_id, plant_catalog_id, status, bed_id, is_perennial, variety_name, support_needed, notes, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+         id, garden_id, plant_catalog_id, status, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
       [
         makeId("crop"),
         input.gardenId,
@@ -175,6 +179,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
         input.isPerennial ? 1 : 0,
         varietyName,
         input.supportNeeded ? 1 : 0,
+        quantity,
         now,
         now,
       ]
@@ -183,9 +188,10 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
 
   async update(input: UpdateGardenCropItemInput): Promise<void> {
     const varietyName = input.varietyName?.trim() || null;
+    const quantity = input.quantity === undefined ? null : Math.max(1, Math.floor(input.quantity));
     await getDatabase().runAsync(
       `UPDATE garden_crop_entries
-       SET status = ?, bed_id = ?, is_perennial = ?, variety_name = ?, support_needed = ?, updated_at = ?
+       SET status = ?, bed_id = ?, is_perennial = ?, variety_name = ?, support_needed = ?, quantity = COALESCE(?, quantity), updated_at = ?
        WHERE id = ?`,
       [
         input.status,
@@ -193,6 +199,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
         input.status === "already_growing" && input.isPerennial ? 1 : 0,
         varietyName,
         input.supportNeeded ? 1 : 0,
+        quantity,
         new Date().toISOString(),
         input.id,
       ]

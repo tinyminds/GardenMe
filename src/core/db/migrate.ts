@@ -319,6 +319,13 @@ const migrations: Migration[] = [
         ('comp_024', 'sunflower', 'potato', 'avoid', 'Can be listed as a problematic pairing in some guides.', 'https://en.wikipedia.org/wiki/List_of_companion_plants', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
     `,
   },
+  {
+    version: "0012_crop_entry_quantity",
+    sql: `
+      ALTER TABLE garden_crop_entries ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;
+      CREATE INDEX IF NOT EXISTS idx_crop_entries_quantity ON garden_crop_entries(quantity);
+    `,
+  },
 ];
 
 export async function runMigrations(db: AppDatabase): Promise<void> {
@@ -352,6 +359,9 @@ export async function runMigrations(db: AppDatabase): Promise<void> {
       } else if (migration.version === "0007_crop_entry_variety_support") {
         await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN variety_name TEXT;").catch(() => undefined);
         await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN support_needed INTEGER NOT NULL DEFAULT 0;").catch(() => undefined);
+      } else if (migration.version === "0012_crop_entry_quantity") {
+        await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;").catch(() => undefined);
+        await db.execAsync("CREATE INDEX IF NOT EXISTS idx_crop_entries_quantity ON garden_crop_entries(quantity);").catch(() => undefined);
       } else if (
         migration.version === "0008_expand_plant_catalog_sources" ||
         migration.version === "0009_restrict_plant_catalog_sources"

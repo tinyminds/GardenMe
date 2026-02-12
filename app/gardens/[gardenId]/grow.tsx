@@ -34,6 +34,7 @@ type CropEntryDraft = {
   bedId: string | null;
   varietyName: string;
   supportNeeded: boolean;
+  quantity: number;
 };
 
 export default function GardenGrowListScreen() {
@@ -49,6 +50,15 @@ export default function GardenGrowListScreen() {
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
   const [expandedDescriptions, setExpandedDescriptions] = useState<Record<string, boolean>>({});
   const [addError, setAddError] = useState<string | null>(null);
+  const listNameCollator = useMemo(
+    () =>
+      new Intl.Collator(undefined, {
+        sensitivity: "base",
+        numeric: true,
+        ignorePunctuation: true,
+      }),
+    []
+  );
 
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedSearch(search.trim()), 280);
@@ -280,6 +290,7 @@ export default function GardenGrowListScreen() {
           plantCatalogId: item.plantCatalogId,
           varietyName: item.varietyName?.trim(),
           supportNeeded: item.supportNeeded,
+          quantity: item.quantity,
         }));
 
       let imported = 0;
@@ -297,6 +308,7 @@ export default function GardenGrowListScreen() {
           status: "wanted",
           ...(candidate.varietyName ? { varietyName: candidate.varietyName } : {}),
           ...(candidate.supportNeeded ? { supportNeeded: true } : {}),
+          quantity: Math.max(1, candidate.quantity || 1),
           isPerennial: false,
         });
 
@@ -339,6 +351,7 @@ export default function GardenGrowListScreen() {
         ...(entry.isPerennial ? { isPerennial: true } : { isPerennial: false }),
         ...(entry.varietyName ? { varietyName: entry.varietyName } : {}),
         ...(entry.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
+        quantity: 1,
       });
     },
     onSuccess: async () => {
@@ -354,6 +367,7 @@ export default function GardenGrowListScreen() {
         bedId: item.bedId ?? null,
         varietyName: item.varietyName ?? "",
         supportNeeded: item.supportNeeded,
+        quantity: Math.max(1, item.quantity ?? 1),
       };
     }
     setEntryDrafts((prev) => (areEntryDraftsEqual(prev, next) ? prev : next));
@@ -369,6 +383,7 @@ export default function GardenGrowListScreen() {
         ...(draft.status === "already_growing" && draft.bedId ? { bedId: draft.bedId } : {}),
         ...(draft.varietyName.trim() ? { varietyName: draft.varietyName.trim() } : { varietyName: "" }),
         ...(draft.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
+        quantity: Math.max(1, Math.floor(draft.quantity || 1)),
       });
     },
     onSuccess: async () => {
@@ -393,6 +408,36 @@ export default function GardenGrowListScreen() {
     return lookup;
   }, [bedsQuery.data]);
 
+  const splitOneMutation = useMutation({
+    mutationFn: async (entry: GardenCropWishlistItemView) => {
+      if (!gardenId) throw new Error("Missing garden id");
+      if ((entry.quantity ?? 1) <= 1) return;
+
+      await wishlistRepository.update({
+        id: entry.id,
+        status: entry.status,
+        ...(entry.status === "already_growing" && entry.bedId ? { bedId: entry.bedId } : {}),
+        ...(entry.varietyName ? { varietyName: entry.varietyName } : { varietyName: "" }),
+        ...(entry.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
+        quantity: Math.max(1, (entry.quantity ?? 1) - 1),
+      });
+
+      await wishlistRepository.add({
+        gardenId,
+        plantCatalogId: entry.plantCatalogId,
+        status: entry.status,
+        ...(entry.status === "already_growing" && entry.bedId ? { bedId: entry.bedId } : {}),
+        ...(entry.isPerennial ? { isPerennial: true } : { isPerennial: false }),
+        ...(entry.varietyName ? { varietyName: entry.varietyName } : {}),
+        ...(entry.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
+        quantity: 1,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+    },
+  });
+
   const visibleWishlistItems = useMemo(() => {
     const searchTerm = listSearch.trim().toLowerCase();
     const list = [...(wishlistQuery.data ?? [])].filter((item) => {
@@ -411,13 +456,13 @@ export default function GardenGrowListScreen() {
     });
 
     list.sort((a, b) => {
-      const nameSort = a.plant.commonName.localeCompare(b.plant.commonName);
+      const nameSort = listNameCollator.compare(a.plant.commonName.trim(), b.plant.commonName.trim());
       if (nameSort !== 0) return listSortDirection === "asc" ? nameSort : -nameSort;
-      const varietySort = (a.varietyName ?? "").localeCompare(b.varietyName ?? "");
+      const varietySort = listNameCollator.compare((a.varietyName ?? "").trim(), (b.varietyName ?? "").trim());
       return listSortDirection === "asc" ? varietySort : -varietySort;
     });
     return list;
-  }, [wishlistQuery.data, listSearch, listSortDirection]);
+  }, [listNameCollator, wishlistQuery.data, listSearch, listSortDirection]);
 
   return (
     <View style={styles.page}>
@@ -594,8 +639,47 @@ export default function GardenGrowListScreen() {
                   {item.bedName ? ` - ${item.bedName}` : ""}
                   {isPerennialFromBed ? " - Perennial" : ""}
                   {(entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded) ? " - Needs support" : ""}
+                  {` - Qty ${Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}`}
                 </Text>
                 <View style={styles.inlineControls}>
+                  <View style={styles.qtyRow}>
+                    <Text style={styles.qtyLabel}>Quantity</Text>
+                    <Pressable
+                      style={styles.qtyButton}
+                      onPress={() =>
+                        setEntryDrafts((prev) => ({
+                          ...prev,
+                          [item.id]: {
+                            status: prev[item.id]?.status ?? item.status,
+                            bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
+                            varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
+                            supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                            quantity: Math.max(1, (prev[item.id]?.quantity ?? item.quantity ?? 1) - 1),
+                          },
+                        }))
+                      }
+                    >
+                      <Text style={styles.qtyButtonText}>-</Text>
+                    </Pressable>
+                    <Text style={styles.qtyValue}>{Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}</Text>
+                    <Pressable
+                      style={styles.qtyButton}
+                      onPress={() =>
+                        setEntryDrafts((prev) => ({
+                          ...prev,
+                          [item.id]: {
+                            status: prev[item.id]?.status ?? item.status,
+                            bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
+                            varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
+                            supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                            quantity: Math.max(1, (prev[item.id]?.quantity ?? item.quantity ?? 1) + 1),
+                          },
+                        }))
+                      }
+                    >
+                      <Text style={styles.qtyButtonText}>+</Text>
+                    </Pressable>
+                  </View>
                   <TextInput
                     value={entryDrafts[item.id]?.varietyName ?? item.varietyName ?? ""}
                     onChangeText={(value) =>
@@ -606,6 +690,7 @@ export default function GardenGrowListScreen() {
                           bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
                           varietyName: value,
                           supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                          quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
                         },
                       }))
                     }
@@ -624,6 +709,7 @@ export default function GardenGrowListScreen() {
                           bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
                           varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
                           supportNeeded: nextValue,
+                          quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
                         },
                       }))
                     }
@@ -639,6 +725,7 @@ export default function GardenGrowListScreen() {
                           bedId: isGrowing ? (prev[item.id]?.bedId ?? item.bedId ?? null) : null,
                           varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
                           supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                          quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
                         },
                       }))
                     }
@@ -660,6 +747,7 @@ export default function GardenGrowListScreen() {
                                     bedId: selected ? null : bed.id,
                                     varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
                                     supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                                    quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
                                   },
                                 }))
                               }
@@ -683,6 +771,13 @@ export default function GardenGrowListScreen() {
                   onPress={() => cloneEntryMutation.mutate(item)}
                 >
                   <Text style={styles.cloneInlineButtonText}>Clone</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.cloneInlineButton}
+                  disabled={splitOneMutation.isPending || (item.quantity ?? 1) <= 1}
+                  onPress={() => splitOneMutation.mutate(item)}
+                >
+                  <Text style={styles.cloneInlineButtonText}>Split 1</Text>
                 </Pressable>
                 <Pressable
                   style={styles.saveInlineButton}
@@ -723,7 +818,8 @@ function areEntryDraftsEqual(
       left.status !== right.status ||
       left.bedId !== right.bedId ||
       left.varietyName !== right.varietyName ||
-      left.supportNeeded !== right.supportNeeded
+      left.supportNeeded !== right.supportNeeded ||
+      left.quantity !== right.quantity
     ) {
       return false;
     }
@@ -992,6 +1088,20 @@ const styles = StyleSheet.create({
   },
   wishMeta: { color: "#5A7363", fontSize: 12 },
   inlineControls: { marginTop: 6, gap: 6 },
+  qtyRow: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start" },
+  qtyLabel: { color: "#355847", fontWeight: "700", fontSize: 12 },
+  qtyButton: {
+    backgroundColor: "#E7EFE5",
+    borderColor: "#BDD6C3",
+    borderWidth: 1,
+    borderRadius: 999,
+    width: 26,
+    height: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  qtyButtonText: { color: "#2A5E40", fontWeight: "800", fontSize: 14 },
+  qtyValue: { minWidth: 20, textAlign: "center", color: "#20402F", fontWeight: "700" },
   inlineInput: {
     borderWidth: 1,
     borderColor: "#D0DFCD",

@@ -12,6 +12,7 @@ export interface AddGardenCropItemInput {
   isPerennial?: boolean;
   varietyName?: string;
   supportNeeded?: boolean;
+  quantity?: number;
 }
 
 export interface UpdateGardenCropItemInput {
@@ -21,6 +22,7 @@ export interface UpdateGardenCropItemInput {
   isPerennial?: boolean;
   varietyName?: string;
   supportNeeded?: boolean;
+  quantity?: number;
 }
 
 export interface GardenCropWishlistRepository {
