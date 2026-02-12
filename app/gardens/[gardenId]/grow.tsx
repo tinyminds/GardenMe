@@ -38,6 +38,41 @@ type CropEntryDraft = {
   quantity: number;
 };
 
+type PlantDataDraft = {
+  category: PlantCategory;
+  sunRequirements: string;
+  rowSpacing: string;
+  spread: string;
+  height: string;
+};
+
+type BulkImportProgress = {
+  current: number;
+  total: number;
+  currentName?: string;
+};
+
+type BulkImportSummary = {
+  total: number;
+  added: number;
+  skipped: number;
+  unmatched: number;
+  unmatchedNames: string[];
+};
+
+type PlantCategory = "unspecified" | "tree" | "shrub" | "herb" | "vegetable" | "fruit" | "flower" | "climber";
+
+const PLANT_CATEGORY_OPTIONS: Array<{ value: PlantCategory; label: string }> = [
+  { value: "unspecified", label: "Not chosen" },
+  { value: "tree", label: "Tree" },
+  { value: "shrub", label: "Shrub" },
+  { value: "herb", label: "Herb" },
+  { value: "vegetable", label: "Vegetable" },
+  { value: "fruit", label: "Fruit" },
+  { value: "flower", label: "Flower" },
+  { value: "climber", label: "Climber" },
+];
+
 export default function GardenGrowListScreen() {
   const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
@@ -51,6 +86,14 @@ export default function GardenGrowListScreen() {
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
   const [expandedDescriptions, setExpandedDescriptions] = useState<Record<string, boolean>>({});
+  const [expandedPlantData, setExpandedPlantData] = useState<Record<string, boolean>>({});
+  const [expandedWishlistRows, setExpandedWishlistRows] = useState<Record<string, boolean>>({});
+  const [plantDataDrafts, setPlantDataDrafts] = useState<Record<string, PlantDataDraft>>({});
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkImportText, setBulkImportText] = useState("");
+  const [bulkImportProgress, setBulkImportProgress] = useState<BulkImportProgress | null>(null);
+  const [bulkImportMessage, setBulkImportMessage] = useState<string | null>(null);
+  const [bulkImportUnmatchedNames, setBulkImportUnmatchedNames] = useState<string[]>([]);
   const [addError, setAddError] = useState<string | null>(null);
   const listNameCollator = useMemo(
     () =>
@@ -215,6 +258,44 @@ export default function GardenGrowListScreen() {
       let plantCatalogId = payload.suggestion?.plantCatalogId;
       const suggestion = payload.suggestion;
 
+      if (suggestion?.source === "growstuff") {
+        const resolvedIdentifier = await resolveGrowstuffIdentifier(suggestion);
+        if (resolvedIdentifier) {
+          let canonical = await plantCatalogRepository.upsert({
+            source: "growstuff",
+            externalId: resolvedIdentifier,
+            commonName: suggestion.commonName,
+            ...(suggestion.scientificName ? { scientificName: suggestion.scientificName } : {}),
+            ...(suggestion.familyName ? { familyName: suggestion.familyName } : {}),
+            ...(suggestion.imageUrl ? { imageUrl: suggestion.imageUrl } : {}),
+            ...(suggestion.metaJson ? { metaJson: suggestion.metaJson } : {}),
+          });
+
+          try {
+            const details = await fetchGrowstuffCropDetails(resolvedIdentifier);
+            if (details) {
+              const resolvedExternalId = details.id ? String(details.id) : resolvedIdentifier;
+              const preferredScientificName = pickScientificName(details) || canonical.scientificName;
+              canonical = await plantCatalogRepository.upsert({
+                source: "growstuff",
+                externalId: resolvedExternalId,
+                commonName: details.name?.trim() || canonical.commonName,
+                ...(preferredScientificName ? { scientificName: preferredScientificName } : {}),
+                ...(canonical.familyName ? { familyName: canonical.familyName } : {}),
+                ...(details.thumbnail_url?.trim() || canonical.imageUrl
+                  ? { imageUrl: details.thumbnail_url?.trim() || canonical.imageUrl }
+                  : {}),
+                metaJson: buildGrowstuffMetaJson(canonical.metaJson, details),
+              });
+            }
+          } catch {
+            // Keep canonical row even when details fetch fails.
+          }
+
+          plantCatalogId = canonical.id;
+        }
+      }
+
       if (!plantCatalogId) {
         const manualName = payload.manualName?.trim();
         if (!manualName) throw new Error("Missing plant name");
@@ -230,31 +311,6 @@ export default function GardenGrowListScreen() {
         plantCatalogId,
         status: "wanted",
       });
-
-      // Enrich Growstuff catalog metadata in the background so tap-to-add stays instant.
-      if (suggestion?.source === "growstuff" && suggestion.externalId) {
-        const externalId = suggestion.externalId;
-        void (async () => {
-          try {
-            const details = await fetchGrowstuffCropDetails(externalId);
-            if (!details) return;
-            const preferredScientificName = pickScientificName(details) || suggestion.scientificName;
-            await plantCatalogRepository.upsert({
-              source: "growstuff",
-              externalId,
-              commonName: details.name?.trim() || suggestion.commonName,
-              ...(preferredScientificName ? { scientificName: preferredScientificName } : {}),
-              ...(suggestion.familyName ? { familyName: suggestion.familyName } : {}),
-              ...(details.thumbnail_url?.trim() || suggestion.imageUrl
-                ? { imageUrl: details.thumbnail_url?.trim() || suggestion.imageUrl }
-                : {}),
-              metaJson: buildGrowstuffMetaJson(suggestion.metaJson, details),
-            });
-          } catch {
-            // Ignore enrich failures; entry is already added.
-          }
-        })();
-      }
     },
     onSuccess: async () => {
       setAddError(null);
@@ -397,6 +453,129 @@ export default function GardenGrowListScreen() {
     },
   });
 
+  const bulkImportMutation = useMutation({
+    onMutate: () => {
+      setAddError(null);
+      setBulkImportMessage(null);
+      setBulkImportUnmatchedNames([]);
+      setBulkImportProgress(null);
+    },
+    mutationFn: async (): Promise<BulkImportSummary> => {
+      if (!gardenId) throw new Error("Missing garden id");
+      const names = parseBulkPlantNames(bulkImportText);
+      if (names.length === 0) return { total: 0, added: 0, skipped: 0, unmatched: 0, unmatchedNames: [] };
+
+      const existing = await wishlistRepository.listByGarden(gardenId);
+      const existingPlantIds = new Set(existing.map((item) => item.plantCatalogId));
+
+      let added = 0;
+      let skipped = 0;
+      let unmatched = 0;
+      const unmatchedNames: string[] = [];
+
+      for (let index = 0; index < names.length; index += 1) {
+        const name = names[index]!;
+        setBulkImportProgress({ current: index + 1, total: names.length, currentName: name });
+
+        const matched = await findBestPlantMatchForBulk(name, plantCatalogRepository);
+        if (!matched) {
+          unmatched += 1;
+          unmatchedNames.push(name);
+          continue;
+        }
+
+        if (existingPlantIds.has(matched.id)) {
+          skipped += 1;
+          continue;
+        }
+
+        try {
+          await wishlistRepository.add({
+            gardenId,
+            plantCatalogId: matched.id,
+            status: "wanted",
+          });
+          if (matched.source === "growstuff" && matched.externalId) {
+            try {
+              const details = await fetchGrowstuffCropDetails(matched.externalId);
+              if (details) {
+                const preferredScientificName = pickScientificName(details) || matched.scientificName;
+                await plantCatalogRepository.upsert({
+                  source: "growstuff",
+                  externalId: matched.externalId,
+                  commonName: details.name?.trim() || matched.commonName,
+                  ...(preferredScientificName ? { scientificName: preferredScientificName } : {}),
+                  ...(matched.familyName ? { familyName: matched.familyName } : {}),
+                  ...(details.thumbnail_url?.trim() || matched.imageUrl
+                    ? { imageUrl: details.thumbnail_url?.trim() || matched.imageUrl }
+                    : {}),
+                  metaJson: buildGrowstuffMetaJson(matched.metaJson, details),
+                });
+              }
+            } catch {
+              // Keep added plant even if detail enrichment fails.
+            }
+          }
+          existingPlantIds.add(matched.id);
+          added += 1;
+        } catch {
+          skipped += 1;
+        }
+
+        if (index < names.length - 1) {
+          await waitMs(140);
+        }
+      }
+
+      return { total: names.length, added, skipped, unmatched, unmatchedNames };
+    },
+    onSuccess: async (summary) => {
+      if (summary.total === 0) {
+        setBulkImportMessage("No valid plant names found in that text.");
+      } else {
+        setBulkImportMessage(
+          `Bulk import done: added ${summary.added}, skipped ${summary.skipped}, unmatched ${summary.unmatched} (total ${summary.total}).`
+        );
+      }
+      setBulkImportUnmatchedNames(summary.unmatchedNames);
+      setBulkImportProgress(null);
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+    },
+    onError: () => {
+      setBulkImportProgress(null);
+      setBulkImportUnmatchedNames([]);
+      setBulkImportMessage("Bulk import failed. Try again.");
+    },
+  });
+
+  useEffect(() => {
+    const next: Record<string, PlantDataDraft> = {};
+    for (const item of wishlistQuery.data ?? []) {
+      next[item.id] = getPlantDataDraft(item.plant.metaJson);
+    }
+    setPlantDataDrafts((prev) => (arePlantDataDraftsEqual(prev, next) ? prev : next));
+  }, [wishlistQuery.data]);
+
+  const updatePlantDataMutation = useMutation({
+    mutationFn: async (item: GardenCropWishlistItemView) => {
+      const draft = plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson);
+      const nextMetaJson = mergePlantDataMetaJson(item.plant.metaJson, draft);
+      await plantCatalogRepository.upsert({
+        source: item.plant.source,
+        ...(item.plant.externalId ? { externalId: item.plant.externalId } : {}),
+        commonName: item.plant.commonName,
+        ...(item.plant.scientificName ? { scientificName: item.plant.scientificName } : {}),
+        ...(item.plant.familyName ? { familyName: item.plant.familyName } : {}),
+        ...(item.plant.imageUrl ? { imageUrl: item.plant.imageUrl } : {}),
+        metaJson: nextMetaJson,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+    },
+  });
+
   const perennialLookupByBedId = useMemo(() => {
     const lookup = new Map<string, Set<string>>();
     for (const bed of bedsQuery.data ?? []) {
@@ -536,6 +715,71 @@ export default function GardenGrowListScreen() {
               <Text style={[styles.primaryButtonText, { color: search.trim() ? theme.primaryActionText : theme.disabledActionText }]}>Add Typed Plant</Text>
             </Pressable>
           </View>
+          <View style={styles.addRow}>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+              disabled={bulkImportMutation.isPending}
+              onPress={() => setBulkImportOpen((value) => !value)}
+            >
+              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>
+                {bulkImportOpen ? "Hide Bulk Import" : "Bulk Import"}
+              </Text>
+            </Pressable>
+          </View>
+          {bulkImportOpen && (
+            <View style={styles.importSection}>
+              <Text style={[styles.helper, { color: theme.textMuted }]}>Paste comma/newline/semicolon separated plant names.</Text>
+              <TextInput
+                value={bulkImportText}
+                onChangeText={setBulkImportText}
+                placeholder={"e.g. tomato, basil\nquince\naubergine"}
+                style={[styles.bulkInput, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
+                multiline
+                textAlignVertical="top"
+                editable={!bulkImportMutation.isPending}
+              />
+              <View style={styles.addRow}>
+                <Pressable
+                  style={[
+                    styles.primaryButton,
+                    { backgroundColor: bulkImportText.trim() ? theme.primaryActionBackground : theme.disabledActionBackground },
+                    !bulkImportText.trim() && styles.buttonDisabled,
+                  ]}
+                  disabled={!bulkImportText.trim() || bulkImportMutation.isPending}
+                  onPress={() => bulkImportMutation.mutate()}
+                >
+                  <Text style={[styles.primaryButtonText, { color: bulkImportText.trim() ? theme.primaryActionText : theme.disabledActionText }]}>
+                    {bulkImportMutation.isPending ? "Importing..." : "Run Bulk Import"}
+                  </Text>
+                </Pressable>
+              </View>
+              {bulkImportProgress && (
+                <Text style={[styles.helper, { color: theme.textMuted }]}>
+                  {`Processing ${bulkImportProgress.current}/${bulkImportProgress.total}${bulkImportProgress.currentName ? `: ${bulkImportProgress.currentName}` : ""}`}
+                </Text>
+              )}
+              {bulkImportMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{bulkImportMessage}</Text>}
+              {bulkImportUnmatchedNames.length > 0 && (
+                <View style={styles.unmatchedSection}>
+                  <Text style={[styles.configLabel, { color: theme.textPrimary }]}>Unmatched (tap to put in search)</Text>
+                  <View style={styles.configChips}>
+                    {bulkImportUnmatchedNames.map((name) => (
+                      <Pressable
+                        key={`unmatched-${name}`}
+                        style={[styles.configChip, { backgroundColor: theme.secondaryActionBackground }]}
+                        onPress={() => {
+                          setSearch(name);
+                          setBulkImportOpen(false);
+                        }}
+                      >
+                        <Text style={[styles.configChipText, { color: theme.secondaryActionText }]}>{name}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
           {addError && <Text style={[styles.errorText, { color: theme.dangerActionBackground }]}>{addError}</Text>}
         </View>
 
@@ -612,6 +856,29 @@ export default function GardenGrowListScreen() {
           )}
           {visibleWishlistItems.map((item) => (
             <View key={item.id} style={[styles.wishRow, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground }]}>
+              <Pressable
+                style={[styles.compactHeader, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
+                onPress={() =>
+                  setExpandedWishlistRows((prev) => ({
+                    ...prev,
+                    [item.id]: !Boolean(prev[item.id]),
+                  }))
+                }
+              >
+                <View style={styles.compactHeaderMain}>
+                  <Text style={[styles.wishName, { color: theme.textPrimary }]}>{item.plant.commonName}</Text>
+                  <Text style={[styles.compactHeaderMeta, { color: theme.textMuted }]}>
+                    {(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"}
+                    {item.bedName ? ` - ${item.bedName}` : ""}
+                    {` - Qty ${Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}`}
+                  </Text>
+                </View>
+                <Text style={[styles.compactHeaderCaret, { color: theme.textMuted }]}>
+                  {Boolean(expandedWishlistRows[item.id]) ? "v" : ">"}
+                </Text>
+              </Pressable>
+              {Boolean(expandedWishlistRows[item.id]) && (
+              <>
               <View style={styles.wishMain}>
                 {(() => {
                   const normalizedName = item.plant.commonName.trim().toLowerCase();
@@ -645,6 +912,154 @@ export default function GardenGrowListScreen() {
                 {item.varietyName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Variety: {item.varietyName}</Text>}
                 {item.plant.scientificName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{item.plant.scientificName}</Text>}
                 {item.plant.familyName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Family: {item.plant.familyName}</Text>}
+                {(() => {
+                  const category = plantDataDrafts[item.id]?.category ?? getPlantDataDraft(item.plant.metaJson).category;
+                  if (category === "unspecified") return null;
+                  const label = PLANT_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ?? category;
+                  return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Category: {label}</Text>;
+                })()}
+                {(() => {
+                  const isPlantDataExpanded = Boolean(expandedPlantData[item.id]);
+                  const plantDataDraft = plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson);
+                  const missingLabels = getMissingPlantDataLabels(plantDataDraft);
+                  return (
+                    <>
+                      <Pressable
+                        style={styles.descriptionToggle}
+                        onPress={() =>
+                          setExpandedPlantData((prev) => ({
+                            ...prev,
+                            [item.id]: !Boolean(prev[item.id]),
+                          }))
+                        }
+                      >
+                        <Text style={[styles.descriptionToggleText, { color: theme.secondaryActionText }]}>
+                          {isPlantDataExpanded ? "v Plant data" : "> Plant data"}
+                        </Text>
+                      </Pressable>
+                      {!isPlantDataExpanded && (
+                        <Text style={[styles.wishMeta, { color: theme.textMuted }]}>
+                          {missingLabels.length > 0 ? `Missing: ${missingLabels.join(", ")}` : "Data complete"}
+                        </Text>
+                      )}
+                      {isPlantDataExpanded && (
+                        <View style={[styles.dataPanel, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
+                          <View style={styles.dataField}>
+                            <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Category</Text>
+                            <View style={styles.configChips}>
+                              {PLANT_CATEGORY_OPTIONS.map((option) => {
+                                const selected = plantDataDraft.category === option.value;
+                                return (
+                                  <Pressable
+                                    key={`${item.id}-category-${option.value}`}
+                                    style={[
+                                      styles.configChip,
+                                      { backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                                    ]}
+                                    onPress={() =>
+                                      setPlantDataDrafts((prev) => ({
+                                        ...prev,
+                                        [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), category: option.value },
+                                      }))
+                                    }
+                                  >
+                                    <Text style={[styles.configChipText, { color: selected ? theme.primaryActionText : theme.secondaryActionText }]}>
+                                      {option.label}
+                                    </Text>
+                                  </Pressable>
+                                );
+                              })}
+                            </View>
+                          </View>
+                          <View style={styles.dataField}>
+                            <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Sun requirements</Text>
+                            <TextInput
+                              value={plantDataDraft.sunRequirements}
+                              onChangeText={(value) =>
+                                setPlantDataDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), sunRequirements: value },
+                                }))
+                              }
+                              placeholder="e.g. Full sun / Part shade"
+                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                              autoCapitalize="sentences"
+                            />
+                          </View>
+                          <View style={styles.dataGrid}>
+                            <View style={styles.dataField}>
+                              <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Row spacing (cm)</Text>
+                              <TextInput
+                                value={plantDataDraft.rowSpacing}
+                                onChangeText={(value) =>
+                                  setPlantDataDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), rowSpacing: value },
+                                  }))
+                                }
+                                placeholder="-"
+                                style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                                keyboardType="numeric"
+                              />
+                            </View>
+                            <View style={styles.dataField}>
+                              <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Spread (cm)</Text>
+                              <TextInput
+                                value={plantDataDraft.spread}
+                                onChangeText={(value) =>
+                                  setPlantDataDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), spread: value },
+                                  }))
+                                }
+                                placeholder="-"
+                                style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                                keyboardType="numeric"
+                              />
+                            </View>
+                            <View style={styles.dataField}>
+                              <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Height (cm)</Text>
+                              <TextInput
+                                value={plantDataDraft.height}
+                                onChangeText={(value) =>
+                                  setPlantDataDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), height: value },
+                                  }))
+                                }
+                                placeholder="-"
+                                style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                                keyboardType="numeric"
+                              />
+                            </View>
+                          </View>
+                          <View style={styles.dataActions}>
+                            <Pressable
+                              style={[styles.cloneInlineButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                              onPress={() =>
+                                setPlantDataDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: getPlantDataDraft(item.plant.metaJson),
+                                }))
+                              }
+                            >
+                              <Text style={[styles.cloneInlineButtonText, { color: theme.secondaryActionText }]}>Reset</Text>
+                            </Pressable>
+                            <Pressable
+                              style={[styles.saveInlineButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground }]}
+                              disabled={updatePlantDataMutation.isPending}
+                              onPress={() => updatePlantDataMutation.mutate(item)}
+                            >
+                              <Text style={[styles.saveInlineButtonText, { color: theme.primaryActionText }]}>
+                                {updatePlantDataMutation.isPending ? "Saving..." : "Save plant data"}
+                              </Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      )}
+                    </>
+                  );
+                })()}
                 <Text style={[styles.wishMeta, { color: theme.textMuted }]}>
                   {(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"}
                   {item.bedName ? ` - ${item.bedName}` : ""}
@@ -787,10 +1202,18 @@ export default function GardenGrowListScreen() {
                 </Pressable>
                 <Pressable
                   style={[styles.cloneInlineButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
-                  disabled={splitOneMutation.isPending || (item.quantity ?? 1) <= 1}
+                  disabled={
+                    splitOneMutation.isPending ||
+                    Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1) <= 1 ||
+                    Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1) !== Math.max(1, item.quantity ?? 1)
+                  }
                   onPress={() => splitOneMutation.mutate(item)}
                 >
-                  <Text style={[styles.cloneInlineButtonText, { color: theme.secondaryActionText }]}>Split 1</Text>
+                  <Text style={[styles.cloneInlineButtonText, { color: theme.secondaryActionText }]}>
+                    {Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1) !== Math.max(1, item.quantity ?? 1)
+                      ? "Split 1 (Save qty)"
+                      : "Split 1"}
+                  </Text>
                 </Pressable>
                 <Pressable
                   style={[styles.saveInlineButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground }]}
@@ -807,11 +1230,28 @@ export default function GardenGrowListScreen() {
                   <Text style={[styles.removeButtonText, { color: theme.dangerActionText }]}>Remove</Text>
                 </Pressable>
               </View>
+              </>
+              )}
             </View>
           ))}
         </View>
 
       </ScrollView>
+      {bulkImportMutation.isPending && (
+        <View style={[styles.blockingOverlay, { backgroundColor: theme.appBackground }]}>
+          <ActivityIndicator size="large" color={theme.primaryActionBackground} />
+          <Text style={[styles.blockingOverlayText, { color: theme.textPrimary }]}>
+            {bulkImportProgress
+              ? `Bulk import in progress (${bulkImportProgress.current}/${bulkImportProgress.total})`
+              : "Bulk import in progress"}
+          </Text>
+          {bulkImportProgress?.currentName ? (
+            <Text style={[styles.blockingOverlaySubtext, { color: theme.textMuted }]}>
+              {bulkImportProgress.currentName}
+            </Text>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 }
@@ -838,6 +1278,218 @@ function areEntryDraftsEqual(
     }
   }
   return true;
+}
+
+function arePlantDataDraftsEqual(
+  current: Record<string, PlantDataDraft>,
+  incoming: Record<string, PlantDataDraft>
+): boolean {
+  const currentKeys = Object.keys(current);
+  const incomingKeys = Object.keys(incoming);
+  if (currentKeys.length !== incomingKeys.length) return false;
+  for (const key of incomingKeys) {
+    const left = current[key];
+    const right = incoming[key];
+    if (!left || !right) return false;
+    if (
+      left.category !== right.category ||
+      left.sunRequirements !== right.sunRequirements ||
+      left.rowSpacing !== right.rowSpacing ||
+      left.spread !== right.spread ||
+      left.height !== right.height
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function getPlantDataDraft(metaJson?: string): PlantDataDraft {
+  const parsed = extractPlantSizing(metaJson);
+  return {
+    category: parsed.category ?? "unspecified",
+    sunRequirements: parsed.sunRequirements ?? "",
+    rowSpacing: parsed.rowSpacing ?? "",
+    spread: parsed.spread ?? "",
+    height: parsed.height ?? "",
+  };
+}
+
+function getMissingPlantDataLabels(draft: PlantDataDraft): string[] {
+  const missing: string[] = [];
+  if (!draft.sunRequirements.trim()) missing.push("sun");
+  if (!draft.rowSpacing.trim()) missing.push("row");
+  if (!draft.spread.trim()) missing.push("spread");
+  if (!draft.height.trim()) missing.push("height");
+  return missing;
+}
+
+function mergePlantDataMetaJson(existingMetaJson: string | undefined, draft: PlantDataDraft): string {
+  const existing = parseMetaJsonObject(existingMetaJson);
+  const gardenme = asRecord(existing.gardenme) ?? {};
+  const category = normalizePlantCategory(draft.category);
+  const sunRequirements = draft.sunRequirements.trim();
+  const rowSpacing = toPositiveNumber(draft.rowSpacing);
+  const spread = toPositiveNumber(draft.spread);
+  const height = toPositiveNumber(draft.height);
+
+  const nextGardenme: Record<string, unknown> = {
+    ...gardenme,
+    ...(category !== "unspecified" ? { category } : {}),
+    ...(sunRequirements ? { sunRequirements } : {}),
+    ...(typeof rowSpacing === "number" ? { rowSpacing } : {}),
+    ...(typeof spread === "number" ? { spread } : {}),
+    ...(typeof height === "number" ? { height } : {}),
+  };
+
+  const nextRoot: Record<string, unknown> = {
+    ...existing,
+    gardenme: nextGardenme,
+    ...(category !== "unspecified" ? { plant_category: category } : {}),
+    ...(sunRequirements ? { sun_requirements: sunRequirements } : {}),
+    ...(typeof rowSpacing === "number" ? { row_spacing: rowSpacing } : {}),
+    ...(typeof spread === "number" ? { spread } : {}),
+    ...(typeof height === "number" ? { height } : {}),
+  };
+
+  return JSON.stringify(nextRoot);
+}
+
+async function resolveGrowstuffIdentifier(suggestion: PlantSuggestion): Promise<string | null> {
+  const direct = suggestion.externalId?.trim();
+  if (direct) return direct;
+
+  const metaFallback = extractGrowstuffIdentifierFromMeta(suggestion.metaJson);
+  if (metaFallback) return metaFallback;
+
+  try {
+    const hits = await searchGrowstuffPlants(suggestion.commonName, 1, 8);
+    if (hits.length === 0) return null;
+    const target = normalizeSearchText(suggestion.commonName);
+    const exact = hits.find((hit) => normalizeSearchText(hit.commonName) === target);
+    return (exact ?? hits[0])?.externalId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function extractGrowstuffIdentifierFromMeta(metaJson?: string): string | null {
+  if (!metaJson) return null;
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      id?: string | number;
+      _id?: string | number;
+      slug?: string;
+    };
+    if (parsed.id !== undefined && parsed.id !== null) return String(parsed.id);
+    if (parsed._id !== undefined && parsed._id !== null) return String(parsed._id);
+    if (typeof parsed.slug === "string" && parsed.slug.trim()) return parsed.slug.trim();
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function findBestPlantMatchForBulk(
+  rawName: string,
+  repository: SqlitePlantCatalogRepository
+): Promise<PlantCatalogEntry | null> {
+  const query = rawName.trim();
+  if (!query) return null;
+
+  const localCandidates = (await repository.searchByName(query, 20)).filter(
+    (entry) => entry.source === "growstuff" || entry.source === "manual"
+  );
+  const bestLocal = pickBestPlantMatch(query, localCandidates);
+  if (bestLocal && bestLocal.score >= 95) return bestLocal.entry;
+
+  if (query.length >= 2) {
+    try {
+      const remoteHits = await searchGrowstuffPlants(query, 1, 8);
+      const remoteCandidates = await Promise.all(
+        remoteHits.map(async (hit) => {
+          const existing = await repository.getBySourceExternalId("growstuff", hit.externalId);
+          return repository.upsert({
+            source: "growstuff",
+            externalId: hit.externalId,
+            commonName: hit.commonName,
+            ...(hit.scientificName ? { scientificName: hit.scientificName } : {}),
+            ...(hit.familyName ? { familyName: hit.familyName } : {}),
+            ...(hit.imageUrl ? { imageUrl: hit.imageUrl } : {}),
+            metaJson: existing?.metaJson ?? hit.rawJson,
+          });
+        })
+      );
+      const bestRemote = pickBestPlantMatch(query, remoteCandidates);
+      if (bestRemote && bestRemote.score >= 70) return bestRemote.entry;
+      if (bestLocal) return bestLocal.entry;
+      if (bestRemote) return bestRemote.entry;
+    } catch {
+      // Fall back to local result only.
+    }
+  }
+
+  return bestLocal?.entry ?? null;
+}
+
+function pickBestPlantMatch(
+  query: string,
+  candidates: PlantCatalogEntry[]
+): { entry: PlantCatalogEntry; score: number } | null {
+  if (candidates.length === 0) return null;
+  const scored = candidates
+    .map((entry) => ({
+      entry,
+      score: computePlantMatchScore(query, entry),
+      sourcePriority: entry.source === "growstuff" ? 0 : 1,
+    }))
+    .sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      if (a.sourcePriority !== b.sourcePriority) return a.sourcePriority - b.sourcePriority;
+      return a.entry.commonName.localeCompare(b.entry.commonName, undefined, { sensitivity: "base" });
+    });
+  return scored[0] ?? null;
+}
+
+function computePlantMatchScore(query: string, entry: PlantCatalogEntry): number {
+  const normalizedQuery = normalizeSearchText(query);
+  const common = normalizeSearchText(entry.commonName);
+  const scientific = normalizeSearchText(entry.scientificName ?? "");
+  if (!normalizedQuery) return 0;
+  const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const wordMatch = new RegExp(`\\b${escapedQuery}\\b`);
+  let score = 0;
+  if (common === normalizedQuery) score += 120;
+  if (wordMatch.test(common)) score += 95;
+  if (common.startsWith(normalizedQuery)) score += 85;
+  if (common.includes(normalizedQuery)) score += 45;
+  if (scientific === normalizedQuery) score += 55;
+  if (wordMatch.test(scientific)) score += 40;
+  if (scientific.startsWith(normalizedQuery)) score += 35;
+  if (scientific.includes(normalizedQuery)) score += 20;
+  if (isSingularPluralEquivalent(common, normalizedQuery)) score += 30;
+  if (isLikelySpecificVarietyName(entry.commonName, normalizedQuery)) score -= 35;
+  return score;
+}
+
+function parseBulkPlantNames(input: string): string[] {
+  const values = input
+    .split(/[\n,;]+/g)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(value);
+  }
+  return output;
+}
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildGrowstuffMetaJson(existingMetaJson: string | undefined, details: GrowstuffCropDetails): string {
@@ -884,9 +1536,15 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function pickScientificName(details: GrowstuffCropDetails): string | undefined {
-  const single = details.scientific_name?.trim();
+  const single = typeof details.scientific_name === "string" ? details.scientific_name.trim() : "";
   if (single) return single;
-  return details.scientific_names?.find((name): name is string => Boolean(name?.trim()))?.trim();
+  const list = Array.isArray(details.scientific_names) ? details.scientific_names : [];
+  for (const value of list) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
 }
 
 function extractCompanionPlantingNotes(description?: string | null): string[] {
@@ -910,6 +1568,66 @@ function extractPlantDescription(metaJson?: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function extractPlantSizing(metaJson?: string): {
+  category?: PlantCategory;
+  sunRequirements?: string;
+  rowSpacing?: string;
+  spread?: string;
+  height?: string;
+} {
+  if (!metaJson) return {};
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      plant_category?: string;
+      sun_requirements?: string;
+      row_spacing?: number | string;
+      spread?: number | string;
+      height?: number | string;
+      gardenme?: {
+        category?: string;
+        sunRequirements?: string;
+        rowSpacing?: number | string;
+        spread?: number | string;
+        height?: number | string;
+      };
+    };
+    const category = normalizePlantCategory(parsed.gardenme?.category ?? parsed.plant_category);
+    const sun = parsed.gardenme?.sunRequirements ?? parsed.sun_requirements;
+    const row = parsed.gardenme?.rowSpacing ?? parsed.row_spacing;
+    const spread = parsed.gardenme?.spread ?? parsed.spread;
+    const height = parsed.gardenme?.height ?? parsed.height;
+    return {
+      ...(category ? { category } : {}),
+      ...(typeof sun === "string" && sun.trim() ? { sunRequirements: sun.trim() } : {}),
+      ...(row !== undefined ? { rowSpacing: `${row}` } : {}),
+      ...(spread !== undefined ? { spread: `${spread}` } : {}),
+      ...(height !== undefined ? { height: `${height}` } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function toPositiveNumber(value: string): number | undefined {
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+function normalizePlantCategory(value: unknown): PlantCategory {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (raw === "tree") return "tree";
+  if (raw === "shrub") return "shrub";
+  if (raw === "herb") return "herb";
+  if (raw === "vegetable") return "vegetable";
+  if (raw === "fruit") return "fruit";
+  if (raw === "flower") return "flower";
+  if (raw === "climber") return "climber";
+  return "unspecified";
 }
 
 function extractSuggestionDetails(metaJson?: string): {
@@ -1038,6 +1756,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     color: "#1F3B2D",
   },
+  bulkInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    minHeight: 110,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "#1F3B2D",
+  },
   addRow: { flexDirection: "row", justifyContent: "flex-end" },
   primaryButton: {
     backgroundColor: "#2E6C49",
@@ -1059,6 +1785,7 @@ const styles = StyleSheet.create({
   helper: { color: "#587261", fontSize: 13 },
   errorText: { color: "#8C3A2D", fontSize: 12, fontWeight: "600" },
   importSection: { gap: 8, marginTop: 2 },
+  unmatchedSection: { gap: 6, marginTop: 4 },
   configRow: { gap: 6 },
   configLabel: { color: "#244130", fontWeight: "700" },
   configChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
@@ -1115,11 +1842,23 @@ const styles = StyleSheet.create({
     borderColor: "#D8E5D5",
     borderRadius: 10,
     padding: 10,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: "column",
+    alignItems: "stretch",
     gap: 10,
   },
+  compactHeader: {
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  compactHeaderMain: { flex: 1, gap: 2 },
+  compactHeaderMeta: { fontSize: 12 },
+  compactHeaderCaret: { fontSize: 16, fontWeight: "700" },
   wishMain: { flex: 1, gap: 2 },
   wishName: { color: "#20402F", fontWeight: "700" },
   descriptionToggle: { marginTop: 2 },
@@ -1133,6 +1872,17 @@ const styles = StyleSheet.create({
     color: "#4D6758",
     fontSize: 12,
   },
+  dataPanel: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 8,
+    gap: 8,
+  },
+  dataGrid: { gap: 8 },
+  dataField: { gap: 4 },
+  dataLabel: { fontSize: 12, fontWeight: "700" },
+  dataActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
   wishMeta: { color: "#5A7363", fontSize: 12 },
   inlineControls: { marginTop: 6, gap: 6 },
   qtyRow: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start" },
@@ -1214,4 +1964,17 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   removeButtonText: { color: "#8C3A2D", fontWeight: "700", fontSize: 12 },
+  blockingOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+  },
+  blockingOverlayText: { fontSize: 14, fontWeight: "700", textAlign: "center" },
+  blockingOverlaySubtext: { fontSize: 12, textAlign: "center" },
 });

@@ -46,6 +46,7 @@ type PlantingRow = {
   planted_at: string;
   ended_at: string | null;
   end_state: PlantingEndState | null;
+  notes: string | null;
   planting_created_at: string;
   planting_updated_at: string;
   entry_variety_name: string | null;
@@ -124,6 +125,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
          gp.planted_at AS planted_at,
          gp.ended_at AS ended_at,
          gp.end_state AS end_state,
+         gp.notes AS notes,
          gp.created_at AS planting_created_at,
          gp.updated_at AS planting_updated_at,
          e.variety_name AS entry_variety_name,
@@ -155,6 +157,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
       plantedAt: row.planted_at,
       ...(row.ended_at ? { endedAt: row.ended_at } : {}),
       ...(row.end_state ? { endState: row.end_state } : {}),
+      ...(row.notes ? { notes: row.notes } : {}),
       createdAt: row.planting_created_at,
       updatedAt: row.planting_updated_at,
       ...(row.entry_variety_name ? { varietyName: row.entry_variety_name } : {}),
@@ -242,8 +245,9 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
     });
   }
 
-  async finishPlanting(input: { entryId: string; endState: PlantingEndState; endedAt?: string }): Promise<void> {
+  async finishPlanting(input: { entryId: string; endState: PlantingEndState; endedAt?: string; notes?: string }): Promise<void> {
     const now = input.endedAt ?? new Date().toISOString();
+    const notes = input.notes?.trim() || null;
     const db = getDatabase();
     await db.withTransactionAsync(async () => {
       const active = await db.getFirstAsync<{ id: string }>(
@@ -253,8 +257,8 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
 
       if (active?.id) {
         await db.runAsync(
-          "UPDATE garden_crop_plantings SET ended_at = ?, end_state = ?, updated_at = ? WHERE id = ?",
-          [now, input.endState, now, active.id]
+          "UPDATE garden_crop_plantings SET ended_at = ?, end_state = ?, notes = ?, updated_at = ? WHERE id = ?",
+          [now, input.endState, notes, now, active.id]
         );
       } else {
         const entry = await db.getFirstAsync<{ garden_id: string; bed_id: string | null; updated_at: string }>(
@@ -266,14 +270,92 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
         await db.runAsync(
           `INSERT INTO garden_crop_plantings (
              id, entry_id, garden_id, bed_id, planted_at, ended_at, end_state, notes, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-          [makeId("planting"), input.entryId, entry.garden_id, entry.bed_id, plantedAt, now, input.endState, now, now]
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [makeId("planting"), input.entryId, entry.garden_id, entry.bed_id, plantedAt, now, input.endState, notes, now, now]
         );
       }
 
       await db.runAsync(
         "UPDATE garden_crop_entries SET status = 'wanted', bed_id = NULL, updated_at = ? WHERE id = ?",
         [now, input.entryId]
+      );
+    });
+  }
+
+  async removePlantingHistory(id: string): Promise<void> {
+    await getDatabase().runAsync("DELETE FROM garden_crop_plantings WHERE id = ?", [id]);
+  }
+
+  async undoMarkPlanted(input: {
+    entryId: string;
+    previousStatus: "wanted" | "already_growing";
+    previousBedId?: string;
+    previousIsPerennial: boolean;
+    previousVarietyName?: string;
+    previousSupportNeeded: boolean;
+    previousQuantity: number;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    const db = getDatabase();
+    await db.withTransactionAsync(async () => {
+      if (input.previousStatus === "wanted") {
+        await db.runAsync("DELETE FROM garden_crop_plantings WHERE entry_id = ? AND ended_at IS NULL", [input.entryId]);
+      } else {
+        await db.runAsync(
+          "UPDATE garden_crop_plantings SET bed_id = ?, updated_at = ? WHERE entry_id = ? AND ended_at IS NULL",
+          [input.previousBedId ?? null, now, input.entryId]
+        );
+      }
+
+      await db.runAsync(
+        `UPDATE garden_crop_entries
+         SET status = ?, bed_id = ?, is_perennial = ?, variety_name = ?, support_needed = ?, quantity = ?, updated_at = ?
+         WHERE id = ?`,
+        [
+          input.previousStatus,
+          input.previousBedId ?? null,
+          input.previousStatus === "already_growing" && input.previousIsPerennial ? 1 : 0,
+          input.previousVarietyName?.trim() || null,
+          input.previousSupportNeeded ? 1 : 0,
+          Math.max(1, Math.floor(input.previousQuantity || 1)),
+          now,
+          input.entryId,
+        ]
+      );
+    });
+  }
+
+  async undoFinishPlanting(input: {
+    entryId: string;
+    plantingId: string;
+    previousStatus: "wanted" | "already_growing";
+    previousBedId?: string;
+    previousIsPerennial: boolean;
+    previousVarietyName?: string;
+    previousSupportNeeded: boolean;
+    previousQuantity: number;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    const db = getDatabase();
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        "UPDATE garden_crop_plantings SET ended_at = NULL, end_state = NULL, updated_at = ? WHERE id = ?",
+        [now, input.plantingId]
+      );
+      await db.runAsync(
+        `UPDATE garden_crop_entries
+         SET status = ?, bed_id = ?, is_perennial = ?, variety_name = ?, support_needed = ?, quantity = ?, updated_at = ?
+         WHERE id = ?`,
+        [
+          input.previousStatus,
+          input.previousBedId ?? null,
+          input.previousStatus === "already_growing" && input.previousIsPerennial ? 1 : 0,
+          input.previousVarietyName?.trim() || null,
+          input.previousSupportNeeded ? 1 : 0,
+          Math.max(1, Math.floor(input.previousQuantity || 1)),
+          now,
+          input.entryId,
+        ]
       );
     });
   }

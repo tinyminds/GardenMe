@@ -31,6 +31,7 @@ export interface GardenCropWishlistRepository {
   add(input: AddGardenCropItemInput): Promise<void>;
   update(input: UpdateGardenCropItemInput): Promise<void>;
   markPlanted(input: { entryId: string; bedId: string; plantedAt?: string }): Promise<void>;
-  finishPlanting(input: { entryId: string; endState: PlantingEndState; endedAt?: string }): Promise<void>;
+  finishPlanting(input: { entryId: string; endState: PlantingEndState; endedAt?: string; notes?: string }): Promise<void>;
+  removePlantingHistory(id: string): Promise<void>;
   remove(id: string): Promise<void>;
 }

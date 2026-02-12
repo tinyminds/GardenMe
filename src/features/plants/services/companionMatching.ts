@@ -37,10 +37,10 @@ export function getCompanionMatchSummary(params: {
   candidateName: string;
   nearbyNames: string[];
   relations: CompanionPlantingRelation[];
-}): { scoreDelta: number; messages: string[] } {
+}): { scoreDelta: number; messages: string[]; goodCount: number; avoidCount: number } {
   const candidateAliases = expandPlantAliases(params.candidateName);
   if (candidateAliases.length === 0 || params.nearbyNames.length === 0 || params.relations.length === 0) {
-    return { scoreDelta: 0, messages: [] };
+    return { scoreDelta: 0, messages: [], goodCount: 0, avoidCount: 0 };
   }
 
   const nearbyAliasPairs = params.nearbyNames.map((name) => ({
@@ -82,7 +82,7 @@ export function getCompanionMatchSummary(params: {
     ...dedupeCompact(cautions, 2),
   ];
 
-  return { scoreDelta, messages };
+  return { scoreDelta, messages, goodCount: positives.length, avoidCount: cautions.length };
 }
 
 function dedupeCompact(values: string[], limit: number): string[] {

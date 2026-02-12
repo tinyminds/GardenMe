@@ -44,6 +44,7 @@ export interface GardenCropPlantingHistoryItem {
   plantedAt: string;
   endedAt?: string;
   endState?: PlantingEndState;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
   plant: PlantCatalogEntry;

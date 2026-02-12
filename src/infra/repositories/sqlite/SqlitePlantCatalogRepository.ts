@@ -55,6 +55,47 @@ export class SqlitePlantCatalogRepository implements PlantCatalogRepository {
     if (input.externalId) {
       const existing = await this.getBySourceExternalId(input.source, input.externalId);
       if (existing) {
+        const fallbackByName = await getDatabase().getFirstAsync<PlantCatalogRow>(
+          `SELECT *
+           FROM plant_catalog_cache
+           WHERE source = ?
+             AND external_id IS NULL
+             AND LOWER(common_name) = LOWER(?)
+             AND id <> ?
+           ORDER BY updated_at DESC
+           LIMIT 1`,
+          [input.source, normalizedName, existing.id]
+        );
+
+        if (fallbackByName) {
+          const db = getDatabase();
+          await db.withTransactionAsync(async () => {
+            await db.runAsync(
+              "UPDATE garden_crop_entries SET plant_catalog_id = ? WHERE plant_catalog_id = ?",
+              [existing.id, fallbackByName.id]
+            );
+            await db.runAsync(
+              "UPDATE garden_crop_wishlist SET plant_catalog_id = ? WHERE plant_catalog_id = ?",
+              [existing.id, fallbackByName.id]
+            ).catch(() => undefined);
+
+            const entryRef = await db.getFirstAsync<{ count: number }>(
+              "SELECT COUNT(*) AS count FROM garden_crop_entries WHERE plant_catalog_id = ?",
+              [fallbackByName.id]
+            );
+            const wishlistRef = await db
+              .getFirstAsync<{ count: number }>(
+                "SELECT COUNT(*) AS count FROM garden_crop_wishlist WHERE plant_catalog_id = ?",
+                [fallbackByName.id]
+              )
+              .catch(() => ({ count: 0 }));
+            const remainingRefs = (entryRef?.count ?? 0) + (wishlistRef?.count ?? 0);
+            if (remainingRefs === 0) {
+              await db.runAsync("DELETE FROM plant_catalog_cache WHERE id = ?", [fallbackByName.id]);
+            }
+          });
+        }
+
         await getDatabase().runAsync(
           `UPDATE plant_catalog_cache
            SET common_name = ?, scientific_name = ?, family_name = ?, image_url = ?, meta_json = ?, updated_at = ?
@@ -79,6 +120,47 @@ export class SqlitePlantCatalogRepository implements PlantCatalogRepository {
           ...(input.familyName ? { familyName: input.familyName } : {}),
           ...(input.imageUrl ? { imageUrl: input.imageUrl } : {}),
           ...(input.metaJson ? { metaJson: input.metaJson } : {}),
+        };
+      }
+
+      // Repair older growstuff rows that were cached without external_id.
+      const fallbackByName = await getDatabase().getFirstAsync<PlantCatalogRow>(
+        `SELECT *
+         FROM plant_catalog_cache
+         WHERE source = ?
+           AND external_id IS NULL
+           AND LOWER(common_name) = LOWER(?)
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [input.source, normalizedName]
+      );
+      if (fallbackByName) {
+        await getDatabase().runAsync(
+          `UPDATE plant_catalog_cache
+           SET external_id = ?, common_name = ?, scientific_name = ?, family_name = ?, image_url = ?, meta_json = ?, updated_at = ?
+           WHERE id = ?`,
+          [
+            input.externalId,
+            normalizedName,
+            input.scientificName ?? null,
+            input.familyName ?? null,
+            input.imageUrl ?? null,
+            input.metaJson ?? null,
+            now,
+            fallbackByName.id,
+          ]
+        );
+        return {
+          id: fallbackByName.id,
+          source: input.source,
+          commonName: normalizedName,
+          externalId: input.externalId,
+          ...(input.scientificName ? { scientificName: input.scientificName } : {}),
+          ...(input.familyName ? { familyName: input.familyName } : {}),
+          ...(input.imageUrl ? { imageUrl: input.imageUrl } : {}),
+          ...(input.metaJson ? { metaJson: input.metaJson } : {}),
+          createdAt: fallbackByName.created_at,
+          updatedAt: now,
         };
       }
     }

@@ -9,17 +9,22 @@ export interface GrowstuffPlantHit {
 
 type GrowstuffQueryItem = {
   id?: string | number;
+  _id?: string | number;
   name?: string | null;
   slug?: string | null;
   scientific_name?: string | null;
   scientific_names?: Array<string | null> | null;
+  alternate_name?: string | null;
   alternate_names?: Array<string | null> | null;
   description?: string | null;
   thumbnail_url?: string | null;
+  image_url?: string | null;
 };
 
 type GrowstuffSearchResponse = {
   query?: GrowstuffQueryItem[];
+  crops?: GrowstuffQueryItem[];
+  results?: GrowstuffQueryItem[];
 };
 
 export type GrowstuffCropDetails = {
@@ -134,11 +139,15 @@ function getGrowstuffBaseUrl(): string {
 }
 
 function toGrowstuffPlantHit(row: GrowstuffQueryItem): GrowstuffPlantHit | null {
-  const id = row.id;
+  const id = row.id ?? row._id;
   const commonName = row.name?.trim();
-  const scientificName =
-    row.scientific_name?.trim() ??
-    row.scientific_names?.find((value): value is string => Boolean(value?.trim()))?.trim();
+  const scientificNameDirect = typeof row.scientific_name === "string" ? row.scientific_name.trim() : "";
+  const scientificNameFromList =
+    Array.isArray(row.scientific_names)
+      ? row.scientific_names.find((value): value is string => typeof value === "string" && Boolean(value.trim()))?.trim()
+      : undefined;
+  const scientificName = scientificNameDirect || scientificNameFromList;
+  const imageUrl = row.thumbnail_url?.trim() || row.image_url?.trim() || "";
   if (!id || (!commonName && !scientificName)) return null;
 
   const displayName = commonName || scientificName || "Unknown plant";
@@ -146,7 +155,7 @@ function toGrowstuffPlantHit(row: GrowstuffQueryItem): GrowstuffPlantHit | null 
     externalId: String(id),
     commonName: displayName,
     ...(scientificName ? { scientificName } : {}),
-    ...(row.thumbnail_url?.trim() ? { imageUrl: row.thumbnail_url.trim() } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
     rawJson: JSON.stringify(row),
   };
 }
@@ -196,5 +205,5 @@ async function fetchRowsFromEndpoint(url: string): Promise<GrowstuffQueryItem[]>
 
   const payload = (await response.json()) as GrowstuffSearchResponse | GrowstuffQueryItem[];
   if (Array.isArray(payload)) return payload;
-  return payload.query ?? [];
+  return payload.query ?? payload.crops ?? payload.results ?? [];
 }
