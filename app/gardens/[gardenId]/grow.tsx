@@ -144,8 +144,8 @@ export default function GardenGrowListScreen() {
       };
 
       const relevanceScore = (entry: PlantCatalogEntry): number => {
-        const common = entry.commonName.trim().toLowerCase();
-        const scientific = (entry.scientificName ?? "").trim().toLowerCase();
+        const common = normalizeSearchText(entry.commonName);
+        const scientific = normalizeSearchText(entry.scientificName ?? "");
         if (!query) return 0;
         const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const wordMatch = new RegExp(`\\b${escapedQuery}\\b`);
@@ -158,6 +158,8 @@ export default function GardenGrowListScreen() {
         if (wordMatch.test(scientific)) score += 40;
         if (scientific.startsWith(query)) score += 35;
         if (scientific.includes(query)) score += 20;
+        if (isSingularPluralEquivalent(common, query)) score += 30;
+        if (isLikelySpecificVarietyName(entry.commonName, query)) score -= 35;
         return score;
       };
 
@@ -167,6 +169,8 @@ export default function GardenGrowListScreen() {
           if (sourceOrder !== 0) return sourceOrder;
           const scoreOrder = relevanceScore(b) - relevanceScore(a);
           if (scoreOrder !== 0) return scoreOrder;
+          const lengthOrder = a.commonName.trim().length - b.commonName.trim().length;
+          if (lengthOrder !== 0) return lengthOrder;
           return a.commonName.localeCompare(b.commonName);
         })
         .slice(0, 36);
@@ -950,6 +954,39 @@ function extractSuggestionDetails(metaJson?: string): {
   } catch {
     return {};
   }
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[()[\],.:;'"`]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isSingularPluralEquivalent(left: string, right: string): boolean {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const singular = (value: string): string => {
+    if (value.endsWith("es") && value.length > 3) return value.slice(0, -2);
+    if (value.endsWith("s") && value.length > 2) return value.slice(0, -1);
+    return value;
+  };
+  return singular(left) === singular(right);
+}
+
+function isLikelySpecificVarietyName(commonName: string, query: string): boolean {
+  const normalized = normalizeSearchText(commonName);
+  if (!normalized || !query) return false;
+  if (normalized === query) return false;
+  if (!normalized.includes(query)) return false;
+
+  const tokenCount = normalized.split(" ").length;
+  const hasDelimiter = /[()\-:,/]/.test(commonName);
+  const hasVarietyKeyword = /\b(variety|cultivar|hybrid|f1|heirloom)\b/i.test(commonName);
+
+  return hasVarietyKeyword || hasDelimiter || tokenCount >= 3;
 }
 
 function ToggleSwitch(props: {
