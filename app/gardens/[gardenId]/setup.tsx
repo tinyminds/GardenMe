@@ -20,6 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { queryClient } from "@/state/queryClient";
 import { polygonArea } from "@/features/garden-mapping/utils/geometry";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 import MapBoundaryEditor, {
   type LatLngPoint,
   type MapSnapshotResult,
@@ -36,6 +37,7 @@ type NativeMapType = "standard" | "satellite" | "hybrid";
 const gardenRepository = new SqliteGardenRepository();
 
 export default function GardenSetupScreen() {
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
   const gardenId = Array.isArray(params.gardenId) ? params.gardenId[0] : params.gardenId;
 
@@ -330,58 +332,73 @@ export default function GardenSetupScreen() {
   const mapAreaSqM = useMemo(() => polygonAreaSqMeters(mapBoundary), [mapBoundary]);
 
   return (
-    <View style={styles.page}>
-      <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+    <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.appBackground }]} edges={["left", "right"]}>
         <KeyboardAvoidingView
           style={styles.keyboardWrap}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           keyboardVerticalOffset={Platform.OS === "ios" ? 80 : 0}
         >
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-            <Text style={styles.title}>Garden Setup</Text>
-            <Text style={styles.subtitle}>Set your garden boundary on map, or enter measurements in meters.</Text>
+            <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Setup</Text>
+            <Text style={[styles.subtitle, { color: theme.textMuted }]}>Set your garden boundary on map, or enter measurements in meters.</Text>
 
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Mode</Text>
+            <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+              <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Mode</Text>
               <View style={styles.row}>
                 <Pressable
-                  style={[styles.modeChip, setupMode === "map" && styles.modeChipActive]}
+                  style={[
+                    styles.modeChip,
+                    { backgroundColor: setupMode === "map" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                  ]}
                   onPress={() => setSetupMode("map")}
                 >
-                  <Text style={[styles.modeChipText, setupMode === "map" && styles.modeChipTextActive]}>Map</Text>
+                  <Text style={[styles.modeChipText, { color: setupMode === "map" ? theme.primaryActionText : theme.secondaryActionText }]}>Map</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.modeChip, setupMode === "measure" && styles.modeChipActive]}
+                  style={[
+                    styles.modeChip,
+                    { backgroundColor: setupMode === "measure" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                  ]}
                   onPress={() => setSetupMode("measure")}
                 >
-                  <Text style={[styles.modeChipText, setupMode === "measure" && styles.modeChipTextActive]}>Measurement</Text>
+                  <Text style={[styles.modeChipText, { color: setupMode === "measure" ? theme.primaryActionText : theme.secondaryActionText }]}>Measurement</Text>
                 </Pressable>
               </View>
             </View>
 
             {setupMode === "map" ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Map Boundary</Text>
-                <Text style={styles.cardText}>Tap points around the outer garden edge, then save.</Text>
+              <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+                <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Map Boundary</Text>
+                <Text style={[styles.cardText, { color: theme.textMuted }]}>Tap points around the outer garden edge, then save.</Text>
 
                 <View style={styles.row}>
                   <Pressable
-                    style={[styles.modeChip, mapType === "standard" && styles.modeChipActive]}
+                    style={[
+                      styles.modeChip,
+                      { backgroundColor: mapType === "standard" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                    ]}
                     onPress={() => setMapType("standard")}
                   >
-                    <Text style={[styles.modeChipText, mapType === "standard" && styles.modeChipTextActive]}>Standard</Text>
+                    <Text style={[styles.modeChipText, { color: mapType === "standard" ? theme.primaryActionText : theme.secondaryActionText }]}>Standard</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.modeChip, mapType === "satellite" && styles.modeChipActive]}
+                    style={[
+                      styles.modeChip,
+                      { backgroundColor: mapType === "satellite" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                    ]}
                     onPress={() => setMapType("satellite")}
                   >
-                    <Text style={[styles.modeChipText, mapType === "satellite" && styles.modeChipTextActive]}>Satellite</Text>
+                    <Text style={[styles.modeChipText, { color: mapType === "satellite" ? theme.primaryActionText : theme.secondaryActionText }]}>Satellite</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.modeChip, mapType === "hybrid" && styles.modeChipActive]}
+                    style={[
+                      styles.modeChip,
+                      { backgroundColor: mapType === "hybrid" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                    ]}
                     onPress={() => setMapType("hybrid")}
                   >
-                    <Text style={[styles.modeChipText, mapType === "hybrid" && styles.modeChipTextActive]}>Satellite + Labels</Text>
+                    <Text style={[styles.modeChipText, { color: mapType === "hybrid" ? theme.primaryActionText : theme.secondaryActionText }]}>Satellite + Labels</Text>
                   </Pressable>
                 </View>
 
@@ -389,33 +406,34 @@ export default function GardenSetupScreen() {
                   <TextInput
                     value={mapSearch}
                     onChangeText={setMapSearch}
-                    style={styles.input}
+                    style={[styles.input, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
                     placeholder="Search address or place"
+                    placeholderTextColor={theme.textMuted}
                     returnKeyType="search"
                     onSubmitEditing={() => {
                       void searchMapLocation();
                     }}
                   />
-                  <Pressable style={styles.toolButton} onPress={() => void searchMapLocation()} disabled={searchingMap}>
-                    {searchingMap ? <ActivityIndicator color="#2D4B3C" size="small" /> : <Text style={styles.toolButtonText}>Search</Text>}
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => void searchMapLocation()} disabled={searchingMap}>
+                    {searchingMap ? <ActivityIndicator color={theme.secondaryActionText} size="small" /> : <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Search</Text>}
                   </Pressable>
-                  <Pressable style={styles.toolButton} onPress={() => void moveToCurrentLocation()} disabled={locatingUser}>
-                    {locatingUser ? <ActivityIndicator color="#2D4B3C" size="small" /> : <Text style={styles.toolButtonText}>My Location</Text>}
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => void moveToCurrentLocation()} disabled={locatingUser}>
+                    {locatingUser ? <ActivityIndicator color={theme.secondaryActionText} size="small" /> : <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>My Location</Text>}
                   </Pressable>
                 </View>
 
                 <View style={styles.zoomRow}>
-                  <Pressable style={styles.toolButton} onPress={undoMapBoundaryPoint}>
-                    <Text style={styles.toolButtonText}>Undo</Text>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={undoMapBoundaryPoint}>
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Undo</Text>
                   </Pressable>
-                  <Pressable style={styles.toolButton} onPress={deleteSelectedMapPoint}>
-                    <Text style={styles.toolButtonText}>Delete Point</Text>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={deleteSelectedMapPoint}>
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Delete Point</Text>
                   </Pressable>
-                  <Pressable style={styles.toolButton} onPress={finishMapBoundary}>
-                    <Text style={styles.toolButtonText}>Finish Shape</Text>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={finishMapBoundary}>
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Finish Shape</Text>
                   </Pressable>
-                  <Pressable style={styles.toolButton} onPress={resetMapBoundary}>
-                    <Text style={styles.toolButtonText}>Reset</Text>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={resetMapBoundary}>
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Reset</Text>
                   </Pressable>
                 </View>
 
@@ -432,44 +450,53 @@ export default function GardenSetupScreen() {
                   onRequestSnapshot={(capture) => setCaptureMapSnapshot(() => capture)}
                 />
 
-                <Text style={styles.infoText}>Boundary points: {mapBoundary.length}{isMapClosed ? " (closed)" : ""}</Text>
-                <Text style={styles.infoText}>Garden area: {mapAreaSqM > 0 ? `${mapAreaSqM.toFixed(1)} sqm` : "-"}</Text>
+                <Text style={[styles.infoText, { color: theme.infoText }]}>Boundary points: {mapBoundary.length}{isMapClosed ? " (closed)" : ""}</Text>
+                <Text style={[styles.infoText, { color: theme.infoText }]}>Garden area: {mapAreaSqM > 0 ? `${mapAreaSqM.toFixed(1)} sqm` : "-"}</Text>
 
-                <Pressable style={styles.button} onPress={saveMapSetup}>
-                  <Text style={styles.buttonText}>Save Map Boundary</Text>
+                <Pressable style={[styles.button, { backgroundColor: theme.primaryActionBackground }]} onPress={saveMapSetup}>
+                  <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Save Map Boundary</Text>
                 </Pressable>
               </View>
             ) : (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Manual Measurements (meters)</Text>
-                <Text style={styles.cardText}>Enter your approximate garden dimensions.</Text>
+              <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+                <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Manual Measurements (meters)</Text>
+                <Text style={[styles.cardText, { color: theme.textMuted }]}>Enter your approximate garden dimensions.</Text>
 
                 <View style={styles.inputRow}>
                   <TextInput
                     value={manualLengthM}
                     onChangeText={setManualLengthM}
                     keyboardType="decimal-pad"
-                    style={styles.input}
+                    style={[styles.input, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
                     placeholder="Length (m)"
+                    placeholderTextColor={theme.textMuted}
                   />
                   <TextInput
                     value={manualWidthM}
                     onChangeText={setManualWidthM}
                     keyboardType="decimal-pad"
-                    style={styles.input}
+                    style={[styles.input, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
                     placeholder="Width (m)"
+                    placeholderTextColor={theme.textMuted}
                   />
                 </View>
 
-                <Text style={styles.infoText}>Garden area: {manualAreaSqM ? `${manualAreaSqM.toFixed(1)} sqm` : "-"}</Text>
+                <Text style={[styles.infoText, { color: theme.infoText }]}>Garden area: {manualAreaSqM ? `${manualAreaSqM.toFixed(1)} sqm` : "-"}</Text>
 
-                <Pressable style={styles.button} onPress={saveManualSetup}>
-                  <Text style={styles.buttonText}>Save Measurements</Text>
+                <Pressable style={[styles.button, { backgroundColor: theme.primaryActionBackground }]} onPress={saveManualSetup}>
+                  <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Save Measurements</Text>
                 </Pressable>
               </View>
             )}
 
-            {gardenId && <Link href={`/gardens/${gardenId}/map`} style={styles.mapperLink}>Continue to Garden Planner</Link>}
+            {gardenId && (
+              <Link
+                href={`/gardens/${gardenId}/map`}
+                style={[styles.mapperLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+              >
+                Continue to Garden Planner
+              </Link>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>

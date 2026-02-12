@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from "expo-router";
+﻿import { useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -8,6 +8,7 @@ import { SqlitePlantCatalogRepository } from "@/infra/repositories/sqlite/Sqlite
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { fetchGrowstuffCropDetails, searchGrowstuffPlants, type GrowstuffCropDetails } from "@/features/plants/services/growstuff";
 import { queryClient } from "@/state/queryClient";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 import type { GardenCropWishlistItemView, PlantCatalogEntry } from "@/domain/entities/Plant";
 
 const gardenRepository = new SqliteGardenRepository();
@@ -38,6 +39,7 @@ type CropEntryDraft = {
 };
 
 export default function GardenGrowListScreen() {
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
   const gardenId = Array.isArray(params.gardenId) ? params.gardenId[0] : params.gardenId;
   const [search, setSearch] = useState("");
@@ -469,72 +471,76 @@ export default function GardenGrowListScreen() {
   }, [listNameCollator, wishlistQuery.data, listSearch, listSortDirection]);
 
   return (
-    <View style={styles.page}>
+    <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="always">
-        <Text style={styles.title}>Grow List</Text>
-        <Text style={styles.subtitle}>
+        <Text style={[styles.title, { color: theme.textPrimary }]}>Grow List</Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>
           {gardenQuery.data?.name
             ? `${gardenQuery.data.name}: track wanted and growing plants`
             : "Track wanted and growing plants"}
         </Text>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Add Plant</Text>
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Add Plant</Text>
           <TextInput
             value={search}
             onChangeText={setSearch}
             placeholder="Search plants or type your own"
-            style={styles.input}
+            style={[styles.input, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
             autoCapitalize="none"
           />
           {debouncedSearch.length >= 2 && (
-            <View style={styles.suggestionsBox}>
+            <View style={[styles.suggestionsBox, { borderColor: theme.borderColor }]}>
               {suggestionsQuery.isLoading && (
                 <View style={styles.loadingRow}>
-                  <ActivityIndicator size="small" color="#2A5E40" />
-                  <Text style={styles.loadingText}>Searching plants...</Text>
+                  <ActivityIndicator size="small" color={theme.secondaryActionText} />
+                  <Text style={[styles.loadingText, { color: theme.textMuted }]}>Searching plants...</Text>
                 </View>
               )}
               {!suggestionsQuery.isLoading && suggestions.length === 0 && (
-                <Text style={styles.emptySuggestion}>No matches.</Text>
+                <Text style={[styles.emptySuggestion, { color: theme.textMuted }]}>No matches.</Text>
               )}
               {visibleSuggestions.map((item) => (
                 <Pressable
                   key={item.plantCatalogId}
-                  style={styles.suggestionRow}
+                  style={[styles.suggestionRow, { borderTopColor: theme.borderColor }]}
                   disabled={addToWishlistMutation.isPending}
                   onPress={() => addToWishlistMutation.mutate({ suggestion: item })}
                 >
                   <View style={styles.suggestionMain}>
-                    <Text style={styles.suggestionName}>{item.commonName}</Text>
-                    {item.scientificName && <Text style={styles.suggestionMeta}>{item.scientificName}</Text>}
-                    {item.familyName && <Text style={styles.suggestionMeta}>Family: {item.familyName}</Text>}
-                    {item.detailLine && <Text style={styles.suggestionMeta}>{item.detailLine}</Text>}
+                    <Text style={[styles.suggestionName, { color: theme.textPrimary }]}>{item.commonName}</Text>
+                    {item.scientificName && <Text style={[styles.suggestionMeta, { color: theme.textMuted }]}>{item.scientificName}</Text>}
+                    {item.familyName && <Text style={[styles.suggestionMeta, { color: theme.textMuted }]}>Family: {item.familyName}</Text>}
+                    {item.detailLine && <Text style={[styles.suggestionMeta, { color: theme.textMuted }]}>{item.detailLine}</Text>}
                   </View>
-                  <Text style={styles.suggestionTag}>{item.sourceLabel}</Text>
+                  <Text style={[styles.suggestionTag, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>{item.sourceLabel}</Text>
                 </Pressable>
               ))}
               {suggestions.length > 12 && (
-                <Pressable style={styles.suggestionMoreButton} onPress={() => setShowAllSuggestions((value) => !value)}>
-                  <Text style={styles.suggestionMoreText}>{showAllSuggestions ? "Show less" : "Show more"}</Text>
+                <Pressable style={[styles.suggestionMoreButton, { borderTopColor: theme.borderColor }]} onPress={() => setShowAllSuggestions((value) => !value)}>
+                  <Text style={[styles.suggestionMoreText, { color: theme.secondaryActionText }]}>{showAllSuggestions ? "Show less" : "Show more"}</Text>
                 </Pressable>
               )}
             </View>
           )}
           <View style={styles.addRow}>
             <Pressable
-              style={[styles.primaryButton, !search.trim() && styles.buttonDisabled]}
+              style={[
+                styles.primaryButton,
+                { backgroundColor: search.trim() ? theme.primaryActionBackground : theme.disabledActionBackground },
+                !search.trim() && styles.buttonDisabled,
+              ]}
               disabled={!search.trim() || addToWishlistMutation.isPending}
               onPress={() => addToWishlistMutation.mutate({ manualName: search })}
             >
-              <Text style={styles.primaryButtonText}>Add Typed Plant</Text>
+              <Text style={[styles.primaryButtonText, { color: search.trim() ? theme.primaryActionText : theme.disabledActionText }]}>Add Typed Plant</Text>
             </Pressable>
           </View>
-          {addError && <Text style={styles.errorText}>{addError}</Text>}
+          {addError && <Text style={[styles.errorText, { color: theme.dangerActionBackground }]}>{addError}</Text>}
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Import From Garden</Text>
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Import From Garden</Text>
           <View style={styles.importSection}>
             <View style={styles.configChips}>
               {(gardensQuery.data ?? [])
@@ -542,69 +548,70 @@ export default function GardenGrowListScreen() {
                 .map((garden) => (
                   <Pressable
                     key={garden.id}
-                    style={[styles.configChip, importSourceGardenId === garden.id && styles.configChipActive]}
+                    style={[styles.configChip, { backgroundColor: importSourceGardenId === garden.id ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
                     onPress={() => setImportSourceGardenId((current) => (current === garden.id ? null : garden.id))}
                   >
-                    <Text style={styles.configChipText}>{garden.name}</Text>
+                    <Text style={[styles.configChipText, { color: importSourceGardenId === garden.id ? theme.primaryActionText : theme.secondaryActionText }]}>{garden.name}</Text>
                   </Pressable>
                 ))}
             </View>
             {!gardensQuery.isLoading &&
               (gardensQuery.data ?? []).filter((garden) => garden.id !== gardenId).length === 0 && (
-                <Text style={styles.helper}>No other gardens yet.</Text>
+                <Text style={[styles.helper, { color: theme.textMuted }]}>No other gardens yet.</Text>
               )}
             <View style={styles.addRow}>
               <Pressable
                 style={[
                   styles.secondaryButton,
+                  { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor },
                   (!importSourceGardenId || importFromGardenMutation.isPending) && styles.buttonDisabled,
                 ]}
                 disabled={!importSourceGardenId || importFromGardenMutation.isPending}
                 onPress={() => importFromGardenMutation.mutate()}
               >
-                <Text style={styles.secondaryButtonText}>
+                <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>
                   {importFromGardenMutation.isPending ? "Importing..." : "Import"}
                 </Text>
               </Pressable>
             </View>
-            {importMessage && <Text style={styles.helper}>{importMessage}</Text>}
+            {importMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{importMessage}</Text>}
           </View>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Plant List</Text>
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Plant List</Text>
           <View style={styles.listControls}>
             <TextInput
               value={listSearch}
               onChangeText={setListSearch}
               placeholder="Search list"
-              style={styles.input}
+              style={[styles.input, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
               autoCapitalize="none"
             />
             <View style={styles.configChips}>
               <Pressable
-                style={[styles.configChip, listSortDirection === "asc" && styles.configChipActive]}
+                style={[styles.configChip, { backgroundColor: listSortDirection === "asc" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
                 onPress={() => setListSortDirection("asc")}
               >
-                <Text style={styles.configChipText}>A-Z</Text>
+                <Text style={[styles.configChipText, { color: listSortDirection === "asc" ? theme.primaryActionText : theme.secondaryActionText }]}>A-Z</Text>
               </Pressable>
               <Pressable
-                style={[styles.configChip, listSortDirection === "desc" && styles.configChipActive]}
+                style={[styles.configChip, { backgroundColor: listSortDirection === "desc" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
                 onPress={() => setListSortDirection("desc")}
               >
-                <Text style={styles.configChipText}>Z-A</Text>
+                <Text style={[styles.configChipText, { color: listSortDirection === "desc" ? theme.primaryActionText : theme.secondaryActionText }]}>Z-A</Text>
               </Pressable>
             </View>
           </View>
-          {wishlistQuery.isLoading && <Text style={styles.helper}>Loading...</Text>}
+          {wishlistQuery.isLoading && <Text style={[styles.helper, { color: theme.textMuted }]}>Loading...</Text>}
           {!wishlistQuery.isLoading && (wishlistQuery.data?.length ?? 0) === 0 && (
-            <Text style={styles.helper}>No plants yet.</Text>
+            <Text style={[styles.helper, { color: theme.textMuted }]}>No plants yet.</Text>
           )}
           {!wishlistQuery.isLoading && (wishlistQuery.data?.length ?? 0) > 0 && visibleWishlistItems.length === 0 && (
-            <Text style={styles.helper}>No plants match that filter.</Text>
+            <Text style={[styles.helper, { color: theme.textMuted }]}>No plants match that filter.</Text>
           )}
           {visibleWishlistItems.map((item) => (
-            <View key={item.id} style={styles.wishRow}>
+            <View key={item.id} style={[styles.wishRow, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground }]}>
               <View style={styles.wishMain}>
                 {(() => {
                   const normalizedName = item.plant.commonName.trim().toLowerCase();
@@ -616,7 +623,7 @@ export default function GardenGrowListScreen() {
                   const isDescriptionExpanded = Boolean(expandedDescriptions[item.id]);
                   return (
                     <>
-                <Text style={styles.wishName}>{item.plant.commonName}</Text>
+                <Text style={[styles.wishName, { color: theme.textPrimary }]}>{item.plant.commonName}</Text>
                 {description && (
                   <>
                     <Pressable
@@ -628,17 +635,17 @@ export default function GardenGrowListScreen() {
                         }))
                       }
                     >
-                      <Text style={styles.descriptionToggleText}>
-                        {isDescriptionExpanded ? "▾ Description" : "▸ Description"}
+                      <Text style={[styles.descriptionToggleText, { color: theme.secondaryActionText }]}>
+                        {isDescriptionExpanded ? "v Description" : "> Description"}
                       </Text>
                     </Pressable>
-                    {isDescriptionExpanded && <Text style={styles.descriptionBody}>{description}</Text>}
+                    {isDescriptionExpanded && <Text style={[styles.descriptionBody, { backgroundColor: theme.appBackground, color: theme.textMuted }]}>{description}</Text>}
                   </>
                 )}
-                {item.varietyName && <Text style={styles.wishMeta}>Variety: {item.varietyName}</Text>}
-                {item.plant.scientificName && <Text style={styles.wishMeta}>{item.plant.scientificName}</Text>}
-                {item.plant.familyName && <Text style={styles.wishMeta}>Family: {item.plant.familyName}</Text>}
-                <Text style={styles.wishMeta}>
+                {item.varietyName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Variety: {item.varietyName}</Text>}
+                {item.plant.scientificName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{item.plant.scientificName}</Text>}
+                {item.plant.familyName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Family: {item.plant.familyName}</Text>}
+                <Text style={[styles.wishMeta, { color: theme.textMuted }]}>
                   {(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"}
                   {item.bedName ? ` - ${item.bedName}` : ""}
                   {isPerennialFromBed ? " - Perennial" : ""}
@@ -647,9 +654,9 @@ export default function GardenGrowListScreen() {
                 </Text>
                 <View style={styles.inlineControls}>
                   <View style={styles.qtyRow}>
-                    <Text style={styles.qtyLabel}>Quantity</Text>
+                    <Text style={[styles.qtyLabel, { color: theme.textPrimary }]}>Quantity</Text>
                     <Pressable
-                      style={styles.qtyButton}
+                      style={[styles.qtyButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
                       onPress={() =>
                         setEntryDrafts((prev) => ({
                           ...prev,
@@ -663,11 +670,11 @@ export default function GardenGrowListScreen() {
                         }))
                       }
                     >
-                      <Text style={styles.qtyButtonText}>-</Text>
+                      <Text style={[styles.qtyButtonText, { color: theme.secondaryActionText }]}>-</Text>
                     </Pressable>
-                    <Text style={styles.qtyValue}>{Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}</Text>
+                    <Text style={[styles.qtyValue, { color: theme.textPrimary }]}>{Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}</Text>
                     <Pressable
-                      style={styles.qtyButton}
+                      style={[styles.qtyButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
                       onPress={() =>
                         setEntryDrafts((prev) => ({
                           ...prev,
@@ -681,7 +688,7 @@ export default function GardenGrowListScreen() {
                         }))
                       }
                     >
-                      <Text style={styles.qtyButtonText}>+</Text>
+                      <Text style={[styles.qtyButtonText, { color: theme.secondaryActionText }]}>+</Text>
                     </Pressable>
                   </View>
                   <TextInput
@@ -699,12 +706,13 @@ export default function GardenGrowListScreen() {
                       }))
                     }
                     placeholder="Variety (optional)"
-                    style={styles.inlineInput}
+                    style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
                     autoCapitalize="words"
                   />
                   <ToggleSwitch
                     label={(entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded) ? "Needs support" : "No support"}
                     value={entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded}
+                    theme={theme}
                     onToggle={(nextValue) =>
                       setEntryDrafts((prev) => ({
                         ...prev,
@@ -721,6 +729,7 @@ export default function GardenGrowListScreen() {
                   <ToggleSwitch
                     label={(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"}
                     value={(entryDrafts[item.id]?.status ?? item.status) === "already_growing"}
+                    theme={theme}
                     onToggle={(isGrowing) =>
                       setEntryDrafts((prev) => ({
                         ...prev,
@@ -742,7 +751,7 @@ export default function GardenGrowListScreen() {
                           return (
                             <Pressable
                               key={`${item.id}-${bed.id}`}
-                              style={[styles.configChip, selected && styles.configChipActive]}
+                              style={[styles.configChip, { backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
                               onPress={() =>
                                 setEntryDrafts((prev) => ({
                                   ...prev,
@@ -756,7 +765,7 @@ export default function GardenGrowListScreen() {
                                 }))
                               }
                             >
-                              <Text style={styles.configChipText}>{bed.name}</Text>
+                              <Text style={[styles.configChipText, { color: selected ? theme.primaryActionText : theme.secondaryActionText }]}>{bed.name}</Text>
                             </Pressable>
                           );
                         })}
@@ -770,32 +779,32 @@ export default function GardenGrowListScreen() {
               </View>
               <View style={styles.rowActions}>
                 <Pressable
-                  style={styles.cloneInlineButton}
+                  style={[styles.cloneInlineButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
                   disabled={cloneEntryMutation.isPending}
                   onPress={() => cloneEntryMutation.mutate(item)}
                 >
-                  <Text style={styles.cloneInlineButtonText}>Clone</Text>
+                  <Text style={[styles.cloneInlineButtonText, { color: theme.secondaryActionText }]}>Clone</Text>
                 </Pressable>
                 <Pressable
-                  style={styles.cloneInlineButton}
+                  style={[styles.cloneInlineButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
                   disabled={splitOneMutation.isPending || (item.quantity ?? 1) <= 1}
                   onPress={() => splitOneMutation.mutate(item)}
                 >
-                  <Text style={styles.cloneInlineButtonText}>Split 1</Text>
+                  <Text style={[styles.cloneInlineButtonText, { color: theme.secondaryActionText }]}>Split 1</Text>
                 </Pressable>
                 <Pressable
-                  style={styles.saveInlineButton}
+                  style={[styles.saveInlineButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground }]}
                   disabled={updateEntryMutation.isPending}
                   onPress={() => updateEntryMutation.mutate(item.id)}
                 >
-                  <Text style={styles.saveInlineButtonText}>Save</Text>
+                  <Text style={[styles.saveInlineButtonText, { color: theme.primaryActionText }]}>Save</Text>
                 </Pressable>
                 <Pressable
-                  style={styles.removeButton}
+                  style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.dangerActionBackground }]}
                   disabled={removeMutation.isPending}
                   onPress={() => removeMutation.mutate(item.id)}
                 >
-                  <Text style={styles.removeButtonText}>Remove</Text>
+                  <Text style={[styles.removeButtonText, { color: theme.dangerActionText }]}>Remove</Text>
                 </Pressable>
               </View>
             </View>
@@ -993,12 +1002,13 @@ function ToggleSwitch(props: {
   label: string;
   value: boolean;
   onToggle: (nextValue: boolean) => void;
+  theme: import("@/ui/theme/themeTokens").ThemeTokens;
 }) {
   return (
-    <Pressable style={styles.switchRow} onPress={() => props.onToggle(!props.value)}>
-      <Text style={styles.switchLabel}>{props.label}</Text>
-      <View style={[styles.switchTrack, props.value && styles.switchTrackActive]}>
-        <View style={[styles.switchThumb, props.value && styles.switchThumbActive]} />
+    <Pressable style={[styles.switchRow, { backgroundColor: props.theme.secondaryActionBackground }]} onPress={() => props.onToggle(!props.value)}>
+      <Text style={[styles.switchLabel, { color: props.theme.secondaryActionText }]}>{props.label}</Text>
+      <View style={[styles.switchTrack, { backgroundColor: props.value ? props.theme.toggleOnBackground : props.theme.toggleOffBackground }]}>
+        <View style={[styles.switchThumb, { backgroundColor: props.theme.toggleThumbColor }, props.value && styles.switchThumbActive]} />
       </View>
     </Pressable>
   );

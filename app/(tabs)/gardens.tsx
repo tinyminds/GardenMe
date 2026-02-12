@@ -6,10 +6,12 @@ import { useGardenSummariesQuery } from "@/features/gardens/hooks/useGardenSumma
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 
 const repository = new SqliteGardenRepository();
 
 export default function GardensTabScreen() {
+  const { theme } = useTheme();
   const { data, isLoading, isError } = useGardensQuery();
   const gardens = data ?? [];
   const summariesQuery = useGardenSummariesQuery(gardens);
@@ -31,18 +33,27 @@ export default function GardensTabScreen() {
     ]);
   };
 
-  if (isLoading) return <Text style={styles.state}>Loading gardens...</Text>;
-  if (isError) return <Text style={styles.state}>Could not load gardens.</Text>;
+  if (isLoading) return <Text style={[styles.state, { color: theme.textMuted }]}>Loading gardens...</Text>;
+  if (isError) return <Text style={[styles.state, { color: theme.textMuted }]}>Could not load gardens.</Text>;
 
   return (
-    <View style={styles.container}>
-      <Link href="/gardens/new" style={styles.addLink}>+ New Garden</Link>
+    <View style={[styles.container, { backgroundColor: theme.appBackground }]}>
+      <Link href="/gardens/new" style={[styles.addLink, { color: theme.primaryActionBackground }]}>+ New Garden</Link>
       <FlatList
         data={gardens}
         keyExtractor={(item) => item.id}
-        ListEmptyComponent={<Text style={styles.state}>No gardens yet.</Text>}
+        ListEmptyComponent={<Text style={[styles.state, { color: theme.textMuted }]}>No gardens yet.</Text>}
         renderItem={({ item }) => (
-          <View style={[styles.card, selectedGardenId === item.id && styles.cardActive]}>
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.surfaceBackground,
+                borderColor: selectedGardenId === item.id ? theme.primaryActionBackground : theme.borderColor,
+              },
+              selectedGardenId === item.id && styles.cardActive,
+            ]}
+          >
             <Link href={`/gardens/${item.id}`} asChild>
               <Pressable
                 style={styles.cardMain}
@@ -50,19 +61,15 @@ export default function GardensTabScreen() {
                   setSelectedGardenId(item.id);
                 }}
               >
-                <Text style={styles.name}>{item.name}</Text>
-                {item.locationLabel && <Text style={styles.locationText}>{item.locationLabel}</Text>}
-                <Text style={styles.coordsText}>
-                  Coordinates: {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}
-                </Text>
+                <Text style={[styles.name, { color: theme.textPrimary }]}>{item.name}</Text>
+                {item.locationLabel && <Text style={[styles.locationText, { color: theme.textMuted }]}>{item.locationLabel}</Text>}
+                <Text style={[styles.coordsText, { color: theme.infoText }]}>Coordinates: {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}</Text>
                 <View style={styles.metaRow}>
-                  <Text style={styles.metaChip}>
-                    Area {item.scaleCalibration?.boundaryAreaSqM ? `${item.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
-                  </Text>
-                  <Text style={styles.metaChip}>Beds {summaries[item.id]?.bedCount ?? 0}</Text>
-                  <Text style={styles.metaChip}>Features {summaries[item.id]?.featureCount ?? 0}</Text>
+                  <Text style={[styles.metaChip, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Area {item.scaleCalibration?.boundaryAreaSqM ? `${item.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}</Text>
+                  <Text style={[styles.metaChip, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Beds {summaries[item.id]?.bedCount ?? 0}</Text>
+                  <Text style={[styles.metaChip, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Features {summaries[item.id]?.featureCount ?? 0}</Text>
                 </View>
-                <Text style={styles.statusText}>
+                <Text style={[styles.statusText, { color: theme.textMuted }]}>
                   {item.scaleCalibration
                     ? (summaries[item.id]?.bedCount ?? 0) > 0 || (summaries[item.id]?.featureCount ?? 0) > 0
                       ? "Mapped and in progress"
@@ -71,8 +78,11 @@ export default function GardensTabScreen() {
                 </Text>
               </Pressable>
             </Link>
-            <Pressable style={styles.deleteButton} onPress={() => confirmDelete(item.id, item.name)}>
-              <Text style={styles.deleteButtonText}>×</Text>
+            <Pressable
+              style={[styles.deleteButton, { borderColor: theme.borderColor, backgroundColor: theme.dangerActionBackground }]}
+              onPress={() => confirmDelete(item.id, item.name)}
+            >
+              <Text style={[styles.deleteButtonText, { color: theme.dangerActionText }]}>×</Text>
             </Pressable>
           </View>
         )}
@@ -82,26 +92,22 @@ export default function GardensTabScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#F4F8F3" },
-  addLink: { color: "#2F6F4F", marginBottom: 12, fontWeight: "700" },
+  container: { flex: 1, padding: 16 },
+  addLink: { marginBottom: 12, fontWeight: "700" },
   card: {
     position: "relative",
-    backgroundColor: "#EAF3E8",
     borderRadius: 12,
     marginBottom: 10,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "#D7E6D6",
   },
-  cardActive: { borderColor: "#2F6F4F", borderWidth: 2 },
+  cardActive: { borderWidth: 2 },
   cardMain: { padding: 14, paddingRight: 54, gap: 7 },
   name: { fontSize: 18, fontWeight: "700", marginBottom: 4 },
-  locationText: { color: "#38503F", fontWeight: "600" },
-  coordsText: { color: "#617A6A", fontSize: 12, marginTop: -1 },
+  locationText: { fontWeight: "600" },
+  coordsText: { fontSize: 12, marginTop: -1 },
   metaRow: { flexDirection: "row", flexWrap: "wrap", columnGap: 8, rowGap: 8, marginTop: 3 },
   metaChip: {
-    backgroundColor: "#DCE9DA",
-    color: "#284534",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -110,7 +116,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     alignSelf: "flex-start",
   },
-  statusText: { color: "#365648", fontWeight: "700", marginTop: 2 },
+  statusText: { fontWeight: "700", marginTop: 2 },
   deleteButton: {
     position: "absolute",
     right: 10,
@@ -120,10 +126,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#FBE3DE",
     borderWidth: 1,
-    borderColor: "#DFA69A",
     alignItems: "center",
     justifyContent: "center",
   },
-  deleteButtonText: { color: "#A13422", fontWeight: "800", fontSize: 16, lineHeight: 18 },
+  deleteButtonText: { fontWeight: "800", fontSize: 16, lineHeight: 18 },
   state: { padding: 20 },
 });
+

@@ -1,0 +1,102 @@
+export type ThemeTokens = {
+  appBackground: string;
+  surfaceBackground: string;
+  borderColor: string;
+  textPrimary: string;
+  textMuted: string;
+  infoText: string;
+  primaryActionBackground: string;
+  primaryActionText: string;
+  secondaryActionBackground: string;
+  secondaryActionText: string;
+  disabledActionBackground: string;
+  disabledActionText: string;
+  dangerActionBackground: string;
+  dangerActionText: string;
+  toggleOnBackground: string;
+  toggleOffBackground: string;
+  toggleThumbColor: string;
+  modalBackdrop: string;
+  modalSurfaceBackground: string;
+  modalSurfaceBorder: string;
+  gridLineColor: string;
+  mapBoundaryFill: string;
+  mapBoundaryStroke: string;
+  mapBedFill: string;
+  mapBedStroke: string;
+  mapLawnFill: string;
+  mapLawnStroke: string;
+  mapTreeFill: string;
+  mapTreeStroke: string;
+  mapShrubFill: string;
+  mapShrubStroke: string;
+  mapHedgeFill: string;
+  mapHedgeStroke: string;
+  mapPathFill: string;
+  mapPathStroke: string;
+  mapWallFill: string;
+  mapWallStroke: string;
+  mapFenceFill: string;
+  mapFenceStroke: string;
+  mapTrellisFill: string;
+  mapTrellisStroke: string;
+  mapPatioFill: string;
+  mapPatioStroke: string;
+  mapDeckFill: string;
+  mapDeckStroke: string;
+};
+
+export const DEFAULT_THEME_TOKENS: ThemeTokens = {
+  appBackground: "#F0F6EE",
+  surfaceBackground: "#FFFFFF",
+  borderColor: "#D8E5D5",
+  textPrimary: "#1E402C",
+  textMuted: "#4E6857",
+  infoText: "#587063",
+  primaryActionBackground: "#1E6A42",
+  primaryActionText: "#FFFFFF",
+  secondaryActionBackground: "#DFEADF",
+  secondaryActionText: "#1F3F2B",
+  disabledActionBackground: "#A0B2A4",
+  disabledActionText: "#FFFFFF",
+  dangerActionBackground: "#C74C3A",
+  dangerActionText: "#FFFFFF",
+  toggleOnBackground: "#2D6A49",
+  toggleOffBackground: "#BFD1BC",
+  toggleThumbColor: "#FFFFFF",
+  modalBackdrop: "#00000066",
+  modalSurfaceBackground: "#FFFFFF",
+  modalSurfaceBorder: "#D8E5D5",
+  gridLineColor: "#14432E4D",
+  mapBoundaryFill: "#2762421F",
+  mapBoundaryStroke: "#2D6A49",
+  mapBedFill: "#3582524D",
+  mapBedStroke: "#101010",
+  mapLawnFill: "#6FAB5F38",
+  mapLawnStroke: "#101010",
+  mapTreeFill: "#216C3C4D",
+  mapTreeStroke: "#1A5C35",
+  mapShrubFill: "#60A85F47",
+  mapShrubStroke: "#3B7F45",
+  mapHedgeFill: "#3F824942",
+  mapHedgeStroke: "#2D7A40",
+  mapPathFill: "#9A9A9A47",
+  mapPathStroke: "#7A7A7A",
+  mapWallFill: "#76767659",
+  mapWallStroke: "#4D4D4D",
+  mapFenceFill: "#916A4A4D",
+  mapFenceStroke: "#7F5738",
+  mapTrellisFill: "#BBAB4C4D",
+  mapTrellisStroke: "#9F8D2E",
+  mapPatioFill: "#94949452",
+  mapPatioStroke: "#6A6A6A",
+  mapDeckFill: "#93673E52",
+  mapDeckStroke: "#7A4E2B",
+};
+
+export function mergeThemeTokens(input?: Partial<ThemeTokens> | null): ThemeTokens {
+  return {
+    ...DEFAULT_THEME_TOKENS,
+    ...(input ?? {}),
+  };
+}

@@ -21,6 +21,7 @@ import { captureRef } from "react-native-view-shot";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/state/queryClient";
 import { makeId } from "@/utils/id";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
@@ -45,20 +46,6 @@ const featureTypes: GardenFeatureType[] = [
   GardenFeatureType.PATIO,
   GardenFeatureType.DECK,
 ];
-
-const typeColors: Record<GardenFeatureType, { fill: string; stroke: string }> = {
-  bed: { fill: "rgba(53,130,82,0.3)", stroke: "#101010" },
-  lawn: { fill: "rgba(111,171,95,0.22)", stroke: "#101010" },
-  tree: { fill: "rgba(33,108,60,0.3)", stroke: "#1A5C35" },
-  shrub: { fill: "rgba(96,168,95,0.28)", stroke: "#3B7F45" },
-  hedge: { fill: "rgba(63,130,73,0.26)", stroke: "#2D7A40" },
-  path: { fill: "rgba(154,154,154,0.28)", stroke: "#7A7A7A" },
-  wall: { fill: "rgba(118,118,118,0.35)", stroke: "#4D4D4D" },
-  fence: { fill: "rgba(145,106,74,0.3)", stroke: "#7F5738" },
-  trellis: { fill: "rgba(187,171,76,0.3)", stroke: "#9F8D2E" },
-  patio: { fill: "rgba(148,148,148,0.32)", stroke: "#6A6A6A" },
-  deck: { fill: "rgba(147,103,62,0.32)", stroke: "#7A4E2B" },
-};
 
 type ZonePreview = {
   id: string;
@@ -89,6 +76,7 @@ const BASE_CANVAS_HEIGHT = 700;
 const AUTO_CLOSE_PX = 24;
 
 export default function GardenMapEditorScreen() {
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
   const gardenId = Array.isArray(params.gardenId) ? params.gardenId[0] : params.gardenId;
 
@@ -191,6 +179,22 @@ export default function GardenMapEditorScreen() {
   const gridStepY = calibration ? 1 / Math.max(calibration.metersPerPixel * calibration.baseHeight, 1e-6) : 0;
   const shapeOptions = getShapeOptionsForType(activeType);
   const defaultShapeMode = shapeOptions[0]?.mode ?? "points";
+  const typeColors: Record<GardenFeatureType, { fill: string; stroke: string }> = useMemo(
+    () => ({
+      bed: { fill: theme.mapBedFill, stroke: theme.mapBedStroke },
+      lawn: { fill: theme.mapLawnFill, stroke: theme.mapLawnStroke },
+      tree: { fill: theme.mapTreeFill, stroke: theme.mapTreeStroke },
+      shrub: { fill: theme.mapShrubFill, stroke: theme.mapShrubStroke },
+      hedge: { fill: theme.mapHedgeFill, stroke: theme.mapHedgeStroke },
+      path: { fill: theme.mapPathFill, stroke: theme.mapPathStroke },
+      wall: { fill: theme.mapWallFill, stroke: theme.mapWallStroke },
+      fence: { fill: theme.mapFenceFill, stroke: theme.mapFenceStroke },
+      trellis: { fill: theme.mapTrellisFill, stroke: theme.mapTrellisStroke },
+      patio: { fill: theme.mapPatioFill, stroke: theme.mapPatioStroke },
+      deck: { fill: theme.mapDeckFill, stroke: theme.mapDeckStroke },
+    }),
+    [theme]
+  );
 
   useEffect(() => {
     if (editingZoneId) return;
@@ -832,25 +836,25 @@ export default function GardenMapEditorScreen() {
   })();
 
   return (
-    <View style={styles.page}>
-      <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+    <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.appBackground }]} edges={["left", "right"]}>
         <ScrollView contentContainerStyle={styles.scrollContent} scrollEnabled={!isEditingCanvas || canvasMode === "draw"}>
         <View style={styles.header}>
-          <Text style={styles.title}>Garden Mapper</Text>
-          <Text style={styles.subtitle}>Map beds and spaces quickly with tap-to-draw and tap-to-edit.</Text>
+          <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Mapper</Text>
+          <Text style={[styles.subtitle, { color: theme.textMuted }]}>Map beds and spaces quickly with tap-to-draw and tap-to-edit.</Text>
         </View>
 
-        <View style={styles.guidanceCard}>
-          <Text style={styles.guidanceText}>{guidanceText}</Text>
+        <View style={[styles.guidanceCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.guidanceText, { color: theme.infoText }]}>{guidanceText}</Text>
           {!calibration && gardenId && (
-            <Link href={`/gardens/${gardenId}/setup`} style={styles.setupLinkText}>
+            <Link href={`/gardens/${gardenId}/setup`} style={[styles.setupLinkText, { color: theme.primaryActionBackground }]}>
               Set scale in Setup to enable sqm estimates
             </Link>
           )}
         </View>
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>1. Select Area Type</Text>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>1. Select Area Type</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeRow}>
             {featureTypes.map((type) => {
               const selected = type === activeType;
@@ -868,9 +872,12 @@ export default function GardenMapEditorScreen() {
                     setPresetShape(null);
                     setName(nextZoneName(type, existingZones));
                   }}
-                  style={[styles.typeChip, selected && styles.typeChipActive]}
+                  style={[
+                    styles.typeChip,
+                    { backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                  ]}
                 >
-                  <Text style={[styles.typeChipText, selected && styles.typeChipTextActive]}>{type}</Text>
+                  <Text style={[styles.typeChipText, { color: selected ? theme.primaryActionText : theme.secondaryActionText }]}>{type}</Text>
                 </Pressable>
               );
             })}
@@ -879,10 +886,13 @@ export default function GardenMapEditorScreen() {
             {shapeOptions.map((option) => (
               <Pressable
                 key={option.mode}
-                style={[styles.secondaryButton, shapeDraftMode === option.mode && styles.secondaryButtonActive]}
+                style={[
+                  styles.secondaryButton,
+                  { backgroundColor: shapeDraftMode === option.mode ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                ]}
                 onPress={() => setShapeDraftMode(option.mode)}
               >
-                <Text style={[styles.secondaryButtonText, shapeDraftMode === option.mode && styles.secondaryButtonTextActive]}>
+                <Text style={[styles.secondaryButtonText, { color: shapeDraftMode === option.mode ? theme.primaryActionText : theme.secondaryActionText }]}>
                   {option.label}
                 </Text>
               </Pressable>
@@ -890,16 +900,16 @@ export default function GardenMapEditorScreen() {
           </View>
         </View>
 
-        <View style={styles.sectionCard}>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <View style={styles.sectionTitleRow}>
             <Text style={styles.sectionTitle}>2. Planner Canvas</Text>
             <View style={styles.zoomRow}>
-              <Pressable style={styles.zoomButton} onPress={() => setZoom((z) => clamp(z - 0.25, 0.2, 15))}>
-                <Text style={styles.zoomButtonText}>-</Text>
+              <Pressable style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setZoom((z) => clamp(z - 0.25, 0.2, 15))}>
+                <Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>-</Text>
               </Pressable>
-              <Text style={styles.zoomText}>{Math.round(zoom * 100)}%</Text>
-              <Pressable style={styles.zoomButton} onPress={() => setZoom((z) => clamp(z + 0.25, 0.2, 15))}>
-                <Text style={styles.zoomButtonText}>+</Text>
+              <Text style={[styles.zoomText, { color: theme.textPrimary }]}>{Math.round(zoom * 100)}%</Text>
+              <Pressable style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setZoom((z) => clamp(z + 0.25, 0.2, 15))}>
+                <Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>+</Text>
               </Pressable>
             </View>
           </View>
@@ -933,34 +943,43 @@ export default function GardenMapEditorScreen() {
           </View>
           <View style={styles.toolbarRow}>
             <Pressable
-              style={[styles.secondaryButton, canvasMode === "draw" && styles.secondaryButtonActive]}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: canvasMode === "draw" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+              ]}
               onPress={() => setCanvasMode("draw")}
             >
-              <Text style={[styles.secondaryButtonText, canvasMode === "draw" && styles.secondaryButtonTextActive]}>Draw</Text>
+              <Text style={[styles.secondaryButtonText, { color: canvasMode === "draw" ? theme.primaryActionText : theme.secondaryActionText }]}>Draw</Text>
             </Pressable>
             <Pressable
-              style={[styles.secondaryButton, canvasMode === "pan" && styles.secondaryButtonActive]}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: canvasMode === "pan" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+              ]}
               onPress={() => {
                 setCanvasMode("pan");
                 setSelectedPointIndex(null);
               }}
             >
-              <Text style={[styles.secondaryButtonText, canvasMode === "pan" && styles.secondaryButtonTextActive]}>Pan</Text>
+              <Text style={[styles.secondaryButtonText, { color: canvasMode === "pan" ? theme.primaryActionText : theme.secondaryActionText }]}>Pan</Text>
             </Pressable>
             <Pressable
-              style={[styles.secondaryButton, isExportingImage && styles.secondaryButtonReady]}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: isExportingImage ? theme.disabledActionBackground : theme.secondaryActionBackground },
+              ]}
               onPress={() => void exportPlannerImage()}
               disabled={isExportingImage}
             >
-              <Text style={[styles.secondaryButtonText, isExportingImage && styles.secondaryButtonTextReady]}>
+              <Text style={[styles.secondaryButtonText, { color: isExportingImage ? theme.disabledActionText : theme.secondaryActionText }]}>
                 {isExportingImage ? "Exporting..." : "Export Image"}
               </Text>
             </Pressable>
           </View>
-          <Text style={styles.infoText}>
+          <Text style={[styles.infoText, { color: theme.infoText }]}>
             Mode: {canvasMode === "draw" ? "Draw/edit points." : "Pan/zoom/twist canvas."}
           </Text>
-          <Text style={styles.infoText}>View rotation: {viewRotationDeg.toFixed(1)}deg</Text>
+          <Text style={[styles.infoText, { color: theme.infoText }]}>View rotation: {viewRotationDeg.toFixed(1)}deg</Text>
 
           <View style={styles.canvasViewport} onLayout={onViewportLayout}>
             <ScrollView
@@ -987,7 +1006,7 @@ export default function GardenMapEditorScreen() {
                 {showBaseImage && gardenQuery.data?.photoUri ? (
                   <Image source={{ uri: gardenQuery.data.photoUri }} style={styles.canvasImage} resizeMode="stretch" />
                 ) : (
-                  <View style={[styles.canvasImage, styles.placeholder]} />
+                    <View style={[styles.canvasImage, styles.placeholder, { backgroundColor: theme.appBackground }]} />
                 )}
 
                 <Pressable
@@ -1003,7 +1022,7 @@ export default function GardenMapEditorScreen() {
                         y1={0}
                         x2={x}
                         y2={canvas.height}
-                        stroke="rgba(20,67,46,0.3)"
+                        stroke={theme.gridLineColor}
                         strokeWidth={1}
                       />
                     ))}
@@ -1014,21 +1033,21 @@ export default function GardenMapEditorScreen() {
                         y1={y}
                         x2={canvas.width}
                         y2={y}
-                        stroke="rgba(20,67,46,0.3)"
+                        stroke={theme.gridLineColor}
                         strokeWidth={1}
                       />
                     ))}
                     {!isBoundaryRect(gardenBoundary) && (
                       <Path
                         d={`${rectPath(canvas.width, canvas.height)} ${polygonPath(gardenBoundary, canvas.width, canvas.height)}`}
-                        fill="#E7EFE5"
+                        fill={theme.appBackground}
                         fillRule="evenodd"
                       />
                     )}
                     <Polygon
                       points={toSvgPoints(gardenBoundary, canvas)}
-                      fill={showBaseImage && gardenQuery.data?.photoUri ? "transparent" : "rgba(39,98,66,0.12)"}
-                      stroke="#2D6A49"
+                      fill={showBaseImage && gardenQuery.data?.photoUri ? "transparent" : theme.mapBoundaryFill}
+                      stroke={theme.mapBoundaryStroke}
                       strokeWidth={showBaseImage && gardenQuery.data?.photoUri ? 3 : 4}
                     />
                     {boundaryMeasurements.map((measurement, index) => (
@@ -1040,7 +1059,7 @@ export default function GardenMapEditorScreen() {
                         alignmentBaseline="middle"
                         fontSize={11 * annotationScale}
                         fontWeight="700"
-                        fill="#173A29"
+                        fill={theme.textPrimary}
                         transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
                       >
                         {measurement.label}
@@ -1050,7 +1069,7 @@ export default function GardenMapEditorScreen() {
                       const points = toSvgPoints(zone.polygon, canvas);
                       const color = typeColors[zone.type];
                       const isEditingThis = editingZoneId === zone.id;
-                      const stripeSpec = getStripeSpecForType(zone.type);
+                      const stripeSpec = getStripeSpecForType(zone.type, theme);
                       const hatchLines = stripeSpec
                         ? buildHatchLines(canvas.width, canvas.height, stripeSpec.spacingPx, stripeSpec.angleDeg)
                         : [];
@@ -1069,7 +1088,7 @@ export default function GardenMapEditorScreen() {
                           <Polygon
                             points={points}
                             fill={color.fill}
-                            stroke={isEditingThis ? "#E85D2A" : color.stroke}
+                            stroke={isEditingThis ? theme.primaryActionBackground : color.stroke}
                             strokeWidth={isEditingThis ? 4 : 2}
                           />
                           {stripeSpec && clippedHatchLines.map((line, index) => (
@@ -1093,7 +1112,7 @@ export default function GardenMapEditorScreen() {
                               alignmentBaseline="middle"
                               fontSize={11 * annotationScale}
                               fontWeight="700"
-                              fill="#1B3D2B"
+                              fill={theme.textPrimary}
                               transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
                             >
                               {measurement.label}
@@ -1107,7 +1126,7 @@ export default function GardenMapEditorScreen() {
                               alignmentBaseline="middle"
                               fontSize={bedLabel.fontSize * annotationScale}
                               fontWeight="800"
-                              fill="#000000"
+                              fill={theme.textPrimary}
                             >
                               {truncateLabel(zone.name, 20)}
                             </SvgText>
@@ -1120,17 +1139,17 @@ export default function GardenMapEditorScreen() {
                       <>
                         <Polygon
                           points={toSvgPoints(draftPoints, canvas)}
-                          fill={isClosed ? typeColors[activeType].fill : "rgba(0,0,0,0.06)"}
+                          fill={isClosed ? typeColors[activeType].fill : withAlpha(theme.textPrimary, 0.1)}
                           stroke={typeColors[activeType].stroke}
                           strokeWidth={3}
                           {...(!isClosed ? { strokeDasharray: [10, 5] } : {})}
                         />
-                        {isClosed && getStripeSpecForType(activeType) && clipHatchLinesToPolygon(
+                        {isClosed && getStripeSpecForType(activeType, theme) && clipHatchLinesToPolygon(
                           buildHatchLines(
                             canvas.width,
                             canvas.height,
-                            getStripeSpecForType(activeType)!.spacingPx,
-                            getStripeSpecForType(activeType)!.angleDeg
+                            getStripeSpecForType(activeType, theme)!.spacingPx,
+                            getStripeSpecForType(activeType, theme)!.angleDeg
                           ),
                           draftPoints,
                           canvas.width,
@@ -1142,9 +1161,9 @@ export default function GardenMapEditorScreen() {
                             y1={line.y1}
                             x2={line.x2}
                             y2={line.y2}
-                            stroke={getStripeSpecForType(activeType)!.color}
+                            stroke={getStripeSpecForType(activeType, theme)!.color}
                             strokeWidth={1}
-                            opacity={getStripeSpecForType(activeType)!.opacity}
+                            opacity={getStripeSpecForType(activeType, theme)!.opacity}
                           />
                         ))}
                         {draftBedMeasurementLabels.map((measurement, index) => (
@@ -1156,7 +1175,7 @@ export default function GardenMapEditorScreen() {
                             alignmentBaseline="middle"
                             fontSize={11 * annotationScale}
                             fontWeight="700"
-                            fill="#1B3D2B"
+                            fill={theme.textPrimary}
                             transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
                           >
                             {measurement.label}
@@ -1171,8 +1190,8 @@ export default function GardenMapEditorScreen() {
                         cx={point.x * canvas.width}
                         cy={point.y * canvas.height}
                         r={selectedPointIndex === index ? 8 : 6}
-                        fill={selectedPointIndex === index ? "#E85D2A" : "#F4F4F4"}
-                        stroke="#1F3D2A"
+                        fill={selectedPointIndex === index ? theme.primaryActionBackground : theme.surfaceBackground}
+                        stroke={theme.textPrimary}
                         strokeWidth={2}
                       />
                     ))}
@@ -1220,8 +1239,8 @@ export default function GardenMapEditorScreen() {
           </View>
         </View>
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>3. Tools</Text>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>3. Tools</Text>
           <View style={styles.toolbarRow}>
             <ToggleSwitch
               label="Snap"
@@ -1230,7 +1249,10 @@ export default function GardenMapEditorScreen() {
               onToggle={setSnapToGrid}
             />
             <Pressable
-              style={[styles.secondaryButton, (canApplyShape || canCloseShape) && styles.secondaryButtonReady]}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: canApplyShape || canCloseShape ? theme.primaryActionBackground : theme.secondaryActionBackground },
+              ]}
               onPress={() => {
                 if (presetShape) {
                   setPresetShape(null);
@@ -1241,34 +1263,40 @@ export default function GardenMapEditorScreen() {
               }}
               disabled={!canApplyShape && !canCloseShape}
             >
-              <Text style={[styles.secondaryButtonText, (canApplyShape || canCloseShape) && styles.secondaryButtonTextReady]}>
+              <Text style={[styles.secondaryButtonText, { color: canApplyShape || canCloseShape ? theme.primaryActionText : theme.secondaryActionText }]}>
                 {shapeActionLabel}
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.secondaryButton, canUndo && styles.secondaryButtonReady]}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: canUndo ? theme.primaryActionBackground : theme.secondaryActionBackground },
+              ]}
               onPress={handleUndo}
               disabled={!canUndo}
             >
-              <Text style={[styles.secondaryButtonText, canUndo && styles.secondaryButtonTextReady]}>Undo</Text>
+              <Text style={[styles.secondaryButtonText, { color: canUndo ? theme.primaryActionText : theme.secondaryActionText }]}>Undo</Text>
             </Pressable>
             <Pressable
-              style={[styles.secondaryButton, canDeletePoint && styles.secondaryButtonReady]}
+              style={[
+                styles.secondaryButton,
+                { backgroundColor: canDeletePoint ? theme.primaryActionBackground : theme.secondaryActionBackground },
+              ]}
               onPress={deleteSelectedPoint}
               disabled={!canDeletePoint}
             >
-              <Text style={[styles.secondaryButtonText, canDeletePoint && styles.secondaryButtonTextReady]}>Delete Point</Text>
+              <Text style={[styles.secondaryButtonText, { color: canDeletePoint ? theme.primaryActionText : theme.secondaryActionText }]}>Delete Point</Text>
             </Pressable>
             {canCancelEdit && (
-              <Pressable style={[styles.secondaryButton, styles.secondaryButtonReady]} onPress={resetDraft}>
-                <Text style={[styles.secondaryButtonText, styles.secondaryButtonTextReady]}>Cancel Edit</Text>
+              <Pressable style={[styles.secondaryButton, { backgroundColor: theme.primaryActionBackground }]} onPress={resetDraft}>
+                <Text style={[styles.secondaryButtonText, { color: theme.primaryActionText }]}>Cancel Edit</Text>
               </Pressable>
             )}
           </View>
-          <Text style={styles.infoText}>Twist and zoom in Pan mode for easier drawing alignment.</Text>
-          {showGridLayer && calibration && <Text style={styles.infoText}>Grid spacing: 1 meter.</Text>}
+          <Text style={[styles.infoText, { color: theme.infoText }]}>Twist and zoom in Pan mode for easier drawing alignment.</Text>
+          {showGridLayer && calibration && <Text style={[styles.infoText, { color: theme.infoText }]}>Grid spacing: 1 meter.</Text>}
           {presetShape && (
-            <Text style={styles.infoText}>
+            <Text style={[styles.infoText, { color: theme.infoText }]}>
               {presetShape.kind === "line"
                 ? "Drag center handle to move and end handle to rotate/lengthen, then tap Apply Shape."
                 : "Drag center handle to move, corner handle to resize, then tap Apply Shape."}
@@ -1276,13 +1304,13 @@ export default function GardenMapEditorScreen() {
           )}
         </View>
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>4. Area Details</Text>
+        <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>4. Area Details</Text>
           <TextInput
             value={name}
             onChangeText={setName}
             placeholder={activeType === GardenFeatureType.BED ? "Bed name" : "Area name"}
-            style={styles.nameInput}
+            style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
           />
 
           {activeType === GardenFeatureType.BED && (
@@ -1318,7 +1346,7 @@ export default function GardenMapEditorScreen() {
                   {isDraftBedRectangle ? (
                     <View style={styles.precisionDualRow}>
                       <View style={styles.precisionField}>
-                        <Text style={styles.pickerTitle}>Length (m)</Text>
+                        <Text style={[styles.pickerTitle, { color: theme.textPrimary }]}>Length (m)</Text>
                         <TextInput
                           value={rectLengthMInput}
                           onChangeText={handleRectLengthChange}
@@ -1333,11 +1361,11 @@ export default function GardenMapEditorScreen() {
                           }}
                           placeholder="Length (m)"
                           keyboardType="decimal-pad"
-                          style={styles.nameInput}
+                          style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
                         />
                       </View>
                       <View style={styles.precisionField}>
-                        <Text style={styles.pickerTitle}>Width (m)</Text>
+                        <Text style={[styles.pickerTitle, { color: theme.textPrimary }]}>Width (m)</Text>
                         <TextInput
                           value={rectWidthMInput}
                           onChangeText={handleRectWidthChange}
@@ -1352,12 +1380,12 @@ export default function GardenMapEditorScreen() {
                           }}
                           placeholder="Width (m)"
                           keyboardType="decimal-pad"
-                          style={styles.nameInput}
+                          style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
                         />
                       </View>
                     </View>
                   ) : (
-                    <Text style={styles.infoText}>Point/ellipse beds: resize directly on the map.</Text>
+                    <Text style={[styles.infoText, { color: theme.infoText }]}>Point/ellipse beds: resize directly on the map.</Text>
                   )}
                 </View>
               )}
@@ -1365,19 +1393,28 @@ export default function GardenMapEditorScreen() {
           )}
         </View>
 
-        <View style={styles.saveCard}>
-          <Text style={styles.sectionTitle}>5. Save Current Area</Text>
-          <Text style={styles.infoText}>
+        <View style={[styles.saveCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>5. Save Current Area</Text>
+          <Text style={[styles.infoText, { color: theme.infoText }]}>
             {saveDisabled ? "Add at least 3 points and a name to enable save." : "Ready to save."}
           </Text>
-          <Pressable style={[styles.primarySaveButton, saveDisabled && styles.primarySaveButtonDisabled]} onPress={saveZone} disabled={saveDisabled}>
-            <Text style={styles.primarySaveButtonText}>{editingZoneId ? `Update ${activeType}` : `Save ${activeType}`}</Text>
+          <Pressable
+            style={[
+              styles.primarySaveButton,
+              { backgroundColor: saveDisabled ? theme.disabledActionBackground : theme.primaryActionBackground },
+            ]}
+            onPress={saveZone}
+            disabled={saveDisabled}
+          >
+            <Text style={[styles.primarySaveButtonText, { color: saveDisabled ? theme.disabledActionText : theme.primaryActionText }]}>
+              {editingZoneId ? `Update ${activeType}` : `Save ${activeType}`}
+            </Text>
           </Pressable>
         </View>
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>6. Saved Areas</Text>
-          {existingZones.length === 0 && <Text style={styles.emptyText}>No saved areas yet.</Text>}
+        <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>6. Saved Areas</Text>
+          {existingZones.length === 0 && <Text style={[styles.emptyText, { color: theme.textMuted }]}>No saved areas yet.</Text>}
           {existingZones.map((zone) => (
             <View key={zone.id} style={styles.zoneRow}>
               <View style={styles.zoneMeta}>
@@ -1395,19 +1432,19 @@ export default function GardenMapEditorScreen() {
                 </Text>
               </View>
               <View style={styles.zoneActions}>
-                <Pressable style={styles.editButton} onPress={() => startEditZone(zone)}>
-                  <Text style={styles.editButtonText}>Edit</Text>
+                <Pressable style={[styles.editButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => startEditZone(zone)}>
+                  <Text style={[styles.editButtonText, { color: theme.secondaryActionText }]}>Edit</Text>
                 </Pressable>
-                <Pressable style={styles.deleteButton} onPress={() => confirmDeleteZone(zone)}>
-                  <Text style={styles.deleteButtonText}>Delete</Text>
+                <Pressable style={[styles.deleteButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => confirmDeleteZone(zone)}>
+                  <Text style={[styles.deleteButtonText, { color: theme.dangerActionText }]}>Delete</Text>
                 </Pressable>
               </View>
             </View>
           ))}
         </View>
 
-        <View style={styles.footerCard}>
-          <Text style={styles.footerText}>
+        <View style={[styles.footerCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.footerText, { color: theme.textMuted }]}>
             Draft points: {draftPoints.length}
             {" · "}Area ratio: {area.toFixed(3)}
             {areaSqM !== null ? ` · ~${areaSqM.toFixed(1)} sqm` : ""}
@@ -1468,17 +1505,27 @@ function ToggleSwitch(props: {
   onToggle: (nextValue: boolean) => void;
   disabled?: boolean;
 }) {
+  const { theme } = useTheme();
   return (
     <Pressable
-      style={[styles.switchRow, props.disabled && styles.switchRowDisabled]}
+      style={[
+        styles.switchRow,
+        { backgroundColor: theme.secondaryActionBackground },
+        props.disabled && styles.switchRowDisabled,
+      ]}
       onPress={() => {
         if (props.disabled) return;
         props.onToggle(!props.value);
       }}
     >
-      <Text style={styles.switchLabel}>{props.label}</Text>
-      <View style={[styles.switchTrack, props.value && styles.switchTrackActive]}>
-        <View style={[styles.switchThumb, props.value && styles.switchThumbActive]} />
+      <Text style={[styles.switchLabel, { color: theme.secondaryActionText }]}>{props.label}</Text>
+      <View
+        style={[
+          styles.switchTrack,
+          { backgroundColor: props.value ? theme.toggleOnBackground : theme.toggleOffBackground },
+        ]}
+      >
+        <View style={[styles.switchThumb, { backgroundColor: theme.toggleThumbColor }, props.value && styles.switchThumbActive]} />
       </View>
     </Pressable>
   );
@@ -1490,17 +1537,23 @@ function PickerRow(props: {
   selected: string;
   onSelect: (value: string) => void;
 }) {
+  const { theme } = useTheme();
   return (
     <View style={styles.pickerRow}>
-      <Text style={styles.pickerTitle}>{props.title}</Text>
+      <Text style={[styles.pickerTitle, { color: theme.textPrimary }]}>{props.title}</Text>
       <View style={styles.pickerOptionsRow}>
         {props.options.map((option) => (
           <Pressable
             key={option}
             onPress={() => props.onSelect(option)}
-            style={[styles.pickerChip, props.selected === option && styles.pickerChipActive]}
+            style={[
+              styles.pickerChip,
+              { backgroundColor: props.selected === option ? theme.primaryActionBackground : theme.secondaryActionBackground },
+            ]}
           >
-            <Text style={styles.pickerChipText}>{option.replace("_", " ")}</Text>
+            <Text style={[styles.pickerChipText, { color: props.selected === option ? theme.primaryActionText : theme.secondaryActionText }]}>
+              {option.replace("_", " ")}
+            </Text>
           </Pressable>
         ))}
       </View>
@@ -1510,6 +1563,21 @@ function PickerRow(props: {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function withAlpha(color: string, alpha: number): string {
+  const clamped = Math.max(0, Math.min(1, alpha));
+  const hex = color.trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{8}$/.test(hex)) {
+    const base = hex.slice(0, 6).toUpperCase();
+    const a = Math.round(clamped * 255).toString(16).padStart(2, "0").toUpperCase();
+    return `#${base}${a}`;
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+    const a = Math.round(clamped * 255).toString(16).padStart(2, "0").toUpperCase();
+    return `#${hex.toUpperCase()}${a}`;
+  }
+  return color;
 }
 
 function normalizeDegrees(value: number): number {
@@ -1591,13 +1659,14 @@ function normalizedAreaToSqM(
 }
 
 function getStripeSpecForType(
-  type: GardenFeatureType
+  type: GardenFeatureType,
+  theme: import("@/ui/theme/themeTokens").ThemeTokens
 ): { spacingPx: number; angleDeg: number; color: string; opacity: number } | null {
   switch (type) {
     case GardenFeatureType.LAWN:
-      return { spacingPx: 22, angleDeg: -22, color: "#4D8A55", opacity: 0.22 };
+      return { spacingPx: 22, angleDeg: -22, color: theme.mapLawnStroke, opacity: 0.22 };
     case GardenFeatureType.DECK:
-      return { spacingPx: 12, angleDeg: -18, color: "#6F4B2F", opacity: 0.24 };
+      return { spacingPx: 12, angleDeg: -18, color: theme.mapDeckStroke, opacity: 0.24 };
     default:
       return null;
   }

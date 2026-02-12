@@ -5,6 +5,7 @@ import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedReposi
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 
 const gardenRepository = new SqliteGardenRepository();
 const bedRepository = new SqliteBedRepository();
@@ -14,6 +15,7 @@ const wishlistRepository = new SqliteGardenCropWishlistRepository();
 type StepStatus = "done" | "in_progress" | "start" | "blocked";
 
 export default function GardenDetailScreen() {
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
   const gardenId = Array.isArray(params.gardenId) ? params.gardenId[0] : params.gardenId;
 
@@ -73,7 +75,7 @@ export default function GardenDetailScreen() {
         {
           href: `/gardens/${gardenId}/map`,
           title: "Garden Mapper",
-          helper: hasMappedContent ? `${bedCount} beds · ${featureCount} features` : "Add beds and features",
+          helper: hasMappedContent ? `${bedCount} beds | ${featureCount} features` : "Add beds and features",
           status: hasMappedContent ? ("in_progress" as StepStatus) : hasSetup ? ("start" as StepStatus) : ("blocked" as StepStatus),
         },
         {
@@ -92,42 +94,55 @@ export default function GardenDetailScreen() {
     : [];
 
   return (
-    <View style={styles.page}>
-      <View style={styles.container}>
-        <Text style={styles.title}>Garden Workspace</Text>
-        <Text style={styles.subtitle}>Move through setup, mapping, and review without losing context.</Text>
+    <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
+      <View style={[styles.container, { backgroundColor: theme.appBackground }]}>
+        <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Workspace</Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Move through setup, mapping, and review without losing context.</Text>
 
         {gardenId ? (
           <>
             {garden && (
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryName}>{garden.name}</Text>
-                <Text style={styles.summaryMeta}>
+              <View style={[styles.summaryCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+                <Text style={[styles.summaryName, { color: theme.textPrimary }]}>{garden.name}</Text>
+                <Text style={[styles.summaryMeta, { color: theme.textMuted }]}>
                   {garden.locationLabel ?? `${garden.latitude.toFixed(5)}, ${garden.longitude.toFixed(5)}`}
                 </Text>
-                <Text style={styles.summaryMeta}>
+                <Text style={[styles.summaryMeta, { color: theme.textMuted }]}>
                   Area {garden.scaleCalibration?.boundaryAreaSqM ? `${garden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
-                  {" · "}Beds {bedCount}
-                  {" · "}Features {featureCount}
-                  {" · "}Grow list {wishlistCount}
+                  {" | "}Beds {bedCount}
+                  {" | "}Features {featureCount}
+                  {" | "}Grow list {wishlistCount}
                 </Text>
               </View>
             )}
 
             {steps.map((step) => (
-              <Link key={step.href} href={step.href} style={styles.stepLink}>
+              <Link
+                key={step.href}
+                href={step.href}
+                style={[styles.stepLink, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}
+              >
                 <View style={styles.stepRow}>
-                  <Text style={styles.stepTitle}>{step.title}</Text>
+                  <Text style={[styles.stepTitle, { color: theme.textPrimary }]}>{step.title}</Text>
                   <Text
                     style={[
                       styles.stepStatus,
-                      step.status === "done" && styles.stepStatusDone,
-                      step.status === "in_progress" && styles.stepStatusProgress,
-                      step.status === "blocked" && styles.stepStatusBlocked,
+                      {
+                        backgroundColor:
+                          step.status === "done"
+                            ? theme.secondaryActionBackground
+                            : step.status === "in_progress"
+                              ? theme.secondaryActionBackground
+                              : step.status === "blocked"
+                                ? theme.disabledActionBackground
+                                : theme.secondaryActionBackground,
+                        color:
+                          step.status === "blocked" ? theme.disabledActionText : theme.secondaryActionText,
+                      },
                     ]}
                   >
                     {step.status === "done"
-                      ? "✓ Done"
+                      ? "\u2713 Done"
                       : step.status === "in_progress"
                         ? "In progress"
                         : step.status === "blocked"
@@ -135,12 +150,12 @@ export default function GardenDetailScreen() {
                           : "Start"}
                   </Text>
                 </View>
-                <Text style={styles.stepHelper}>{step.helper}</Text>
+                <Text style={[styles.stepHelper, { color: theme.textMuted }]}>{step.helper}</Text>
               </Link>
             ))}
           </>
         ) : (
-          <Text style={styles.errorText}>Missing garden id</Text>
+          <Text style={[styles.errorText, { color: theme.textMuted }]}>Missing garden id</Text>
         )}
       </View>
     </View>
@@ -148,23 +163,19 @@ export default function GardenDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#F0F6EE" },
-  container: { flex: 1, padding: 16, backgroundColor: "#F0F6EE", gap: 10 },
-  title: { fontSize: 26, fontWeight: "800", marginBottom: 6, color: "#1D3D2A" },
-  subtitle: { color: "#4A6553", marginBottom: 4 },
+  page: { flex: 1 },
+  container: { flex: 1, padding: 16, gap: 10 },
+  title: { fontSize: 26, fontWeight: "800", marginBottom: 6 },
+  subtitle: { marginBottom: 4 },
   summaryCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#D8E5D5",
     borderWidth: 1,
     borderRadius: 12,
     padding: 12,
     gap: 4,
   },
-  summaryName: { color: "#1E402C", fontSize: 18, fontWeight: "800" },
-  summaryMeta: { color: "#4E6857" },
+  summaryName: { fontSize: 18, fontWeight: "800" },
+  summaryMeta: {},
   stepLink: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#D8E5D5",
     borderWidth: 1,
     borderRadius: 12,
     padding: 12,
@@ -172,11 +183,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   stepRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  stepTitle: { color: "#23412E", fontWeight: "800", fontSize: 16, flex: 1, paddingRight: 6 },
-  stepHelper: { color: "#4E6857", fontWeight: "600", marginTop: 2 },
+  stepTitle: { fontWeight: "800", fontSize: 16, flex: 1, paddingRight: 6 },
+  stepHelper: { fontWeight: "600", marginTop: 2 },
   stepStatus: {
-    backgroundColor: "#E4EFE3",
-    color: "#2F6F4F",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -187,8 +196,6 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     minWidth: 84,
   },
-  stepStatusDone: { backgroundColor: "#D3E9DA", color: "#1E5A37" },
-  stepStatusProgress: { backgroundColor: "#E0ECDD", color: "#325746" },
-  stepStatusBlocked: { backgroundColor: "#ECECEC", color: "#5E6761" },
-  errorText: { color: "#A0382B", fontWeight: "700" },
+  errorText: { fontWeight: "700" },
 });
+

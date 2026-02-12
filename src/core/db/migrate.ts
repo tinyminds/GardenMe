@@ -326,6 +326,16 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_crop_entries_quantity ON garden_crop_entries(quantity);
     `,
   },
+  {
+    version: "0014_app_settings",
+    sql: `
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY NOT NULL,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export async function runMigrations(db: AppDatabase): Promise<void> {

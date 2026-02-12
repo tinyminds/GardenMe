@@ -11,6 +11,7 @@ import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGarden
 import { polygonArea } from "@/features/garden-mapping/utils/geometry";
 import { getCompanionMatchSummary, normalizePlantKey } from "@/features/plants/services/companionMatching";
 import { queryClient } from "@/state/queryClient";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 import type {
   GardenCropPlantingHistoryItem,
   GardenCropWishlistItemView,
@@ -51,6 +52,7 @@ const DEFAULT_BOUNDARY = [
 ];
 
 export default function BedsListScreen() {
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
   const gardenId = Array.isArray(params.gardenId) ? params.gardenId[0] : params.gardenId;
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -329,15 +331,15 @@ export default function BedsListScreen() {
   }, [bedCards]);
 
   return (
-    <View style={styles.page}>
+    <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Beds</Text>
-        <Text style={styles.subtitle}>Review beds and place crops from your grow list.</Text>
+        <Text style={[styles.title, { color: theme.textPrimary }]}>Beds</Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Review beds and place crops from your grow list.</Text>
 
-        {bedsQuery.isLoading && <Text style={styles.empty}>Loading beds...</Text>}
-        {bedsQuery.isError && <Text style={styles.empty}>Could not load beds.</Text>}
+        {bedsQuery.isLoading && <Text style={[styles.empty, { color: theme.textMuted }]}>Loading beds...</Text>}
+        {bedsQuery.isError && <Text style={[styles.empty, { color: theme.textMuted }]}>Could not load beds.</Text>}
         {!bedsQuery.isLoading && !bedsQuery.isError && bedCards.length === 0 && (
-          <Text style={styles.empty}>No beds yet. Add beds in Garden Planner.</Text>
+          <Text style={[styles.empty, { color: theme.textMuted }]}>No beds yet. Add beds in Garden Planner.</Text>
         )}
 
         {bedCards.map((card) => {
@@ -347,32 +349,32 @@ export default function BedsListScreen() {
           const historyExpanded = Boolean(historyExpandedByBed[card.bed.id]);
 
           return (
-            <View key={card.bed.id} style={styles.card}>
-              <Text style={styles.cardTitle}>{card.bed.name}</Text>
-              <Text style={styles.meta}>Sun: {formatLabel(card.bed.sunExposure)} - Drainage: {formatLabel(card.bed.drainage)}</Text>
-              <Text style={styles.meta}>
+            <View key={card.bed.id} style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+              <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{card.bed.name}</Text>
+              <Text style={[styles.meta, { color: theme.textMuted }]}>Sun: {formatLabel(card.bed.sunExposure)} - Drainage: {formatLabel(card.bed.drainage)}</Text>
+              <Text style={[styles.meta, { color: theme.textMuted }]}>
                 {card.bed.containsPerennials ? "Perennial bed" : "Annual/mixed bed"}
                 {typeof card.areaSqM === "number" ? ` - Area ~${card.areaSqM.toFixed(1)} sqm` : ""}
               </Text>
 
               <View style={styles.block}>
-                <Text style={styles.blockTitle}>Growing now</Text>
-                {card.activeGrowingRows.length === 0 && card.growingNames.length === 0 && <Text style={styles.blockText}>Nothing added yet</Text>}
+                <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Growing now</Text>
+                {card.activeGrowingRows.length === 0 && card.growingNames.length === 0 && <Text style={[styles.blockText, { color: theme.textMuted }]}>Nothing added yet</Text>}
                 {card.activeGrowingRows.map((row) => (
-                  <View key={row.entry.id} style={styles.growingRow}>
+                  <View key={row.entry.id} style={[styles.growingRow, { borderColor: theme.borderColor }]}>
                     <View style={styles.growingMain}>
-                      <Text style={styles.growingName}>{formatEntryName(row.entry)}</Text>
-                      <Text style={styles.blockText}>{row.plantedAt ? `Planted ${formatDate(row.plantedAt)}` : "Planted date not set"}</Text>
+                      <Text style={[styles.growingName, { color: theme.textPrimary }]}>{formatEntryName(row.entry)}</Text>
+                      <Text style={[styles.blockText, { color: theme.textMuted }]}>{row.plantedAt ? `Planted ${formatDate(row.plantedAt)}` : "Planted date not set"}</Text>
                     </View>
                     <View style={styles.row}>
-                      <Pressable style={styles.finishChip} disabled={finishPlantingMutation.isPending} onPress={() => finishPlantingMutation.mutate({ entryId: row.entry.id, endState: "harvested" })}><Text style={styles.finishChipText}>Harvested</Text></Pressable>
-                      <Pressable style={styles.finishChip} disabled={finishPlantingMutation.isPending} onPress={() => finishPlantingMutation.mutate({ entryId: row.entry.id, endState: "done" })}><Text style={styles.finishChipText}>Done</Text></Pressable>
-                      <Pressable style={styles.finishChipDanger} disabled={finishPlantingMutation.isPending} onPress={() => finishPlantingMutation.mutate({ entryId: row.entry.id, endState: "dead" })}><Text style={styles.finishChipDangerText}>Lost</Text></Pressable>
+                      <Pressable style={[styles.finishChip, { backgroundColor: theme.secondaryActionBackground }]} disabled={finishPlantingMutation.isPending} onPress={() => finishPlantingMutation.mutate({ entryId: row.entry.id, endState: "harvested" })}><Text style={[styles.finishChipText, { color: theme.secondaryActionText }]}>Harvested</Text></Pressable>
+                      <Pressable style={[styles.finishChip, { backgroundColor: theme.secondaryActionBackground }]} disabled={finishPlantingMutation.isPending} onPress={() => finishPlantingMutation.mutate({ entryId: row.entry.id, endState: "done" })}><Text style={[styles.finishChipText, { color: theme.secondaryActionText }]}>Done</Text></Pressable>
+                      <Pressable style={[styles.finishChipDanger, { backgroundColor: theme.dangerActionBackground }]} disabled={finishPlantingMutation.isPending} onPress={() => finishPlantingMutation.mutate({ entryId: row.entry.id, endState: "dead" })}><Text style={[styles.finishChipDangerText, { color: theme.dangerActionText }]}>Lost</Text></Pressable>
                     </View>
                   </View>
                 ))}
                 {card.growingNames.length > card.activeGrowingRows.length && (
-                  <Text style={styles.blockText}>
+                  <Text style={[styles.blockText, { color: theme.textMuted }]}>
                     Perennials listed in bed profile: {card.growingNames.filter((name) => !card.activeGrowingRows.some((row) => formatEntryName(row.entry) === name)).join(", ")}
                   </Text>
                 )}
@@ -380,23 +382,23 @@ export default function BedsListScreen() {
 
               {card.growingNames.length > 0 && (
                 <View style={styles.block}>
-                  <Text style={styles.blockTitle}>Spare space</Text>
+                  <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Spare space</Text>
                   <View style={styles.row}>
-                    <Pressable style={[styles.toggleChip, hasSpareSpace && styles.toggleChipActive]} onPress={() => setHasSpareSpaceByBed((prev) => ({ ...prev, [card.bed.id]: true }))}><Text style={[styles.toggleChipText, hasSpareSpace && styles.toggleChipTextActive]}>Yes</Text></Pressable>
-                    <Pressable style={[styles.toggleChip, !hasSpareSpace && styles.toggleChipActive]} onPress={() => setHasSpareSpaceByBed((prev) => ({ ...prev, [card.bed.id]: false }))}><Text style={[styles.toggleChipText, !hasSpareSpace && styles.toggleChipTextActive]}>No</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setHasSpareSpaceByBed((prev) => ({ ...prev, [card.bed.id]: true }))}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>Yes</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setHasSpareSpaceByBed((prev) => ({ ...prev, [card.bed.id]: false }))}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>No</Text></Pressable>
                   </View>
                 </View>
               )}
 
               {card.plannedInBed.length > 0 && (
                 <View style={styles.block}>
-                  <Text style={styles.blockTitle}>Planned for this bed</Text>
+                  <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Planned for this bed</Text>
                   <View style={styles.chips}>
                     {card.plannedInBed.map((entry) => (
-                      <View key={entry.id} style={styles.planChip}>
-                        <Text style={styles.planChipText}>{formatEntryName(entry)}</Text>
-                        <Pressable style={styles.planChipPlantButton} onPress={() => markPlantedMutation.mutate({ entryId: entry.id, bedId: card.bed.id })} disabled={markPlantedMutation.isPending}><Text style={styles.planChipPlantButtonText}>Planted</Text></Pressable>
-                        <Pressable style={styles.planChipButton} onPress={() => clearPlanMutation.mutate(entry)} disabled={clearPlanMutation.isPending}><Text style={styles.planChipButtonText}>Clear</Text></Pressable>
+                      <View key={entry.id} style={[styles.planChip, { backgroundColor: theme.secondaryActionBackground }]}>
+                        <Text style={[styles.planChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text>
+                        <Pressable style={[styles.planChipPlantButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => markPlantedMutation.mutate({ entryId: entry.id, bedId: card.bed.id })} disabled={markPlantedMutation.isPending}><Text style={[styles.planChipPlantButtonText, { color: theme.primaryActionText }]}>Planted</Text></Pressable>
+                        <Pressable style={[styles.planChipButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => clearPlanMutation.mutate(entry)} disabled={clearPlanMutation.isPending}><Text style={[styles.planChipButtonText, { color: theme.dangerActionText }]}>Clear</Text></Pressable>
                       </View>
                     ))}
                   </View>
@@ -405,38 +407,38 @@ export default function BedsListScreen() {
 
               {card.historicalRows.length > 0 && (
                 <View style={styles.block}>
-                  <Pressable style={styles.historyHeader} onPress={() => setHistoryExpandedByBed((prev) => ({ ...prev, [card.bed.id]: !historyExpanded }))}>
-                    <Text style={styles.blockTitle}>{historyExpanded ? "History - hide" : "History - show"} ({card.historicalRows.length})</Text>
+                  <Pressable style={[styles.historyHeader, { backgroundColor: theme.appBackground }]} onPress={() => setHistoryExpandedByBed((prev) => ({ ...prev, [card.bed.id]: !historyExpanded }))}>
+                    <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>{historyExpanded ? "History - hide" : "History - show"} ({card.historicalRows.length})</Text>
                   </Pressable>
                   {historyExpanded && card.historicalRows.map((row) => (
-                    <View key={row.id} style={styles.historyRow}>
-                      <Text style={styles.historyName}>{formatHistoryName(row)}</Text>
-                      <Text style={styles.historyMeta}>{formatDate(row.plantedAt)} - {row.endedAt ? formatDate(row.endedAt) : "ongoing"}{row.endState ? ` - ${formatEndStateLabel(row.endState)}` : ""}</Text>
+                    <View key={row.id} style={[styles.historyRow, { borderColor: theme.borderColor }]}>
+                      <Text style={[styles.historyName, { color: theme.textPrimary }]}>{formatHistoryName(row)}</Text>
+                      <Text style={[styles.historyMeta, { color: theme.textMuted }]}>{formatDate(row.plantedAt)} - {row.endedAt ? formatDate(row.endedAt) : "ongoing"}{row.endState ? ` - ${formatEndStateLabel(row.endState)}` : ""}</Text>
                     </View>
                   ))}
                 </View>
               )}
 
               <View style={styles.block}>
-                <Text style={styles.blockTitle}>Suggested plans</Text>
+                <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Suggested plans</Text>
                 {!showSuggestions ? (
-                  <Text style={styles.blockText}>Suggestions hidden while this bed is marked as full.</Text>
+                  <Text style={[styles.blockText, { color: theme.textMuted }]}>Suggestions hidden while this bed is marked as full.</Text>
                 ) : card.suggestions.length === 0 ? (
-                  <Text style={styles.blockText}>No clear suggestions yet. Add more crops in Grow List.</Text>
+                  <Text style={[styles.blockText, { color: theme.textMuted }]}>No clear suggestions yet. Add more crops in Grow List.</Text>
                 ) : (
                   card.suggestions.map((suggestion) => (
-                    <View key={suggestion.entry.id} style={styles.suggestionRow}>
+                    <View key={suggestion.entry.id} style={[styles.suggestionRow, { borderColor: theme.borderColor }]}>
                       <View style={styles.suggestionMain}>
-                        <Text style={styles.suggestionName}>{formatEntryName(suggestion.entry)}</Text>
-                        <Text style={styles.suggestionReason}>{suggestion.sunReason}</Text>
-                        <Text style={styles.suggestionReason}>{suggestion.spacingReason}</Text>
+                        <Text style={[styles.suggestionName, { color: theme.textPrimary }]}>{formatEntryName(suggestion.entry)}</Text>
+                        <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.sunReason}</Text>
+                        <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.spacingReason}</Text>
                         {suggestion.companionMessages.map((message) => (
-                          <Text key={`${suggestion.entry.id}-${normalizePlantKey(message)}`} style={styles.suggestionReason}>
+                          <Text key={`${suggestion.entry.id}-${normalizePlantKey(message)}`} style={[styles.suggestionReason, { color: theme.textMuted }]}>
                             {message}
                           </Text>
                         ))}
                       </View>
-                      <Pressable style={styles.suggestionButton} onPress={() => planInBedMutation.mutate({ entry: suggestion.entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={styles.suggestionButtonText}>Plan Here</Text></Pressable>
+                      <Pressable style={[styles.suggestionButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => planInBedMutation.mutate({ entry: suggestion.entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={[styles.suggestionButtonText, { color: theme.secondaryActionText }]}>Plan Here</Text></Pressable>
                     </View>
                   ))
                 )}
@@ -444,30 +446,30 @@ export default function BedsListScreen() {
 
               {showSuggestions && (
                 <View style={styles.block}>
-                  <Text style={styles.blockTitle}>Other options</Text>
+                  <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Other options</Text>
                   {card.contraryOptions.length === 0 ? (
-                    <Text style={styles.blockText}>No extra planned crops available.</Text>
+                    <Text style={[styles.blockText, { color: theme.textMuted }]}>No extra planned crops available.</Text>
                   ) : (
                     <View style={styles.chips}>
                       {card.contraryOptions.map((entry) => (
-                        <Pressable key={entry.id} style={styles.optionChip} onPress={() => planInBedMutation.mutate({ entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={styles.optionChipText}>{formatEntryName(entry)}</Text></Pressable>
+                        <Pressable key={entry.id} style={[styles.optionChip, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => planInBedMutation.mutate({ entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={[styles.optionChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text></Pressable>
                       ))}
                     </View>
                   )}
-                  <Link href={`/gardens/${gardenId}/grow`} style={styles.linkText}>Add more crops in Grow List</Link>
+                  <Link href={`/gardens/${gardenId}/grow`} style={[styles.linkText, { color: theme.primaryActionBackground }]}>Add more crops in Grow List</Link>
                 </View>
               )}
             </View>
           );
         })}
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Garden Layout</Text>
-          <Text style={styles.meta}>No image or grid here. This is a clean bed layout.</Text>
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Garden Layout</Text>
+          <Text style={[styles.meta, { color: theme.textMuted }]}>No image or grid here. This is a clean bed layout.</Text>
           <View style={styles.zoomRow}>
-            <Pressable style={styles.zoomButton} onPress={() => setPreviewZoom((value) => Math.max(0.7, Number((value - 0.1).toFixed(2))))}><Text style={styles.zoomButtonText}>-</Text></Pressable>
-            <Text style={styles.zoomText}>{Math.round(previewZoom * 100)}%</Text>
-            <Pressable style={styles.zoomButton} onPress={() => setPreviewZoom((value) => Math.min(1.8, Number((value + 0.1).toFixed(2))))}><Text style={styles.zoomButtonText}>+</Text></Pressable>
+            <Pressable style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setPreviewZoom((value) => Math.max(0.7, Number((value - 0.1).toFixed(2))))}><Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>-</Text></Pressable>
+            <Text style={[styles.zoomText, { color: theme.textPrimary }]}>{Math.round(previewZoom * 100)}%</Text>
+            <Pressable style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setPreviewZoom((value) => Math.min(1.8, Number((value + 0.1).toFixed(2))))}><Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>+</Text></Pressable>
           </View>
           <View onLayout={(event) => {
             const width = Math.floor(event.nativeEvent.layout.width);
@@ -475,12 +477,12 @@ export default function BedsListScreen() {
           }}>
             <ScrollView horizontal showsHorizontalScrollIndicator>
               <ScrollView showsVerticalScrollIndicator>
-                <View style={[styles.previewCanvas, { width: previewWidth, height: previewHeight }]}>
+                <View style={[styles.previewCanvas, { width: previewWidth, height: previewHeight, borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
                   <Svg width={previewWidth} height={previewHeight} style={StyleSheet.absoluteFillObject}>
-                    <Path d={`${rectPath(previewWidth, previewHeight)} ${polygonPath(boundary, previewWidth, previewHeight)}`} fill="#EEF5EA" fillRule="evenodd" />
-                    <Polygon points={toSvgPoints(boundary, previewWidth, previewHeight)} fill="transparent" stroke="#2F6F4F" strokeWidth={2} />
+                    <Path d={`${rectPath(previewWidth, previewHeight)} ${polygonPath(boundary, previewWidth, previewHeight)}`} fill={theme.mapBoundaryFill} fillRule="evenodd" />
+                    <Polygon points={toSvgPoints(boundary, previewWidth, previewHeight)} fill="transparent" stroke={theme.mapBoundaryStroke} strokeWidth={2} />
                     {beds.map((bed) => (
-                      <Polygon key={`shape-${bed.id}`} points={toSvgPoints(bed.polygon, previewWidth, previewHeight)} fill="rgba(53,130,82,0.30)" stroke="#1B4E33" strokeWidth={1.4} />
+                      <Polygon key={`shape-${bed.id}`} points={toSvgPoints(bed.polygon, previewWidth, previewHeight)} fill={theme.mapBedFill} stroke={theme.mapBedStroke} strokeWidth={1.4} />
                     ))}
                   </Svg>
                   {beds.map((bed) => {
@@ -489,7 +491,7 @@ export default function BedsListScreen() {
                     const top = center.y * previewHeight;
                     const info = bedInfoById.get(bed.id);
                     return (
-                      <Pressable key={bed.id} style={[styles.previewPin, { left, top }]} onPress={() => {
+                      <Pressable key={bed.id} style={[styles.previewPin, { left, top, backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionText }]} onPress={() => {
                         if (!info) return;
                         Alert.alert(info.bedName, [
                           info.isPerennialBed ? "Type: perennial bed" : "Type: annual/mixed bed",
@@ -497,7 +499,7 @@ export default function BedsListScreen() {
                           info.planned.length > 0 ? `Planned: ${info.planned.join(", ")}` : "Planned: none",
                         ].join("\n"));
                       }}>
-                        <Text style={styles.previewPinText}>i</Text>
+                        <Text style={[styles.previewPinText, { color: theme.primaryActionText }]}>i</Text>
                       </Pressable>
                     );
                   })}

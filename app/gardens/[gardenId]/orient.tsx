@@ -21,6 +21,7 @@ import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/Sqlit
 import { queryClient } from "@/state/queryClient";
 import { polygonArea } from "@/features/garden-mapping/utils/geometry";
 import type { Point2D } from "@/domain/entities/Bed";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 
 const DEFAULT_BOUNDARY = [
   { x: 0, y: 0 },
@@ -34,6 +35,7 @@ const bedRepository = new SqliteBedRepository();
 const featureRepository = new SqliteGardenFeatureRepository();
 
 export default function GardenOrientationScreen() {
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
   const gardenId = Array.isArray(params.gardenId) ? params.gardenId[0] : params.gardenId;
   const [canvas, setCanvas] = useState({ width: 320, height: 220 });
@@ -214,14 +216,14 @@ export default function GardenOrientationScreen() {
   };
 
   return (
-    <View style={styles.page}>
-      <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
+    <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.appBackground }]} edges={["left", "right"]}>
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Opening Planner...</Text>
-          <Text style={styles.subtitle}>Orientation step has been folded into planner flow.</Text>
+          <Text style={[styles.title, { color: theme.textPrimary }]}>Opening Planner...</Text>
+          <Text style={[styles.subtitle, { color: theme.textMuted }]}>Orientation step has been folded into planner flow.</Text>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Preview</Text>
+          <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Preview</Text>
             <View style={styles.preview} onLayout={onPreviewLayout} {...gestureResponder.panHandlers}>
               <View style={[StyleSheet.absoluteFillObject, styles.placeholder]} />
               <View style={[StyleSheet.absoluteFillObject, transformedLayerStyle]}>
@@ -235,13 +237,13 @@ export default function GardenOrientationScreen() {
                 <Svg width="100%" height="100%">
                   <Path
                     d={`${rectPath(canvas.width, canvas.height)} ${polygonPath(boundary, canvas.width, canvas.height)}`}
-                    fill="#E7EFE5"
+                    fill={theme.mapBoundaryFill}
                     fillRule="evenodd"
                   />
                   <Polygon
                     points={toSvgPoints(boundary, canvas.width, canvas.height)}
                     fill="transparent"
-                    stroke="#2F6F4F"
+                    stroke={theme.mapBoundaryStroke}
                     strokeWidth={3}
                   />
                 </Svg>
@@ -249,41 +251,47 @@ export default function GardenOrientationScreen() {
             </View>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Orientation</Text>
+          <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Orientation</Text>
             <View style={styles.row}>
-              <Pressable style={styles.button} onPress={() => setRotationDegrees(suggestedRotation)}>
-                <Text style={styles.buttonText}>Auto Orient</Text>
+              <Pressable style={[styles.button, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setRotationDegrees(suggestedRotation)}>
+                <Text style={[styles.buttonText, { color: theme.secondaryActionText }]}>Auto Orient</Text>
               </Pressable>
             </View>
-            <Text style={styles.infoText}>
+            <Text style={[styles.infoText, { color: theme.infoText }]}>
               Use two fingers on preview to rotate/pinch and fine-tune.
             </Text>
-            <Text style={styles.infoText}>Current rotation: {rotationDegrees.toFixed(1)}deg</Text>
-            <Text style={styles.infoText}>Suggested: {suggestedRotation.toFixed(1)}deg</Text>
+            <Text style={[styles.infoText, { color: theme.infoText }]}>Current rotation: {rotationDegrees.toFixed(1)}deg</Text>
+            <Text style={[styles.infoText, { color: theme.infoText }]}>Suggested: {suggestedRotation.toFixed(1)}deg</Text>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Base Image</Text>
-            <Text style={styles.cardText}>Keep the map image as drawing reference, or remove it for a clean plan.</Text>
+          <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Base Image</Text>
+            <Text style={[styles.cardText, { color: theme.textMuted }]}>Keep the map image as drawing reference, or remove it for a clean plan.</Text>
             <View style={styles.row}>
               <Pressable
-                style={[styles.chip, keepImage && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  { backgroundColor: keepImage ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                ]}
                 onPress={() => setKeepImage(true)}
               >
-                <Text style={[styles.chipText, keepImage && styles.chipTextActive]}>Keep Image</Text>
+                <Text style={[styles.chipText, { color: keepImage ? theme.primaryActionText : theme.secondaryActionText }]}>Keep Image</Text>
               </Pressable>
               <Pressable
-                style={[styles.chip, !keepImage && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  { backgroundColor: !keepImage ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                ]}
                 onPress={() => setKeepImage(false)}
               >
-                <Text style={[styles.chipText, !keepImage && styles.chipTextActive]}>Remove Image</Text>
+                <Text style={[styles.chipText, { color: !keepImage ? theme.primaryActionText : theme.secondaryActionText }]}>Remove Image</Text>
               </Pressable>
             </View>
           </View>
 
-          <Pressable style={styles.saveButton} onPress={() => void saveAndContinue()}>
-            <Text style={styles.saveButtonText}>Save Orientation + Continue</Text>
+          <Pressable style={[styles.saveButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => void saveAndContinue()}>
+            <Text style={[styles.saveButtonText, { color: theme.primaryActionText }]}>Save Orientation + Continue</Text>
           </Pressable>
         </ScrollView>
       </SafeAreaView>

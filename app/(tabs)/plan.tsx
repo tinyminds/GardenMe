@@ -1,4 +1,4 @@
-import { Link } from "expo-router";
+﻿import { Link } from "expo-router";
 import { useEffect } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -7,12 +7,14 @@ import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 
 const bedRepository = new SqliteBedRepository();
 const featureRepository = new SqliteGardenFeatureRepository();
 const growRepository = new SqliteGardenCropWishlistRepository();
 
 export default function PlanTabScreen() {
+  const { theme } = useTheme();
   const gardensQuery = useGardensQuery();
   const gardens = gardensQuery.data ?? [];
   const selectedGardenId = useSelectedGardenStore((state) => state.selectedGardenId);
@@ -59,12 +61,12 @@ export default function PlanTabScreen() {
   const perennialBedCount = (bedsQuery.data ?? []).filter((bed) => bed.containsPerennials).length;
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Plan</Text>
-      <Text style={styles.subtitle}>One place for setup, mapping, beds, and growing plan.</Text>
+    <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
+      <Text style={[styles.title, { color: theme.textPrimary }]}>Plan</Text>
+      <Text style={[styles.subtitle, { color: theme.textMuted }]}>One place for setup, mapping, beds, and growing plan.</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Garden</Text>
+      <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Garden</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
           {gardens.map((garden) => {
             const selected = garden.id === selectedGardenId;
@@ -72,7 +74,13 @@ export default function PlanTabScreen() {
               <Text
                 key={garden.id}
                 onPress={() => setSelectedGardenId(garden.id)}
-                style={[styles.chip, selected && styles.chipActive]}
+                style={[
+                  styles.chip,
+                  {
+                    backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground,
+                    color: selected ? theme.primaryActionText : theme.secondaryActionText,
+                  },
+                ]}
               >
                 {garden.name}
               </Text>
@@ -82,32 +90,57 @@ export default function PlanTabScreen() {
       </View>
 
       {!selectedGarden ? (
-        <View style={styles.card}>
-          <Text style={styles.state}>No gardens yet.</Text>
-          <Link href="/gardens/new" style={styles.primaryLink}>Create Garden</Link>
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.state, { color: theme.textMuted }]}>No gardens yet.</Text>
+          <Link
+            href="/gardens/new"
+            style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+          >
+            Create Garden
+          </Link>
         </View>
       ) : (
         <>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>{selectedGarden.name}</Text>
-            <Text style={styles.metric}>
+          <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{selectedGarden.name}</Text>
+            <Text style={[styles.metric, { color: theme.textMuted }]}>
               Area {selectedGarden.scaleCalibration?.boundaryAreaSqM ? `${selectedGarden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
             </Text>
-            <Text style={styles.metric}>Beds {bedCount} · Features {featureCount}</Text>
-            <Text style={styles.metric}>Wanted {wantedCount} · Growing {growingCount}</Text>
-            <Text style={styles.metric}>Perennial beds {perennialBedCount}</Text>
+            <Text style={[styles.metric, { color: theme.textMuted }]}>Beds {bedCount} · Features {featureCount}</Text>
+            <Text style={[styles.metric, { color: theme.textMuted }]}>Wanted {wantedCount} · Growing {growingCount}</Text>
+            <Text style={[styles.metric, { color: theme.textMuted }]}>Perennial beds {perennialBedCount}</Text>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Build</Text>
-            <Link href={`/gardens/${selectedGarden.id}/setup`} style={styles.primaryLink}>Setup & Scale</Link>
-            <Link href={`/gardens/${selectedGarden.id}/map`} style={styles.primaryLink}>Garden Mapper</Link>
+          <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Build</Text>
+            <Link
+              href={`/gardens/${selectedGarden.id}/setup`}
+              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+            >
+              Setup & Scale
+            </Link>
+            <Link
+              href={`/gardens/${selectedGarden.id}/map`}
+              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+            >
+              Garden Mapper
+            </Link>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Planting</Text>
-            <Link href={`/gardens/${selectedGarden.id}/grow`} style={styles.primaryLink}>Grow List</Link>
-            <Link href={`/gardens/${selectedGarden.id}/beds`} style={styles.primaryLink}>Beds</Link>
+          <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Planting</Text>
+            <Link
+              href={`/gardens/${selectedGarden.id}/grow`}
+              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+            >
+              Grow List
+            </Link>
+            <Link
+              href={`/gardens/${selectedGarden.id}/beds`}
+              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+            >
+              Beds
+            </Link>
           </View>
         </>
       )}
@@ -116,35 +149,28 @@ export default function PlanTabScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#F0F6EE" },
+  page: { flex: 1 },
   content: { padding: 14, gap: 10, paddingBottom: 120 },
-  title: { fontSize: 28, fontWeight: "800", color: "#1E402C" },
-  subtitle: { color: "#4E6857" },
+  title: { fontSize: 28, fontWeight: "800" },
+  subtitle: {},
   card: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#D8E5D5",
     padding: 12,
     gap: 8,
   },
-  cardTitle: { color: "#2C4737", fontWeight: "800" },
+  cardTitle: { fontWeight: "800" },
   chipRow: { gap: 8 },
   chip: {
-    backgroundColor: "#DFEADF",
-    color: "#23412E",
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
     overflow: "hidden",
     fontWeight: "700",
   },
-  chipActive: { backgroundColor: "#245A3E", color: "#FFFFFF" },
-  metric: { color: "#365648", fontWeight: "600" },
-  state: { color: "#4E6857" },
+  metric: { fontWeight: "600" },
+  state: {},
   primaryLink: {
-    backgroundColor: "#245A3E",
-    color: "#FFFFFF",
     fontWeight: "800",
     borderRadius: 10,
     paddingHorizontal: 12,
@@ -153,3 +179,4 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 });
+
