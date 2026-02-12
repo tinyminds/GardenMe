@@ -902,7 +902,7 @@ export default function GardenMapEditorScreen() {
 
         <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <View style={styles.sectionTitleRow}>
-            <Text style={styles.sectionTitle}>2. Planner Canvas</Text>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>2. Planner Canvas</Text>
             <View style={styles.zoomRow}>
               <Pressable style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setZoom((z) => clamp(z - 0.25, 0.2, 15))}>
                 <Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>-</Text>
@@ -1341,8 +1341,8 @@ export default function GardenMapEditorScreen() {
               />
               {canPrecisionEditBed && (
                 <View style={styles.precisionCard}>
-                  <Text style={styles.precisionTitle}>Precision Controls (Beds)</Text>
-                  <Text style={styles.infoText}>Drag updates values. Editing values updates bed size.</Text>
+                  <Text style={[styles.precisionTitle, { color: theme.textPrimary }]}>Precision Controls (Beds)</Text>
+                  <Text style={[styles.infoText, { color: theme.infoText }]}>Drag updates values. Editing values updates bed size.</Text>
                   {isDraftBedRectangle ? (
                     <View style={styles.precisionDualRow}>
                       <View style={styles.precisionField}>
@@ -1418,8 +1418,8 @@ export default function GardenMapEditorScreen() {
           {existingZones.map((zone) => (
             <View key={zone.id} style={styles.zoneRow}>
               <View style={styles.zoneMeta}>
-                <Text style={styles.zoneName}>{zone.name}</Text>
-                <Text style={styles.zoneSub}>
+                <Text style={[styles.zoneName, { color: theme.textPrimary }]}>{zone.name}</Text>
+                <Text style={[styles.zoneSub, { color: theme.textMuted }]}>
                   {zone.type} · {zone.polygon.length} pts
                   {calibration
                     ? ` · ~${normalizedAreaToSqM(

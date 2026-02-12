@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+﻿import { useRouter } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 
@@ -10,16 +10,22 @@ export default function SettingsTabScreen() {
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <Text style={[styles.title, { color: theme.textPrimary }]}>Settings</Text>
-        <Text style={[styles.subtitle, { color: theme.textMuted }]}>
-          Manage app preferences and appearance.
-        </Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Manage app preferences and appearance.</Text>
         <Pressable
           accessibilityRole="button"
           onPress={() => router.push("/styleguide")}
           style={[styles.linkRow, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
         >
           <Text style={[styles.linkTitle, { color: theme.textPrimary }]}>Styleguide</Text>
-          <Text style={[styles.linkChevron, { color: theme.textMuted }]}>›</Text>
+          <Text style={[styles.linkChevron, { color: theme.textMuted }]}>{">"}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push("/theme-qa")}
+          style={[styles.linkRow, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
+        >
+          <Text style={[styles.linkTitle, { color: theme.textPrimary }]}>Theme QA</Text>
+          <Text style={[styles.linkChevron, { color: theme.textMuted }]}>{">"}</Text>
         </Pressable>
       </View>
     </View>
