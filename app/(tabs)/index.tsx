@@ -1,7 +1,9 @@
-﻿import { Link } from "expo-router";
+﻿import { useQuery } from "@tanstack/react-query";
+import { Link } from "expo-router";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useGardensQuery } from "@/features/gardens/hooks/useGardensQuery";
 import { useGardenSummariesQuery } from "@/features/gardens/hooks/useGardenSummariesQuery";
+import { fetchCurrentWeather, fetchDailyForecast } from "@/features/weather/services/openMeteo";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 
@@ -15,6 +17,23 @@ export default function DashboardScreen() {
   const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
 
   const selectedGarden = gardens.find((garden) => garden.id === selectedGardenId) ?? gardens[0] ?? null;
+  const canLoadWeather = Boolean(
+    selectedGarden && (Math.abs(selectedGarden.latitude) > 0.000001 || Math.abs(selectedGarden.longitude) > 0.000001)
+  );
+
+  const weatherQuery = useQuery({
+    queryKey: ["dashboard-weather", selectedGarden?.id, selectedGarden?.latitude, selectedGarden?.longitude],
+    enabled: canLoadWeather,
+    queryFn: async () => {
+      if (!selectedGarden) return null;
+      const [current, forecast] = await Promise.all([
+        fetchCurrentWeather(selectedGarden.latitude, selectedGarden.longitude),
+        fetchDailyForecast(selectedGarden.latitude, selectedGarden.longitude, 3),
+      ]);
+      return { current, forecast };
+    },
+    staleTime: 15 * 60 * 1000,
+  });
 
   const totalBeds = gardens.reduce((sum, garden) => sum + (summaries[garden.id]?.bedCount ?? 0), 0);
   const mappedGardens = gardens.reduce((sum, garden) => {
@@ -40,9 +59,49 @@ export default function DashboardScreen() {
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Quick Actions</Text>
-        <Link href="/gardens/new" style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>+ New Garden</Link>
-        <Link href="/(tabs)/gardens" style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Open Gardens</Link>
-        <Link href="/(tabs)/plan" style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Open Plan</Link>
+        <Link
+          href="/gardens/new"
+          style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+        >
+          + New Garden
+        </Link>
+        <Link
+          href="/(tabs)/gardens"
+          style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+        >
+          Open Gardens
+        </Link>
+        <Link
+          href="/(tabs)/plan"
+          style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+        >
+          Open Plan
+        </Link>
+      </View>
+
+      <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Garden Weather</Text>
+        {!selectedGarden ? <Text style={[styles.helper, { color: theme.textMuted }]}>Choose a garden to see weather.</Text> : null}
+        {selectedGarden && !canLoadWeather ? (
+          <Text style={[styles.helper, { color: theme.textMuted }]}>Set this garden location to load local weather.</Text>
+        ) : null}
+        {canLoadWeather && weatherQuery.isLoading ? (
+          <Text style={[styles.helper, { color: theme.textMuted }]}>Loading weather...</Text>
+        ) : null}
+        {canLoadWeather && !weatherQuery.isLoading && weatherQuery.data?.current ? (
+          <>
+            <Text style={[styles.weatherNow, { color: theme.textPrimary }]}>
+              Now {Math.round(weatherQuery.data.current.temperatureC)}C, {describeWeatherCode(weatherQuery.data.current.weatherCode)}
+            </Text>
+            <Text style={[styles.helper, { color: theme.textMuted }]}>Wind {Math.round(weatherQuery.data.current.windSpeedKmh)} km/h</Text>
+            {weatherQuery.data.forecast.slice(0, 3).map((day) => (
+              <Text key={day.date} style={[styles.helper, { color: theme.textMuted }]}>
+                {formatShortDate(day.date)}: {Math.round(day.tempMinC)}-{Math.round(day.tempMaxC)}C, {Math.round(day.precipMm)}mm rain (
+                {Math.round(day.precipProbPct)}%)
+              </Text>
+            ))}
+          </>
+        ) : null}
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
@@ -51,17 +110,27 @@ export default function DashboardScreen() {
         {selectedGarden && (
           <>
             <Text style={[styles.gardenName, { color: theme.textPrimary }]}>{selectedGarden.name}</Text>
-            <Text style={[styles.helper, { color: theme.textMuted }]}>
+            <Text style={[styles.helper, { color: theme.textMuted }]}> 
               {selectedGarden.locationLabel ?? `${selectedGarden.latitude.toFixed(4)}, ${selectedGarden.longitude.toFixed(4)}`}
             </Text>
             <Text style={[styles.helper, { color: theme.textMuted }]}> 
               Area {selectedGarden.scaleCalibration?.boundaryAreaSqM ? `${selectedGarden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
-              {" · "}Beds {summaries[selectedGarden.id]?.bedCount ?? 0}
-              {" · "}Features {summaries[selectedGarden.id]?.featureCount ?? 0}
+              {" | "}Beds {summaries[selectedGarden.id]?.bedCount ?? 0}
+              {" | "}Features {summaries[selectedGarden.id]?.featureCount ?? 0}
             </Text>
             <View style={styles.inlineActions}>
-              <Link href={`/gardens/${selectedGarden.id}/setup`} style={[styles.secondaryLinkSmall, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Setup</Link>
-              <Link href={`/gardens/${selectedGarden.id}/map`} style={[styles.secondaryLinkSmall, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Mapper</Link>
+              <Link
+                href={`/gardens/${selectedGarden.id}/setup`}
+                style={[styles.secondaryLinkSmall, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+              >
+                Setup
+              </Link>
+              <Link
+                href={`/gardens/${selectedGarden.id}/map`}
+                style={[styles.secondaryLinkSmall, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+              >
+                Mapper
+              </Link>
               <Pressable onPress={() => setSelectedGardenId(selectedGarden.id)}>
                 <Text style={[styles.selectText, { color: theme.primaryActionBackground }]}>Set as current</Text>
               </Pressable>
@@ -81,6 +150,22 @@ function MetricCard(props: { label: string; value: string }) {
       <Text style={[styles.metricValue, { color: theme.textPrimary }]}>{props.value}</Text>
     </View>
   );
+}
+
+function formatShortDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short" });
+}
+
+function describeWeatherCode(code: number): string {
+  if (code === 0) return "clear";
+  if (code >= 1 && code <= 3) return "partly cloudy";
+  if (code === 45 || code === 48) return "fog";
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "rain";
+  if (code >= 71 && code <= 77) return "snow";
+  if (code >= 95) return "storm";
+  return "mixed conditions";
 }
 
 const styles = StyleSheet.create({
@@ -121,6 +206,7 @@ const styles = StyleSheet.create({
   },
   gardenName: { fontSize: 20, fontWeight: "800" },
   helper: {},
+  weatherNow: { fontSize: 16, fontWeight: "700" },
   inlineActions: { marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
   secondaryLinkSmall: {
     fontWeight: "700",

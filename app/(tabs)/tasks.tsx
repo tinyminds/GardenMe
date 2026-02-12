@@ -5,7 +5,8 @@ import { loadAppPreferences } from "@/core/settings/appPreferences";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGardenTaskRepository";
-import { buildAutoTaskInputs } from "@/features/tasks/services/taskGeneration";
+import { buildAutoTaskInputs, buildWeatherTaskInputs } from "@/features/tasks/services/taskGeneration";
+import { fetchDailyForecast } from "@/features/weather/services/openMeteo";
 import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
@@ -49,17 +50,32 @@ export default function TasksTabScreen() {
 
   const generateMutation = useMutation({
     mutationFn: async (gardenId: string) => {
-      const [wishlist, activePlantings] = await Promise.all([
+      const [garden, wishlist, activePlantings] = await Promise.all([
+        gardenRepository.getById(gardenId),
         wishlistRepository.listByGarden(gardenId),
         wishlistRepository.listPlantingsByGarden(gardenId),
       ]);
+      const activeEntries = wishlist.filter((entry) => entry.status === "already_growing");
+      const forecast =
+        garden && (Math.abs(garden.latitude) > 0.000001 || Math.abs(garden.longitude) > 0.000001)
+          ? await fetchDailyForecast(garden.latitude, garden.longitude, 7)
+          : [];
       const tasks = buildAutoTaskInputs({
         gardenId,
         now: new Date(),
         wishlist,
         activePlantings: activePlantings.filter((row) => !row.endedAt),
       });
+      const weatherTasks = buildWeatherTaskInputs({
+        gardenId,
+        now: new Date(),
+        forecast,
+        activeEntries,
+      });
       for (const task of tasks) {
+        await taskRepository.upsertAutoTask(task);
+      }
+      for (const task of weatherTasks) {
         await taskRepository.upsertAutoTask(task);
       }
     },

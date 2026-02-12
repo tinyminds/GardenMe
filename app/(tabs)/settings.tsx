@@ -113,15 +113,7 @@ export default function SettingsTabScreen() {
           onPress={() => router.push("/styleguide")}
           style={[styles.linkRow, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
         >
-          <Text style={[styles.linkTitle, { color: theme.textPrimary }]}>Styleguide</Text>
-          <Text style={[styles.linkChevron, { color: theme.textMuted }]}>{">"}</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push("/theme-qa")}
-          style={[styles.linkRow, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
-        >
-          <Text style={[styles.linkTitle, { color: theme.textPrimary }]}>Theme QA</Text>
+          <Text style={[styles.linkTitle, { color: theme.textPrimary }]}>Theme Editor</Text>
           <Text style={[styles.linkChevron, { color: theme.textMuted }]}>{">"}</Text>
         </Pressable>
       </View>

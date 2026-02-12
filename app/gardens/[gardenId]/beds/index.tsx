@@ -725,7 +725,7 @@ export default function BedsListScreen() {
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={[styles.title, { color: theme.textPrimary }]}>Beds</Text>
+        <Text style={[styles.title, { color: theme.textPrimary }]}>Bed Planner</Text>
         <Text style={[styles.subtitle, { color: theme.textMuted }]}>Review beds and place crops from your grow list.</Text>
 
         {bedsQuery.isLoading && <Text style={[styles.empty, { color: theme.textMuted }]}>Loading beds...</Text>}

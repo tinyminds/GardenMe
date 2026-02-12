@@ -103,8 +103,8 @@ export default function StyleguideScreen() {
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={[styles.title, { color: theme.textPrimary }]}>Styleguide</Text>
-        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Theme editor with inline previews and pickers.</Text>
+        <Text style={[styles.title, { color: theme.textPrimary }]}>Theme Editor</Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Edit app theme tokens with inline previews and pickers.</Text>
 
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.groupTitle, { color: theme.textPrimary }]}>Quick Preview</Text>

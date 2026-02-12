@@ -139,7 +139,7 @@ export default function PlanTabScreen() {
               href={`/gardens/${selectedGarden.id}/beds`}
               style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
             >
-              Beds
+              Bed Planner
             </Link>
           </View>
         </>

@@ -7,6 +7,8 @@ import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/
 import { SqlitePlantCatalogRepository } from "@/infra/repositories/sqlite/SqlitePlantCatalogRepository";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { fetchGrowstuffCropDetails, searchGrowstuffPlants, type GrowstuffCropDetails } from "@/features/plants/services/growstuff";
+import { getPlantingCalendarProfile } from "@/features/plants/services/plantingCalendar";
+import { fetchBestTreflePlantProfile, type TreflePlantProfile } from "@/features/plants/services/trefle";
 import { queryClient } from "@/state/queryClient";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 import type { GardenCropWishlistItemView, PlantCatalogEntry } from "@/domain/entities/Plant";
@@ -98,6 +100,7 @@ export default function GardenGrowListScreen() {
   const [bulkImportProgress, setBulkImportProgress] = useState<BulkImportProgress | null>(null);
   const [bulkImportMessage, setBulkImportMessage] = useState<string | null>(null);
   const [bulkImportUnmatchedNames, setBulkImportUnmatchedNames] = useState<string[]>([]);
+  const [timingRefreshMessage, setTimingRefreshMessage] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const listNameCollator = useMemo(
     () =>
@@ -296,6 +299,13 @@ export default function GardenGrowListScreen() {
             // Keep canonical row even when details fetch fails.
           }
 
+          canonical = await enrichCatalogEntryWithCalendarIfMissing(
+            canonical,
+            plantCatalogRepository,
+            gardenQuery.data?.latitude
+          );
+          canonical = await enrichCatalogEntryWithTrefleIfMissing(canonical, plantCatalogRepository);
+
           plantCatalogId = canonical.id;
         }
       }
@@ -303,10 +313,15 @@ export default function GardenGrowListScreen() {
       if (!plantCatalogId) {
         const manualName = payload.manualName?.trim();
         if (!manualName) throw new Error("Missing plant name");
-        const entry = await plantCatalogRepository.upsert({
+        let entry = await plantCatalogRepository.upsert({
           source: "manual",
           commonName: manualName,
         });
+        entry = await enrichCatalogEntryWithCalendarIfMissing(
+          entry,
+          plantCatalogRepository,
+          gardenQuery.data?.latitude
+        );
         plantCatalogId = entry.id;
       }
 
@@ -504,7 +519,7 @@ export default function GardenGrowListScreen() {
               const details = await fetchGrowstuffCropDetails(matched.externalId);
               if (details) {
                 const preferredScientificName = pickScientificName(details) || matched.scientificName;
-                await plantCatalogRepository.upsert({
+                const updated = await plantCatalogRepository.upsert({
                   source: "growstuff",
                   externalId: matched.externalId,
                   commonName: details.name?.trim() || matched.commonName,
@@ -515,10 +530,22 @@ export default function GardenGrowListScreen() {
                     : {}),
                   metaJson: buildGrowstuffMetaJson(matched.metaJson, details),
                 });
+                await enrichCatalogEntryWithCalendarIfMissing(
+                  updated,
+                  plantCatalogRepository,
+                  gardenQuery.data?.latitude
+                );
+                await enrichCatalogEntryWithTrefleIfMissing(updated, plantCatalogRepository);
               }
             } catch {
               // Keep added plant even if detail enrichment fails.
             }
+            await enrichCatalogEntryWithCalendarIfMissing(
+              matched,
+              plantCatalogRepository,
+              gardenQuery.data?.latitude
+            );
+            await enrichCatalogEntryWithTrefleIfMissing(matched, plantCatalogRepository);
           }
           existingPlantIds.add(matched.id);
           added += 1;
@@ -549,6 +576,39 @@ export default function GardenGrowListScreen() {
       setBulkImportProgress(null);
       setBulkImportUnmatchedNames([]);
       setBulkImportMessage("Bulk import failed. Try again.");
+    },
+  });
+
+  const refreshTimingMutation = useMutation({
+    onMutate: () => {
+      setTimingRefreshMessage(null);
+    },
+    mutationFn: async (): Promise<{ updated: number; total: number }> => {
+      if (!gardenId) throw new Error("Missing garden id");
+      const items = await wishlistRepository.listByGarden(gardenId);
+      let updated = 0;
+
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index]!;
+        const beforeMeta = item.plant.metaJson ?? "";
+        let next = await enrichCatalogEntryWithCalendarIfMissing(
+          item.plant,
+          plantCatalogRepository,
+          gardenQuery.data?.latitude
+        );
+        next = await enrichCatalogEntryWithTrefleIfMissing(next, plantCatalogRepository);
+        if ((next.metaJson ?? "") !== beforeMeta) updated += 1;
+        if (index < items.length - 1) await waitMs(90);
+      }
+
+      return { updated, total: items.length };
+    },
+    onSuccess: async ({ updated, total }) => {
+      setTimingRefreshMessage(`Timing refresh complete: updated ${updated} of ${total}.`);
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+    },
+    onError: () => {
+      setTimingRefreshMessage("Timing refresh failed. Try again.");
     },
   });
 
@@ -730,6 +790,18 @@ export default function GardenGrowListScreen() {
               </Text>
             </Pressable>
           </View>
+          <View style={styles.addRow}>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+              disabled={refreshTimingMutation.isPending || (wishlistQuery.data ?? []).length === 0}
+              onPress={() => refreshTimingMutation.mutate()}
+            >
+              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>
+                {refreshTimingMutation.isPending ? "Refreshing timing..." : "Refresh timing for current list"}
+              </Text>
+            </Pressable>
+          </View>
+          {timingRefreshMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{timingRefreshMessage}</Text>}
           {bulkImportOpen && (
             <View style={styles.importSection}>
               <Text style={[styles.helper, { color: theme.textMuted }]}>Paste comma/newline/semicolon separated plant names.</Text>
@@ -923,6 +995,11 @@ export default function GardenGrowListScreen() {
                   return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Category: {label}</Text>;
                 })()}
                 {(() => {
+                  const trefleStatus = extractTrefleStatus(item.plant.metaJson);
+                  if (!trefleStatus) return null;
+                  return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{trefleStatus}</Text>;
+                })()}
+                {(() => {
                   const isPlantDataExpanded = Boolean(expandedPlantData[item.id]);
                   const plantDataDraft = plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson);
                   const missingLabels = getMissingPlantDataLabels(plantDataDraft);
@@ -948,6 +1025,16 @@ export default function GardenGrowListScreen() {
                       )}
                       {isPlantDataExpanded && (
                         <View style={[styles.dataPanel, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
+                          {(() => {
+                            const timingStatus = extractTimingStatus(item.plant.metaJson);
+                            if (!timingStatus) return null;
+                            return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{timingStatus}</Text>;
+                          })()}
+                          {(() => {
+                            const trefleStatus = extractTrefleStatus(item.plant.metaJson);
+                            if (!trefleStatus) return null;
+                            return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{trefleStatus}</Text>;
+                          })()}
                           <View style={styles.dataField}>
                             <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Category</Text>
                             <View style={styles.configChips}>
@@ -1037,57 +1124,68 @@ export default function GardenGrowListScreen() {
                               />
                             </View>
                           </View>
-                          <View style={styles.dataField}>
-                            <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Task months (1-12 or Jan-Dec)</Text>
-                            <TextInput
-                              value={plantDataDraft.startIndoorsMonths}
-                              onChangeText={(value) =>
-                                setPlantDataDrafts((prev) => ({
-                                  ...prev,
-                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), startIndoorsMonths: value },
-                                }))
-                              }
-                              placeholder="Start indoors: e.g. 2,3"
-                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
-                              autoCapitalize="none"
-                            />
-                            <TextInput
-                              value={plantDataDraft.directSowMonths}
-                              onChangeText={(value) =>
-                                setPlantDataDrafts((prev) => ({
-                                  ...prev,
-                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), directSowMonths: value },
-                                }))
-                              }
-                              placeholder="Direct sow: e.g. 4,5"
-                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
-                              autoCapitalize="none"
-                            />
-                            <TextInput
-                              value={plantDataDraft.plantOutMonths}
-                              onChangeText={(value) =>
-                                setPlantDataDrafts((prev) => ({
-                                  ...prev,
-                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), plantOutMonths: value },
-                                }))
-                              }
-                              placeholder="Plant out: e.g. 5,6"
-                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
-                              autoCapitalize="none"
-                            />
-                            <TextInput
-                              value={plantDataDraft.harvestMonths}
-                              onChangeText={(value) =>
-                                setPlantDataDrafts((prev) => ({
-                                  ...prev,
-                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), harvestMonths: value },
-                                }))
-                              }
-                              placeholder="Harvest: e.g. 8,9,10"
-                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
-                              autoCapitalize="none"
-                            />
-                          </View>
+                          {!hasPlanningWindowData(item.plant.metaJson) ? (
+                            <View style={styles.dataField}>
+                              <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Task months (1-12 or Jan-Dec)</Text>
+                              <TextInput
+                                value={plantDataDraft.startIndoorsMonths}
+                                onChangeText={(value) =>
+                                  setPlantDataDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), startIndoorsMonths: value },
+                                  }))
+                                }
+                                placeholder="Start indoors: e.g. 2,3"
+                                style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                                autoCapitalize="none"
+                              />
+                              <TextInput
+                                value={plantDataDraft.directSowMonths}
+                                onChangeText={(value) =>
+                                  setPlantDataDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), directSowMonths: value },
+                                  }))
+                                }
+                                placeholder="Direct sow: e.g. 4,5"
+                                style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                                autoCapitalize="none"
+                              />
+                              <TextInput
+                                value={plantDataDraft.plantOutMonths}
+                                onChangeText={(value) =>
+                                  setPlantDataDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), plantOutMonths: value },
+                                  }))
+                                }
+                                placeholder="Plant out: e.g. 5,6"
+                                style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                                autoCapitalize="none"
+                              />
+                              <TextInput
+                                value={plantDataDraft.harvestMonths}
+                                onChangeText={(value) =>
+                                  setPlantDataDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), harvestMonths: value },
+                                  }))
+                                }
+                                placeholder="Harvest: e.g. 8,9,10"
+                                style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                                autoCapitalize="none"
+                              />
+                            </View>
+                          ) : (
+                            <View style={styles.dataField}>
+                              <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Task timing (read only)</Text>
+                              {extractTimingDisplayLines(item.plant.metaJson).map((line) => (
+                                <Text key={`${item.id}-timing-${line}`} style={[styles.wishMeta, { color: theme.textMuted }]}>
+                                  {line}
+                                </Text>
+                              ))}
+                            </View>
+                          )}
                           <View style={styles.dataActions}>
                             <Pressable
                               style={[styles.cloneInlineButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
@@ -1593,6 +1691,179 @@ function buildGrowstuffMetaJson(existingMetaJson: string | undefined, details: G
   return JSON.stringify(merged);
 }
 
+async function enrichCatalogEntryWithTrefleIfMissing(
+  entry: PlantCatalogEntry,
+  repository: SqlitePlantCatalogRepository
+): Promise<PlantCatalogEntry> {
+  if (entry.source !== "growstuff" || !entry.externalId) return entry;
+  if (hasSeasonTimingData(entry.metaJson)) return entry;
+
+  try {
+    const trefle = await fetchBestTreflePlantProfile({
+      commonName: entry.commonName,
+      ...(entry.scientificName ? { scientificName: entry.scientificName } : {}),
+    });
+    if (!trefle) return entry;
+
+    return repository.upsert({
+      source: entry.source,
+      externalId: entry.externalId,
+      commonName: entry.commonName,
+      ...(entry.scientificName ? { scientificName: entry.scientificName } : {}),
+      ...(entry.familyName ? { familyName: entry.familyName } : {}),
+      ...(entry.imageUrl ? { imageUrl: entry.imageUrl } : {}),
+      metaJson: buildTrefleMetaJson(entry.metaJson, trefle),
+    });
+  } catch {
+    return entry;
+  }
+}
+
+async function enrichCatalogEntryWithCalendarIfMissing(
+  entry: PlantCatalogEntry,
+  repository: SqlitePlantCatalogRepository,
+  latitude?: number
+): Promise<PlantCatalogEntry> {
+  if (hasPlanningWindowData(entry.metaJson)) return entry;
+  const profile = getPlantingCalendarProfile({
+    commonName: entry.commonName,
+    ...(entry.scientificName ? { scientificName: entry.scientificName } : {}),
+    ...(typeof latitude === "number" ? { latitude } : {}),
+  });
+  if (!profile) return entry;
+
+  return repository.upsert({
+    source: entry.source,
+    ...(entry.externalId ? { externalId: entry.externalId } : {}),
+    commonName: entry.commonName,
+    ...(entry.scientificName ? { scientificName: entry.scientificName } : {}),
+    ...(entry.familyName ? { familyName: entry.familyName } : {}),
+    ...(entry.imageUrl ? { imageUrl: entry.imageUrl } : {}),
+    metaJson: buildCalendarMetaJson(entry.metaJson, profile),
+  });
+}
+
+function hasSeasonTimingData(metaJson?: string): boolean {
+  if (!metaJson) return false;
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      growth_months?: unknown;
+      fruit_months?: unknown;
+      days_to_harvest?: unknown;
+      median_days_to_first_harvest?: unknown;
+      gardenme?: {
+        taskMonths?: {
+          startIndoors?: unknown;
+          directSow?: unknown;
+          plantOut?: unknown;
+          harvest?: unknown;
+        };
+        daysToFirstHarvest?: unknown;
+      };
+    };
+    const hasMonths =
+      parseMonthInput(parsed.gardenme?.taskMonths?.harvest).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.startIndoors).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.directSow).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.plantOut).length > 0 ||
+      parseMonthInput(parsed.fruit_months).length > 0 ||
+      parseMonthInput(parsed.growth_months).length > 0;
+    const hasHarvestDays =
+      typeof parsed.days_to_harvest === "number" ||
+      typeof parsed.median_days_to_first_harvest === "number" ||
+      typeof parsed.gardenme?.daysToFirstHarvest === "number";
+    return hasMonths || hasHarvestDays;
+  } catch {
+    return false;
+  }
+}
+
+function buildTrefleMetaJson(existingMetaJson: string | undefined, details: TreflePlantProfile): string {
+  const existing = parseMetaJsonObject(existingMetaJson);
+  const gardenme = asRecord(existing.gardenme) ?? {};
+  const existingTaskMonths = asRecord(gardenme.taskMonths) ?? {};
+  const mergedHarvestMonths = Array.from(
+    new Set([
+      ...parseMonthInput(existingTaskMonths.harvest),
+      ...details.fruitMonths,
+      ...details.growthMonths,
+    ])
+  ).sort((a, b) => a - b);
+
+  const nextTaskMonths: Record<string, unknown> = {
+    ...existingTaskMonths,
+    ...(mergedHarvestMonths.length > 0 ? { harvest: mergedHarvestMonths } : {}),
+  };
+
+  const nextGardenme: Record<string, unknown> = {
+    ...gardenme,
+    ...(typeof details.daysToHarvest === "number" ? { daysToFirstHarvest: details.daysToHarvest } : {}),
+    taskMonths: nextTaskMonths,
+  };
+
+  const nextRoot: Record<string, unknown> = {
+    ...existing,
+    ...(details.growthMonths.length > 0 ? { growth_months: details.growthMonths } : {}),
+    ...(details.fruitMonths.length > 0 ? { fruit_months: details.fruitMonths } : {}),
+    ...(typeof details.daysToHarvest === "number" ? { days_to_harvest: details.daysToHarvest } : {}),
+    ...(details.sowing ? { sowing: details.sowing } : {}),
+    gardenme: nextGardenme,
+    trefle: {
+      ...(asRecord(existing.trefle) ?? {}),
+      id: details.trefleId,
+      ...(details.slug ? { slug: details.slug } : {}),
+      ...(details.commonName ? { commonName: details.commonName } : {}),
+      ...(details.scientificName ? { scientificName: details.scientificName } : {}),
+      ...(details.familyName ? { familyName: details.familyName } : {}),
+      ...(details.imageUrl ? { imageUrl: details.imageUrl } : {}),
+      fetchedAt: new Date().toISOString(),
+    },
+  };
+
+  return JSON.stringify(nextRoot);
+}
+
+function buildCalendarMetaJson(
+  existingMetaJson: string | undefined,
+  profile: import("@/features/plants/services/plantingCalendar").PlantingCalendarProfile
+): string {
+  const existing = parseMetaJsonObject(existingMetaJson);
+  const gardenme = asRecord(existing.gardenme) ?? {};
+  const existingTaskMonths = asRecord(gardenme.taskMonths) ?? {};
+
+  const mergeMonths = (current: unknown, incoming: number[]): number[] =>
+    Array.from(new Set([...parseMonthInput(current), ...incoming])).sort((a, b) => a - b);
+
+  const startIndoors = mergeMonths(existingTaskMonths.startIndoors, profile.startIndoorsMonths);
+  const directSow = mergeMonths(existingTaskMonths.directSow, profile.directSowMonths);
+  const plantOut = mergeMonths(existingTaskMonths.plantOut, profile.plantOutMonths);
+  const harvest = mergeMonths(existingTaskMonths.harvest, profile.harvestMonths);
+
+  const nextTaskMonths: Record<string, unknown> = {
+    ...(startIndoors.length > 0 ? { startIndoors } : {}),
+    ...(directSow.length > 0 ? { directSow } : {}),
+    ...(plantOut.length > 0 ? { plantOut } : {}),
+    ...(harvest.length > 0 ? { harvest } : {}),
+  };
+
+  const nextGardenme: Record<string, unknown> = {
+    ...gardenme,
+    taskMonths: nextTaskMonths,
+    calendarSource: profile.sourceLabel,
+  };
+
+  const nextRoot: Record<string, unknown> = {
+    ...existing,
+    gardenme: nextGardenme,
+  };
+
+  if (harvest.length > 0) {
+    nextRoot.fruit_months = harvest;
+  }
+
+  return JSON.stringify(nextRoot);
+}
+
 function parseMetaJsonObject(metaJson?: string): Record<string, unknown> {
   if (!metaJson) return {};
   try {
@@ -1716,6 +1987,192 @@ function extractPlantTaskTiming(metaJson?: string): {
     };
   } catch {
     return {};
+  }
+}
+
+function extractTrefleStatus(metaJson?: string): string | undefined {
+  if (!metaJson) return undefined;
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      trefle?: {
+        id?: number | string;
+      };
+      growth_months?: unknown;
+      fruit_months?: unknown;
+      days_to_harvest?: unknown;
+    };
+    if (!parsed.trefle?.id) return undefined;
+    const hasTiming =
+      parseMonthInput(parsed.growth_months).length > 0 ||
+      parseMonthInput(parsed.fruit_months).length > 0 ||
+      typeof parsed.days_to_harvest === "number";
+    return hasTiming ? `Trefle data: linked (id ${parsed.trefle.id})` : `Trefle data: linked`;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractTimingStatus(metaJson?: string): string | undefined {
+  if (!metaJson) return undefined;
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      growth_months?: unknown;
+      fruit_months?: unknown;
+      days_to_harvest?: unknown;
+      median_days_to_first_harvest?: unknown;
+      gardenme?: {
+        taskMonths?: {
+          startIndoors?: unknown;
+          directSow?: unknown;
+          plantOut?: unknown;
+          harvest?: unknown;
+        };
+        daysToFirstHarvest?: unknown;
+      };
+    };
+
+    const hasWindows = hasPlanningWindowData(metaJson);
+    const hasHarvestDays =
+      typeof parsed.gardenme?.daysToFirstHarvest === "number" ||
+      typeof parsed.days_to_harvest === "number" ||
+      typeof parsed.median_days_to_first_harvest === "number";
+    if (hasWindows && hasHarvestDays) return "Timing data: planning windows + harvest estimate";
+    if (hasWindows) return "Timing data: planning windows present";
+    if (hasHarvestDays) return "Timing data: harvest estimate only";
+    if (hasTimingData(metaJson)) return "Timing data: present";
+    return "Timing data: missing";
+  } catch {
+    return undefined;
+  }
+}
+
+function hasTimingData(metaJson?: string): boolean {
+  if (!metaJson) return false;
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      growth_months?: unknown;
+      fruit_months?: unknown;
+      days_to_harvest?: unknown;
+      median_days_to_first_harvest?: unknown;
+      gardenme?: {
+        taskMonths?: {
+          startIndoors?: unknown;
+          directSow?: unknown;
+          plantOut?: unknown;
+          harvest?: unknown;
+        };
+        daysToFirstHarvest?: unknown;
+      };
+    };
+    const hasTaskMonths =
+      parseMonthInput(parsed.gardenme?.taskMonths?.startIndoors).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.directSow).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.plantOut).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.harvest).length > 0;
+    const hasRootMonths =
+      parseMonthInput(parsed.growth_months).length > 0 ||
+      parseMonthInput(parsed.fruit_months).length > 0;
+    const hasHarvestDays =
+      typeof parsed.gardenme?.daysToFirstHarvest === "number" ||
+      typeof parsed.days_to_harvest === "number" ||
+      typeof parsed.median_days_to_first_harvest === "number";
+    return hasTaskMonths || hasRootMonths || hasHarvestDays;
+  } catch {
+    return false;
+  }
+}
+
+function hasPlanningWindowData(metaJson?: string): boolean {
+  if (!metaJson) return false;
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      growth_months?: unknown;
+      fruit_months?: unknown;
+      gardenme?: {
+        taskMonths?: {
+          startIndoors?: unknown;
+          directSow?: unknown;
+          plantOut?: unknown;
+          harvest?: unknown;
+        };
+      };
+    };
+    return (
+      parseMonthInput(parsed.gardenme?.taskMonths?.startIndoors).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.directSow).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.plantOut).length > 0 ||
+      parseMonthInput(parsed.gardenme?.taskMonths?.harvest).length > 0 ||
+      parseMonthInput(parsed.growth_months).length > 0 ||
+      parseMonthInput(parsed.fruit_months).length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function extractTimingDisplayLines(metaJson?: string): string[] {
+  if (!metaJson) return ["No timing data"];
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      growth_months?: unknown;
+      fruit_months?: unknown;
+      days_to_harvest?: unknown;
+      median_days_to_first_harvest?: unknown;
+      trefle?: {
+        id?: unknown;
+      };
+      gardenme?: {
+        taskMonths?: {
+          startIndoors?: unknown;
+          directSow?: unknown;
+          plantOut?: unknown;
+          harvest?: unknown;
+        };
+        daysToFirstHarvest?: unknown;
+        calendarSource?: unknown;
+      };
+    };
+
+    const startIndoors = parseMonthInput(parsed.gardenme?.taskMonths?.startIndoors);
+    const directSow = parseMonthInput(parsed.gardenme?.taskMonths?.directSow);
+    const plantOut = parseMonthInput(parsed.gardenme?.taskMonths?.plantOut);
+    const harvest = Array.from(
+      new Set([
+        ...parseMonthInput(parsed.gardenme?.taskMonths?.harvest),
+        ...parseMonthInput(parsed.fruit_months),
+        ...parseMonthInput(parsed.growth_months),
+      ])
+    ).sort((a, b) => a - b);
+
+    const harvestDaysRaw =
+      parsed.gardenme?.daysToFirstHarvest ?? parsed.days_to_harvest ?? parsed.median_days_to_first_harvest;
+    const harvestDays =
+      typeof harvestDaysRaw === "number" && Number.isFinite(harvestDaysRaw) && harvestDaysRaw > 0
+        ? Math.round(harvestDaysRaw)
+        : undefined;
+
+    const lines: string[] = [];
+    if (startIndoors.length > 0) lines.push(`Start indoors: ${startIndoors.join(", ")}`);
+    if (directSow.length > 0) lines.push(`Direct sow: ${directSow.join(", ")}`);
+    if (plantOut.length > 0) lines.push(`Plant out: ${plantOut.join(", ")}`);
+    if (harvest.length > 0) lines.push(`Harvest months: ${harvest.join(", ")}`);
+    if (typeof harvestDays === "number") lines.push(`Days to harvest: ~${harvestDays}`);
+    const sourceLabel =
+      typeof parsed.gardenme?.calendarSource === "string" && parsed.gardenme.calendarSource.trim()
+        ? parsed.gardenme.calendarSource.trim()
+        : parsed.trefle?.id
+          ? "Trefle"
+          : startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0
+            ? "Manual/custom"
+            : "Unknown";
+    const hasPlanningWindows = startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0 || harvest.length > 0;
+    const confidence = hasPlanningWindows ? "high" : typeof harvestDays === "number" ? "low" : "low";
+    lines.push(`Source: ${sourceLabel}`);
+    lines.push(`Confidence: ${confidence}`);
+    if (lines.length === 0) lines.push("No timing data");
+    return lines;
+  } catch {
+    return ["No timing data"];
   }
 }
 

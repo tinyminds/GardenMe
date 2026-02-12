@@ -1,6 +1,7 @@
-﻿import { Link } from "expo-router";
-import { useMutation } from "@tanstack/react-query";
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+﻿import { useMutation } from "@tanstack/react-query";
+import { Link } from "expo-router";
+import { useState } from "react";
+import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useGardensQuery } from "@/features/gardens/hooks/useGardensQuery";
 import { useGardenSummariesQuery } from "@/features/gardens/hooks/useGardenSummariesQuery";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
@@ -18,11 +19,22 @@ export default function GardensTabScreen() {
   const summaries = summariesQuery.data ?? {};
   const selectedGardenId = useSelectedGardenStore((state) => state.selectedGardenId);
   const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
+  const [cloneDraft, setCloneDraft] = useState<{ id: string; sourceName: string; name: string } | null>(null);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => repository.delete(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["gardens"] });
+    },
+  });
+
+  const cloneMutation = useMutation({
+    mutationFn: async (payload: { id: string; name: string }) => repository.clone(payload.id, { name: payload.name }),
+    onSuccess: async (cloned) => {
+      setCloneDraft(null);
+      setSelectedGardenId(cloned.id);
+      await queryClient.invalidateQueries({ queryKey: ["gardens"] });
+      Alert.alert("Garden cloned", `Created "${cloned.name}".`);
     },
   });
 
@@ -33,12 +45,29 @@ export default function GardensTabScreen() {
     ]);
   };
 
+  const confirmClone = (id: string, name: string) => {
+    setCloneDraft({ id, sourceName: name, name: `${name} (Copy)` });
+  };
+
+  const submitClone = () => {
+    if (!cloneDraft || cloneMutation.isPending) return;
+    const nextName = cloneDraft.name.trim();
+    if (!nextName) {
+      Alert.alert("Name required", "Enter a name for the cloned garden.");
+      return;
+    }
+    cloneMutation.mutate({ id: cloneDraft.id, name: nextName });
+  };
+
   if (isLoading) return <Text style={[styles.state, { color: theme.textMuted }]}>Loading gardens...</Text>;
   if (isError) return <Text style={[styles.state, { color: theme.textMuted }]}>Could not load gardens.</Text>;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.appBackground }]}>
       <Link href="/gardens/new" style={[styles.addLink, { color: theme.primaryActionBackground }]}>+ New Garden</Link>
+      {cloneMutation.isPending ? (
+        <Text style={[styles.state, { color: theme.textMuted, paddingTop: 0, paddingBottom: 8 }]}>Cloning garden...</Text>
+      ) : null}
       <FlatList
         data={gardens}
         keyExtractor={(item) => item.id}
@@ -79,14 +108,67 @@ export default function GardensTabScreen() {
               </Pressable>
             </Link>
             <Pressable
+              style={[styles.cloneButton, { borderColor: theme.borderColor, backgroundColor: theme.secondaryActionBackground }]}
+              onPress={() => confirmClone(item.id, item.name)}
+              disabled={cloneMutation.isPending || deleteMutation.isPending}
+            >
+              <Text style={[styles.cloneButtonText, { color: theme.secondaryActionText }]}>Copy</Text>
+            </Pressable>
+            <Pressable
               style={[styles.deleteButton, { borderColor: theme.borderColor, backgroundColor: theme.dangerActionBackground }]}
               onPress={() => confirmDelete(item.id, item.name)}
+              disabled={cloneMutation.isPending || deleteMutation.isPending}
             >
-              <Text style={[styles.deleteButtonText, { color: theme.dangerActionText }]}>×</Text>
+              <Text style={[styles.deleteButtonText, { color: theme.dangerActionText }]}>x</Text>
             </Pressable>
           </View>
         )}
       />
+
+      <Modal visible={Boolean(cloneDraft)} transparent animationType="fade" onRequestClose={() => setCloneDraft(null)}>
+        <View style={[styles.modalBackdrop, { backgroundColor: theme.modalBackdrop }]}>
+          <View style={[styles.modalCard, { backgroundColor: theme.modalSurfaceBackground, borderColor: theme.modalSurfaceBorder }]}>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Clone Garden</Text>
+            <Text style={[styles.modalText, { color: theme.textMuted }]}>
+              {cloneDraft ? `Create a full copy of "${cloneDraft.sourceName}".` : ""}
+            </Text>
+            <TextInput
+              value={cloneDraft?.name ?? ""}
+              onChangeText={(value) => setCloneDraft((prev) => (prev ? { ...prev, name: value } : prev))}
+              placeholder="New garden name"
+              placeholderTextColor={theme.textMuted}
+              autoCapitalize="words"
+              editable={!cloneMutation.isPending}
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: theme.appBackground,
+                  borderColor: theme.borderColor,
+                  color: theme.textPrimary,
+                },
+              ]}
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalButtonSecondary, { backgroundColor: theme.secondaryActionBackground }]}
+                onPress={() => setCloneDraft(null)}
+                disabled={cloneMutation.isPending}
+              >
+                <Text style={[styles.modalButtonText, { color: theme.secondaryActionText }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButtonPrimary, { backgroundColor: theme.primaryActionBackground }]}
+                onPress={submitClone}
+                disabled={cloneMutation.isPending}
+              >
+                <Text style={[styles.modalButtonText, { color: theme.primaryActionText }]}>
+                  {cloneMutation.isPending ? "Cloning..." : "Clone"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -102,7 +184,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   cardActive: { borderWidth: 2 },
-  cardMain: { padding: 14, paddingRight: 54, gap: 7 },
+  cardMain: { padding: 14, paddingRight: 92, gap: 7 },
   name: { fontSize: 18, fontWeight: "700", marginBottom: 4 },
   locationText: { fontWeight: "600" },
   coordsText: { fontSize: 12, marginTop: -1 },
@@ -117,6 +199,18 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   statusText: { fontWeight: "700", marginTop: 2 },
+  cloneButton: {
+    position: "absolute",
+    right: 48,
+    top: 10,
+    width: 42,
+    height: 30,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cloneButtonText: { fontWeight: "800", fontSize: 11, lineHeight: 14 },
   deleteButton: {
     position: "absolute",
     right: 10,
@@ -124,12 +218,19 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 999,
-    backgroundColor: "#FBE3DE",
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   deleteButtonText: { fontWeight: "800", fontSize: 16, lineHeight: 18 },
   state: { padding: 20 },
+  modalBackdrop: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
+  modalCard: { width: "100%", maxWidth: 420, borderWidth: 1, borderRadius: 12, padding: 12, gap: 10 },
+  modalTitle: { fontSize: 18, fontWeight: "800" },
+  modalText: { fontSize: 13 },
+  modalInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9, fontWeight: "600" },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
+  modalButtonPrimary: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  modalButtonSecondary: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  modalButtonText: { fontWeight: "700", fontSize: 12 },
 });
-

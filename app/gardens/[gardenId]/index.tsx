@@ -101,7 +101,7 @@ export default function GardenDetailScreen() {
   };
 
   const steps: Array<{ href: string; key: StepKey; title: string; helper: string; status: StepStatus }> = gardenId
-    ? [
+      ? [
         {
           href: `/gardens/${gardenId}/setup`,
           key: "setup",
@@ -119,9 +119,16 @@ export default function GardenDetailScreen() {
           status: mapperDone ? "done" : hasMappedContent ? "in_progress" : hasSetup ? "start" : "blocked",
         },
         {
+          href: `/gardens/${gardenId}/grow`,
+          key: "grow",
+          title: "Grow List",
+          helper: wishlistCount > 0 ? `${wishlistCount} plants shortlisted` : "Choose crops to grow this season",
+          status: growDone ? "done" : hasSetup ? "start" : "blocked",
+        },
+        {
           href: `/gardens/${gardenId}/beds`,
           key: "beds",
-          title: "Beds List",
+          title: "Bed Planner",
           helper:
             bedCount > 0
               ? wishlistCount > 0
@@ -129,13 +136,6 @@ export default function GardenDetailScreen() {
                 : `${bedCount} beds ready to review`
               : "No beds yet",
           status: bedsDone ? "done" : bedCount > 0 ? "in_progress" : hasMappedContent ? "start" : "blocked",
-        },
-        {
-          href: `/gardens/${gardenId}/grow`,
-          key: "grow",
-          title: "Grow List",
-          helper: wishlistCount > 0 ? `${wishlistCount} plants shortlisted` : "Choose crops to grow this season",
-          status: growDone ? "done" : hasSetup ? "start" : "blocked",
         },
       ]
     : [];
