@@ -336,6 +336,37 @@ const migrations: Migration[] = [
       );
     `,
   },
+  {
+    version: "0015_garden_tasks",
+    sql: `
+      CREATE TABLE IF NOT EXISTS garden_tasks (
+        id TEXT PRIMARY KEY NOT NULL,
+        garden_id TEXT NOT NULL,
+        entry_id TEXT,
+        bed_id TEXT,
+        task_type TEXT NOT NULL CHECK (task_type IN ('start_indoors','direct_sow','plant_out','harvest_window','water_alert','manual')),
+        title TEXT NOT NULL,
+        detail TEXT,
+        due_date TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL CHECK (status IN ('open','done','dismissed')),
+        source TEXT NOT NULL CHECK (source IN ('auto','manual')),
+        rule_key TEXT NOT NULL UNIQUE,
+        seen_at TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (garden_id) REFERENCES gardens(id) ON DELETE CASCADE,
+        FOREIGN KEY (entry_id) REFERENCES garden_crop_entries(id) ON DELETE CASCADE,
+        FOREIGN KEY (bed_id) REFERENCES beds(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_garden_tasks_garden_due ON garden_tasks(garden_id, due_date);
+      CREATE INDEX IF NOT EXISTS idx_garden_tasks_status ON garden_tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_garden_tasks_seen ON garden_tasks(seen_at);
+      CREATE INDEX IF NOT EXISTS idx_garden_tasks_entry ON garden_tasks(entry_id);
+    `,
+  },
 ];
 
 export async function runMigrations(db: AppDatabase): Promise<void> {

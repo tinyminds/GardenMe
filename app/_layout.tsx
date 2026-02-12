@@ -4,11 +4,16 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { initDatabase } from "@/core/db/sqlite";
 import { runMigrations } from "@/core/db/migrate";
+import { loadAppPreferences, saveAppPreferences } from "@/core/settings/appPreferences";
+import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { queryClient } from "@/state/queryClient";
+import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { AppTopBar } from "@/ui/components/AppTopBar";
 import { PersistentNav } from "@/ui/components/PersistentNav";
 import { ThemeProvider, useTheme } from "@/ui/theme/ThemeProvider";
 import { DEFAULT_THEME_TOKENS } from "@/ui/theme/themeTokens";
+
+const gardenRepository = new SqliteGardenRepository();
 
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
@@ -44,6 +49,7 @@ function ThemedShell() {
   const { theme } = useTheme();
   return (
     <View style={[styles.shell, { backgroundColor: theme.appBackground }]}>
+      <SelectedGardenBootstrap />
       <AppTopBar />
       <View style={styles.content}>
         <Stack screenOptions={{ headerShown: false }} />
@@ -57,3 +63,41 @@ const styles = StyleSheet.create({
   shell: { flex: 1, backgroundColor: DEFAULT_THEME_TOKENS.appBackground },
   content: { flex: 1 },
 });
+
+function SelectedGardenBootstrap() {
+  const selectedGardenId = useSelectedGardenStore((state) => state.selectedGardenId);
+  const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const [preferences, gardens] = await Promise.all([loadAppPreferences(), gardenRepository.list()]);
+      const preferred = preferences.activeGardenId;
+      const exists = preferred ? gardens.some((garden) => garden.id === preferred) : false;
+      const next = exists ? preferred : gardens[0]?.id ?? null;
+      if (!active) return;
+      if (next !== selectedGardenId) setSelectedGardenId(next);
+      setHydrated(true);
+    })().catch(() => {
+      if (active) setHydrated(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    (async () => {
+      const existing = await loadAppPreferences();
+      if (existing.activeGardenId === selectedGardenId) return;
+      await saveAppPreferences({
+        ...existing,
+        activeGardenId: selectedGardenId,
+      });
+    })().catch(() => undefined);
+  }, [hydrated, selectedGardenId]);
+
+  return null;
+}

@@ -44,6 +44,10 @@ type PlantDataDraft = {
   rowSpacing: string;
   spread: string;
   height: string;
+  startIndoorsMonths: string;
+  directSowMonths: string;
+  plantOutMonths: string;
+  harvestMonths: string;
 };
 
 type BulkImportProgress = {
@@ -1033,6 +1037,57 @@ export default function GardenGrowListScreen() {
                               />
                             </View>
                           </View>
+                          <View style={styles.dataField}>
+                            <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Task months (1-12 or Jan-Dec)</Text>
+                            <TextInput
+                              value={plantDataDraft.startIndoorsMonths}
+                              onChangeText={(value) =>
+                                setPlantDataDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), startIndoorsMonths: value },
+                                }))
+                              }
+                              placeholder="Start indoors: e.g. 2,3"
+                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                              autoCapitalize="none"
+                            />
+                            <TextInput
+                              value={plantDataDraft.directSowMonths}
+                              onChangeText={(value) =>
+                                setPlantDataDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), directSowMonths: value },
+                                }))
+                              }
+                              placeholder="Direct sow: e.g. 4,5"
+                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                              autoCapitalize="none"
+                            />
+                            <TextInput
+                              value={plantDataDraft.plantOutMonths}
+                              onChangeText={(value) =>
+                                setPlantDataDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), plantOutMonths: value },
+                                }))
+                              }
+                              placeholder="Plant out: e.g. 5,6"
+                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                              autoCapitalize="none"
+                            />
+                            <TextInput
+                              value={plantDataDraft.harvestMonths}
+                              onChangeText={(value) =>
+                                setPlantDataDrafts((prev) => ({
+                                  ...prev,
+                                  [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), harvestMonths: value },
+                                }))
+                              }
+                              placeholder="Harvest: e.g. 8,9,10"
+                              style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                              autoCapitalize="none"
+                            />
+                          </View>
                           <View style={styles.dataActions}>
                             <Pressable
                               style={[styles.cloneInlineButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
@@ -1296,7 +1351,11 @@ function arePlantDataDraftsEqual(
       left.sunRequirements !== right.sunRequirements ||
       left.rowSpacing !== right.rowSpacing ||
       left.spread !== right.spread ||
-      left.height !== right.height
+      left.height !== right.height ||
+      left.startIndoorsMonths !== right.startIndoorsMonths ||
+      left.directSowMonths !== right.directSowMonths ||
+      left.plantOutMonths !== right.plantOutMonths ||
+      left.harvestMonths !== right.harvestMonths
     ) {
       return false;
     }
@@ -1306,12 +1365,17 @@ function arePlantDataDraftsEqual(
 
 function getPlantDataDraft(metaJson?: string): PlantDataDraft {
   const parsed = extractPlantSizing(metaJson);
+  const timing = extractPlantTaskTiming(metaJson);
   return {
     category: parsed.category ?? "unspecified",
     sunRequirements: parsed.sunRequirements ?? "",
     rowSpacing: parsed.rowSpacing ?? "",
     spread: parsed.spread ?? "",
     height: parsed.height ?? "",
+    startIndoorsMonths: timing.startIndoorsMonths ?? "",
+    directSowMonths: timing.directSowMonths ?? "",
+    plantOutMonths: timing.plantOutMonths ?? "",
+    harvestMonths: timing.harvestMonths ?? "",
   };
 }
 
@@ -1332,6 +1396,10 @@ function mergePlantDataMetaJson(existingMetaJson: string | undefined, draft: Pla
   const rowSpacing = toPositiveNumber(draft.rowSpacing);
   const spread = toPositiveNumber(draft.spread);
   const height = toPositiveNumber(draft.height);
+  const startIndoorsMonths = parseMonthCsv(draft.startIndoorsMonths);
+  const directSowMonths = parseMonthCsv(draft.directSowMonths);
+  const plantOutMonths = parseMonthCsv(draft.plantOutMonths);
+  const harvestMonths = parseMonthCsv(draft.harvestMonths);
 
   const nextGardenme: Record<string, unknown> = {
     ...gardenme,
@@ -1340,6 +1408,12 @@ function mergePlantDataMetaJson(existingMetaJson: string | undefined, draft: Pla
     ...(typeof rowSpacing === "number" ? { rowSpacing } : {}),
     ...(typeof spread === "number" ? { spread } : {}),
     ...(typeof height === "number" ? { height } : {}),
+    taskMonths: {
+      ...(startIndoorsMonths.length > 0 ? { startIndoors: startIndoorsMonths } : {}),
+      ...(directSowMonths.length > 0 ? { directSow: directSowMonths } : {}),
+      ...(plantOutMonths.length > 0 ? { plantOut: plantOutMonths } : {}),
+      ...(harvestMonths.length > 0 ? { harvest: harvestMonths } : {}),
+    },
   };
 
   const nextRoot: Record<string, unknown> = {
@@ -1608,6 +1682,79 @@ function extractPlantSizing(metaJson?: string): {
   } catch {
     return {};
   }
+}
+
+function extractPlantTaskTiming(metaJson?: string): {
+  startIndoorsMonths?: string;
+  directSowMonths?: string;
+  plantOutMonths?: string;
+  harvestMonths?: string;
+} {
+  if (!metaJson) return {};
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      gardenme?: {
+        taskMonths?: {
+          startIndoors?: unknown;
+          directSow?: unknown;
+          plantOut?: unknown;
+          harvest?: unknown;
+        };
+      };
+      growth_months?: unknown;
+      fruit_months?: unknown;
+    };
+    const startIndoors = monthArrayToCsv(parsed.gardenme?.taskMonths?.startIndoors);
+    const directSow = monthArrayToCsv(parsed.gardenme?.taskMonths?.directSow);
+    const plantOut = monthArrayToCsv(parsed.gardenme?.taskMonths?.plantOut);
+    const harvest = monthArrayToCsv(parsed.gardenme?.taskMonths?.harvest ?? parsed.fruit_months ?? parsed.growth_months);
+    return {
+      ...(startIndoors ? { startIndoorsMonths: startIndoors } : {}),
+      ...(directSow ? { directSowMonths: directSow } : {}),
+      ...(plantOut ? { plantOutMonths: plantOut } : {}),
+      ...(harvest ? { harvestMonths: harvest } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function monthArrayToCsv(value: unknown): string | undefined {
+  const months = parseMonthInput(value);
+  if (months.length === 0) return undefined;
+  return months.join(",");
+}
+
+function parseMonthCsv(value: string): number[] {
+  return parseMonthInput(value);
+}
+
+function parseMonthInput(value: unknown): number[] {
+  const asArray = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[\s,;|/]+/g).map((part) => part.trim()).filter(Boolean)
+      : [];
+  const parsed = asArray
+    .map((item) => {
+      if (typeof item === "number" && Number.isFinite(item)) {
+        const month = Math.round(item);
+        return month >= 1 && month <= 12 ? month : null;
+      }
+      if (typeof item !== "string") return null;
+      const normalized = item.trim().toLowerCase();
+      if (!normalized) return null;
+      const numeric = Number(normalized);
+      if (Number.isFinite(numeric)) {
+        const month = Math.round(numeric);
+        return month >= 1 && month <= 12 ? month : null;
+      }
+      const names = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+      const idx = names.findIndex((name) => name === normalized.slice(0, 3));
+      return idx >= 0 ? idx + 1 : null;
+    })
+    .filter((month): month is number => typeof month === "number");
+  return Array.from(new Set(parsed)).sort((a, b) => a - b);
 }
 
 function toPositiveNumber(value: string): number | undefined {
