@@ -6,7 +6,7 @@ import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGarden
 import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
-import { SelectionRow } from "@/ui/components/SelectionRow";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
 
 const gardenRepository = new SqliteGardenRepository();
 
@@ -61,25 +61,29 @@ export default function SettingsTabScreen() {
           <Text style={[styles.groupMeta, { color: theme.textMuted }]}>
             Only this garden generates task alerts and task badge counts.
           </Text>
-          {(gardensQuery.data ?? []).map((garden) => {
-            const selected = garden.id === activeGardenId;
-            return (
-              <SelectionRow
-                key={garden.id}
-                label={garden.name}
-                selected={selected}
-                onPress={() => setActiveGarden(garden.id)}
-              />
-            );
-          })}
+          <SegmentedChoice
+            options={(gardensQuery.data ?? []).map((garden) => ({ id: garden.id, label: garden.name }))}
+            selectedId={activeGardenId}
+            onSelect={(gardenId) => setActiveGarden(gardenId)}
+          />
         </View>
 
         <View style={[styles.group, { borderColor: theme.borderColor }]}>
           <Text style={[styles.groupTitle, { color: theme.textPrimary }]}>Notifications</Text>
-          <SelectionRow
-            label={preferencesQuery.data?.notificationsEnabled ? "Enabled" : "Disabled"}
-            selected={Boolean(preferencesQuery.data?.notificationsEnabled)}
-            onPress={toggleNotifications}
+          <SegmentedChoice
+            options={[
+              { id: "enabled", label: "Enabled" },
+              { id: "disabled", label: "Disabled" }
+            ]}
+            selectedId={preferencesQuery.data?.notificationsEnabled ? "enabled" : "disabled"}
+            onSelect={(mode) => {
+              const existing = preferencesQuery.data ?? { activeGardenId: activeGardenId ?? null, notificationsEnabled: false };
+              preferencesMutation.mutate({
+                ...existing,
+                activeGardenId: activeGardenId ?? null,
+                notificationsEnabled: mode === "enabled",
+              });
+            }}
           />
         </View>
 

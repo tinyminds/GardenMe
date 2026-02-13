@@ -223,21 +223,20 @@ export default function CalendarTabScreen() {
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}> 
-        <View style={styles.rowBetween}>
-          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>View</Text>
-          <View style={styles.row}>
-            <FilterPill label="Year" selected={viewMode === "year"} onPress={() => setViewMode("year")} />
-            <FilterPill label="Month" selected={viewMode === "month"} onPress={() => setViewMode("month")} />
-            <FilterPill label="Week" selected={viewMode === "week"} onPress={() => setViewMode("week")} />
-          </View>
-        </View>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>View</Text>
+        <SegmentedChoice
+          options={[
+            { id: "year", label: "Year" },
+            { id: "month", label: "Month" },
+            { id: "week", label: "Week" }
+          ]}
+          selectedId={viewMode}
+          onSelect={(mode) => setViewMode(mode as CalendarViewMode)}
+        />
 
         <View style={styles.rowBetween}>
-          <AppButton
-            label="Prev"
-            size="sm"
-            variant="secondary"
-            style={styles.navButton}
+          <Pressable
+            style={styles.chevronButton}
             onPress={() =>
               setFocusDate((prev) =>
                 viewMode === "year"
@@ -247,13 +246,12 @@ export default function CalendarTabScreen() {
                     : new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
               )
             }
-          />
+          >
+            <Text style={[styles.chevronText, { color: theme.textPrimary }]}>‹</Text>
+          </Pressable>
           <Text style={[styles.monthTitle, { color: theme.textPrimary }]}>{headerLabel}</Text>
-          <AppButton
-            label="Next"
-            size="sm"
-            variant="secondary"
-            style={styles.navButton}
+          <Pressable
+            style={styles.chevronButton}
             onPress={() =>
               setFocusDate((prev) =>
                 viewMode === "year"
@@ -263,7 +261,9 @@ export default function CalendarTabScreen() {
                     : new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
               )
             }
-          />
+          >
+            <Text style={[styles.chevronText, { color: theme.textPrimary }]}>›</Text>
+          </Pressable>
         </View>
 
         <View style={styles.rowBetween}>
@@ -504,13 +504,15 @@ const styles = StyleSheet.create({
   helper: { fontSize: 12 },
 
   navButton: { borderRadius: 999, minWidth: 68 },
+  chevronButton: { padding: 8, alignItems: "center", justifyContent: "center", minWidth: 40 },
+  chevronText: { fontSize: 28, fontWeight: "900" },
   monthTitle: { fontWeight: "800", fontSize: 15 },
 
   filterButton: { borderRadius: 10 },
   filterPanel: { borderWidth: 1, borderRadius: 10, overflow: "hidden" },
   filterRow: { flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, paddingHorizontal: 8, paddingVertical: 8 },
   checkbox: { width: 18, height: 18, borderWidth: 1, borderRadius: 4, alignItems: "center", justifyContent: "center" },
-  checkboxMark: { fontSize: 11, fontWeight: "800" },
+  checkboxMark: { fontSize: 11, fontWeight: "800", textAlign: "center", lineHeight: 11 },
   filterRowLabel: { flex: 1, fontWeight: "700", fontSize: 12 },
   filterRowCount: { fontSize: 12, fontWeight: "700" },
 
