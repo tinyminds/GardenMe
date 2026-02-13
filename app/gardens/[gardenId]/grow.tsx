@@ -6,17 +6,20 @@ import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGarden
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { SqlitePlantCatalogRepository } from "@/infra/repositories/sqlite/SqlitePlantCatalogRepository";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
+import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/SqliteCompanionPlantingRepository";
 import { fetchGrowstuffCropDetails, searchGrowstuffPlants, type GrowstuffCropDetails } from "@/features/plants/services/growstuff";
 import { getPlantingCalendarProfile } from "@/features/plants/services/plantingCalendar";
 import { fetchBestTreflePlantProfile, type TreflePlantProfile } from "@/features/plants/services/trefle";
 import { queryClient } from "@/state/queryClient";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 import type { GardenCropWishlistItemView, PlantCatalogEntry } from "@/domain/entities/Plant";
+import type { CompanionPlantingRelation } from "@/domain/entities/CompanionPlanting";
 
 const gardenRepository = new SqliteGardenRepository();
 const wishlistRepository = new SqliteGardenCropWishlistRepository();
 const plantCatalogRepository = new SqlitePlantCatalogRepository();
 const bedRepository = new SqliteBedRepository();
+const companionRepository = new SqliteCompanionPlantingRepository();
 
 type PlantSuggestion = {
   plantCatalogId: string;
@@ -68,6 +71,7 @@ type BulkImportSummary = {
 
 type PlantCategory = "unspecified" | "tree" | "shrub" | "herb" | "vegetable" | "fruit" | "flower" | "climber";
 type ListStatusFilter = "all" | "planned" | "growing";
+type SuggestionTab = "companions" | "common" | "unusual";
 
 const PLANT_CATEGORY_OPTIONS: Array<{ value: PlantCategory; label: string }> = [
   { value: "unspecified", label: "Not chosen" },
@@ -80,6 +84,74 @@ const PLANT_CATEGORY_OPTIONS: Array<{ value: PlantCategory; label: string }> = [
   { value: "climber", label: "Climber" },
 ];
 
+const COMMON_CROP_SUGGESTIONS = [
+  "Tomato",
+  "Lettuce",
+  "Carrot",
+  "Onion",
+  "Garlic",
+  "Potato",
+  "Pea",
+  "Bean",
+  "Cucumber",
+  "Courgette",
+  "Beetroot",
+  "Spinach",
+  "Kale",
+  "Spring Onion",
+  "Parsley",
+];
+
+const UNUSUAL_CROP_SUGGESTIONS = [
+  "Oca",
+  "Crosnes",
+  "Salsify",
+  "Skirret",
+  "Yacon",
+  "Good King Henry",
+  "Cardoon",
+  "New Zealand Spinach",
+  "Tree Kale",
+  "Mibuna",
+  "Mizuna",
+  "Claytonia",
+  "Tomatillo",
+  "Ground Cherry",
+  "Romanesco",
+  "Malabar Spinach",
+  "Celtuce",
+  "Scorzonera",
+  "Achocha",
+  "Wasabi Rocket",
+  "Perpetual Spinach",
+  "Sea Kale",
+  "Walking Onion",
+  "Amaranth",
+  "Chayote",
+  "Mashua",
+  "Ulluco",
+  "Perilla",
+  "Sorrel",
+  "Hyssop",
+];
+
+const EXTRA_COMPANION_SUGGESTIONS_BY_PLANT: Record<string, string[]> = {
+  tomato: ["Marigold", "Comfrey", "Borage", "Nasturtium", "Chives"],
+  potato: ["Marigold", "Comfrey", "Horseradish", "Nasturtium"],
+  cucumber: ["Nasturtium", "Borage", "Calendula", "Dill"],
+  courgette: ["Borage", "Nasturtium", "Calendula", "Marigold"],
+  zucchini: ["Borage", "Nasturtium", "Calendula", "Marigold"],
+  squash: ["Borage", "Nasturtium", "Calendula"],
+  bean: ["Marigold", "Calendula", "Nasturtium", "Summer Savory"],
+  pea: ["Mint", "Marigold", "Nasturtium", "Chives"],
+  cabbage: ["Nasturtium", "Dill", "Thyme", "Marigold"],
+  carrot: ["Chives", "Rosemary", "Sage", "Marigold"],
+  lettuce: ["Chives", "Calendula", "Chamomile", "Coriander"],
+  onion: ["Chamomile", "Savory", "Marigold"],
+  garlic: ["Chamomile", "Marigold"],
+  strawberry: ["Borage", "Marigold", "Chives", "Thyme"],
+};
+
 export default function GardenGrowListScreen() {
   const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
@@ -90,6 +162,9 @@ export default function GardenGrowListScreen() {
   const [listSearch, setListSearch] = useState("");
   const [listSortDirection, setListSortDirection] = useState<"asc" | "desc">("asc");
   const [listStatusFilter, setListStatusFilter] = useState<ListStatusFilter>("all");
+  const [suggestionTab, setSuggestionTab] = useState<SuggestionTab>("companions");
+  const [suggestionRefreshKey, setSuggestionRefreshKey] = useState(0);
+  const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
   const [importSourceGardenId, setImportSourceGardenId] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
@@ -153,6 +228,11 @@ export default function GardenGrowListScreen() {
   const gardensQuery = useQuery({
     queryKey: ["gardens"],
     queryFn: async () => gardenRepository.list(),
+  });
+
+  const companionQuery = useQuery({
+    queryKey: ["companion-relations"],
+    queryFn: async () => companionRepository.listAll(),
   });
 
   const suggestionsQuery = useQuery({
@@ -414,6 +494,46 @@ export default function GardenGrowListScreen() {
     mutationFn: (id: string) => wishlistRepository.remove(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+    },
+  });
+
+  const addSuggestedPlantMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!gardenId) throw new Error("Missing garden id");
+      const normalized = normalizeSearchText(name);
+      const existing = await wishlistRepository.listByGarden(gardenId);
+      const hasName = existing.some((item) => normalizeSearchText(item.plant.commonName) === normalized);
+      if (hasName) return { status: "exists" as const };
+
+      const matched = await findBestPlantMatchForBulk(name, plantCatalogRepository);
+      if (matched) {
+        const duplicate = existing.some((item) => item.plantCatalogId === matched.id);
+        if (duplicate) return { status: "exists" as const };
+        await wishlistRepository.add({
+          gardenId,
+          plantCatalogId: matched.id,
+          status: "wanted",
+        });
+        return { status: "added" as const };
+      }
+
+      const manualEntry = await plantCatalogRepository.upsert({
+        source: "manual",
+        commonName: name.trim(),
+      });
+      await wishlistRepository.add({
+        gardenId,
+        plantCatalogId: manualEntry.id,
+        status: "wanted",
+      });
+      return { status: "added" as const };
+    },
+    onSuccess: async (result, name) => {
+      setSuggestionMessage(result.status === "exists" ? `${name} is already in your list.` : `${name} added.`);
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+    },
+    onError: () => {
+      setSuggestionMessage("Could not add suggestion. Try again.");
     },
   });
 
@@ -713,6 +833,25 @@ export default function GardenGrowListScreen() {
     });
     return list;
   }, [entryDrafts, listNameCollator, listStatusFilter, wishlistQuery.data, listSearch, listSortDirection]);
+
+  const suggestionBuckets = useMemo(() => {
+    const currentNames = new Set((wishlistQuery.data ?? []).map((item) => normalizeSearchText(item.plant.commonName)));
+    const companionNames = collectCompanionSuggestions(companionQuery.data ?? [], currentNames);
+    const commonNames = COMMON_CROP_SUGGESTIONS.filter((name) => !currentNames.has(normalizeSearchText(name)));
+    const unusualNames = UNUSUAL_CROP_SUGGESTIONS.filter((name) => !currentNames.has(normalizeSearchText(name)));
+    return {
+      companions: pickSuggestionBatch(companionNames, 10, suggestionRefreshKey + 11),
+      common: pickSuggestionBatch(commonNames, 10, suggestionRefreshKey + 23),
+      unusual: pickSuggestionBatch(unusualNames, 10, suggestionRefreshKey + 37),
+    };
+  }, [companionQuery.data, suggestionRefreshKey, wishlistQuery.data]);
+
+  const visibleSuggestionChips =
+    suggestionTab === "companions"
+      ? suggestionBuckets.companions
+      : suggestionTab === "common"
+        ? suggestionBuckets.common
+        : suggestionBuckets.unusual;
 
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
@@ -1407,6 +1546,62 @@ export default function GardenGrowListScreen() {
           ))}
         </View>
 
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <View style={styles.rowBetween}>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Suggested Plants</Text>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+              onPress={() => {
+                setSuggestionRefreshKey((value) => value + 1);
+                setSuggestionMessage(null);
+              }}
+              disabled={addSuggestedPlantMutation.isPending}
+            >
+              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Refresh</Text>
+            </Pressable>
+          </View>
+          <View style={styles.configChips}>
+            <Pressable
+              style={[styles.configChip, { backgroundColor: suggestionTab === "companions" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+              onPress={() => setSuggestionTab("companions")}
+            >
+              <Text style={[styles.configChipText, { color: suggestionTab === "companions" ? theme.primaryActionText : theme.secondaryActionText }]}>Companions</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.configChip, { backgroundColor: suggestionTab === "common" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+              onPress={() => setSuggestionTab("common")}
+            >
+              <Text style={[styles.configChipText, { color: suggestionTab === "common" ? theme.primaryActionText : theme.secondaryActionText }]}>Common</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.configChip, { backgroundColor: suggestionTab === "unusual" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+              onPress={() => setSuggestionTab("unusual")}
+            >
+              <Text style={[styles.configChipText, { color: suggestionTab === "unusual" ? theme.primaryActionText : theme.secondaryActionText }]}>Unusual</Text>
+            </Pressable>
+          </View>
+          {visibleSuggestionChips.length === 0 ? (
+            <Text style={[styles.helper, { color: theme.textMuted }]}>No suggestions right now. Refresh or add more plants first.</Text>
+          ) : (
+            <View style={styles.configChips}>
+              {visibleSuggestionChips.map((name) => (
+                <Pressable
+                  key={`${suggestionTab}-${name}`}
+                  style={[styles.configChip, { backgroundColor: theme.secondaryActionBackground }]}
+                  onPress={() => addSuggestedPlantMutation.mutate(name)}
+                  disabled={addSuggestedPlantMutation.isPending}
+                >
+                  <Text style={[styles.configChipText, { color: theme.secondaryActionText }]}>{name}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+          {suggestionMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{suggestionMessage}</Text>}
+          <Text style={[styles.helper, { color: theme.textMuted }]}>
+            Companion picks use your existing companion dataset; common/unusual picks are curated starter lists.
+          </Text>
+        </View>
+
       </ScrollView>
       {bulkImportMutation.isPending && (
         <View style={[styles.blockingOverlay, { backgroundColor: theme.appBackground }]}>
@@ -1702,6 +1897,53 @@ function computePlantMatchScore(query: string, entry: PlantCatalogEntry): number
   if (isSingularPluralEquivalent(common, normalizedQuery)) score += 30;
   if (isLikelySpecificVarietyName(entry.commonName, normalizedQuery)) score -= 35;
   return score;
+}
+
+function collectCompanionSuggestions(
+  relations: CompanionPlantingRelation[],
+  currentNames: Set<string>
+): string[] {
+  const candidates = new Set<string>();
+  for (const relation of relations) {
+    if (relation.relation !== "good") continue;
+    const plant = normalizeSearchText(relation.plantName);
+    const companion = normalizeSearchText(relation.companionName);
+    if (currentNames.has(plant) && !currentNames.has(companion)) candidates.add(relation.companionName.trim());
+    if (currentNames.has(companion) && !currentNames.has(plant)) candidates.add(relation.plantName.trim());
+  }
+  for (const currentName of currentNames) {
+    const extras = EXTRA_COMPANION_SUGGESTIONS_BY_PLANT[currentName];
+    if (!extras) continue;
+    for (const extra of extras) {
+      const normalizedExtra = normalizeSearchText(extra);
+      if (!normalizedExtra || currentNames.has(normalizedExtra)) continue;
+      candidates.add(extra.trim());
+    }
+  }
+  return Array.from(candidates).filter(Boolean);
+}
+
+function pickSuggestionBatch(items: string[], maxCount: number, seed: number): string[] {
+  const unique = Array.from(
+    new Set(
+      items
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+  const scored = unique
+    .map((name) => ({ name, score: seededHash(`${seed}:${normalizeSearchText(name)}`) }))
+    .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return scored.slice(0, maxCount).map((item) => item.name);
+}
+
+function seededHash(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return hash >>> 0;
 }
 
 function parseBulkPlantNames(input: string): string[] {
@@ -2410,6 +2652,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   cardTitle: { fontSize: 16, fontWeight: "800", color: "#274634" },
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   listControls: { gap: 8 },
   input: {
     borderWidth: 1,
