@@ -1,10 +1,13 @@
-﻿import { useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Link } from "expo-router";
 import { useState } from "react";
 import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import * as FileSystem from "expo-file-system";
+import * as DocumentPicker from "expo-document-picker";
+import * as Sharing from "expo-sharing";
 import { useGardensQuery } from "@/features/gardens/hooks/useGardensQuery";
 import { useGardenSummariesQuery } from "@/features/gardens/hooks/useGardenSummariesQuery";
-import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
+import { SqliteGardenRepository, type GardenBackupBundle } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
@@ -20,6 +23,7 @@ export default function GardensTabScreen() {
   const selectedGardenId = useSelectedGardenStore((state) => state.selectedGardenId);
   const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
   const [cloneDraft, setCloneDraft] = useState<{ id: string; sourceName: string; name: string } | null>(null);
+  const [importDraft, setImportDraft] = useState<{ bundle: GardenBackupBundle; name: string } | null>(null);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => repository.delete(id),
@@ -35,6 +39,41 @@ export default function GardensTabScreen() {
       setSelectedGardenId(cloned.id);
       await queryClient.invalidateQueries({ queryKey: ["gardens"] });
       Alert.alert("Garden cloned", `Created "${cloned.name}".`);
+    },
+  });
+
+  const exportBackupMutation = useMutation({
+    mutationFn: async (payload: { id: string; name: string }) => {
+      const bundle = await repository.exportBackupBundle(payload.id);
+      const shareAvailable = await Sharing.isAvailableAsync();
+      if (!shareAvailable) throw new Error("Sharing is not available on this device.");
+      const safeName =
+        payload.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "garden";
+      const file = new FileSystem.File(FileSystem.Paths.cache, `garden-backup-${safeName}-${Date.now()}.json`);
+      file.create({ intermediates: true, overwrite: true });
+      file.write(JSON.stringify(bundle, null, 2));
+      await Sharing.shareAsync(file.uri, {
+        mimeType: "application/json",
+        dialogTitle: "Export Garden Backup",
+        UTI: "public.json",
+      });
+    },
+    onError: (error) => {
+      Alert.alert("Export failed", error instanceof Error ? error.message : "Could not export garden backup.");
+    },
+  });
+
+  const importBackupMutation = useMutation({
+    mutationFn: async (payload: { bundle: GardenBackupBundle; name: string }) =>
+      repository.importBackupBundle(payload.bundle, { name: payload.name }),
+    onSuccess: async (created) => {
+      setImportDraft(null);
+      setSelectedGardenId(created.id);
+      await queryClient.invalidateQueries({ queryKey: ["gardens"] });
+      Alert.alert("Garden imported", `Created "${created.name}".`);
+    },
+    onError: (error) => {
+      Alert.alert("Import failed", error instanceof Error ? error.message : "Could not import garden backup.");
     },
   });
 
@@ -59,12 +98,61 @@ export default function GardensTabScreen() {
     cloneMutation.mutate({ id: cloneDraft.id, name: nextName });
   };
 
+  const startImportBackup = async () => {
+    const pick = await DocumentPicker.getDocumentAsync({
+      type: ["application/json", "text/plain"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (pick.canceled) return;
+    const asset = pick.assets?.[0];
+    if (!asset?.uri) {
+      Alert.alert("Import failed", "No file selected.");
+      return;
+    }
+    try {
+      const file = new FileSystem.File(asset.uri);
+      const text = await file.text();
+      const parsed = JSON.parse(text) as GardenBackupBundle;
+      if (!parsed || parsed.format !== "gardenme-garden-backup-v1" || !parsed.garden?.name) {
+        Alert.alert("Invalid backup", "That file is not a valid GardenMe garden backup.");
+        return;
+      }
+      setImportDraft({
+        bundle: parsed,
+        name: `${parsed.garden.name} (Imported)`,
+      });
+    } catch {
+      Alert.alert("Import failed", "Could not read that backup file.");
+    }
+  };
+
+  const submitImport = () => {
+    if (!importDraft || importBackupMutation.isPending) return;
+    const nextName = importDraft.name.trim();
+    if (!nextName) {
+      Alert.alert("Name required", "Enter a name for the imported garden.");
+      return;
+    }
+    importBackupMutation.mutate({ bundle: importDraft.bundle, name: nextName });
+  };
+
   if (isLoading) return <Text style={[styles.state, { color: theme.textMuted }]}>Loading gardens...</Text>;
   if (isError) return <Text style={[styles.state, { color: theme.textMuted }]}>Could not load gardens.</Text>;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.appBackground }]}>
-      <Link href="/gardens/new" style={[styles.addLink, { color: theme.primaryActionBackground }]}>+ New Garden</Link>
+      <View style={styles.topActions}>
+        <Link href="/gardens/new" style={[styles.addLink, { color: theme.primaryActionBackground }]}>+ New Garden</Link>
+        <Pressable
+          style={[styles.importButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+          onPress={() => void startImportBackup()}
+          disabled={importBackupMutation.isPending || cloneMutation.isPending || deleteMutation.isPending}
+        >
+          <Text style={[styles.importButtonText, { color: theme.secondaryActionText }]}>Import backup</Text>
+        </Pressable>
+      </View>
+      <Text style={[styles.noteText, { color: theme.textMuted }]}>Backups do not include bed photos.</Text>
       {cloneMutation.isPending ? (
         <Text style={[styles.state, { color: theme.textMuted, paddingTop: 0, paddingBottom: 8 }]}>Cloning garden...</Text>
       ) : null}
@@ -110,14 +198,23 @@ export default function GardensTabScreen() {
             <Pressable
               style={[styles.cloneButton, { borderColor: theme.borderColor, backgroundColor: theme.secondaryActionBackground }]}
               onPress={() => confirmClone(item.id, item.name)}
-              disabled={cloneMutation.isPending || deleteMutation.isPending}
+              disabled={cloneMutation.isPending || deleteMutation.isPending || exportBackupMutation.isPending}
             >
               <Text style={[styles.cloneButtonText, { color: theme.secondaryActionText }]}>Copy</Text>
             </Pressable>
             <Pressable
+              style={[styles.backupButton, { borderColor: theme.borderColor, backgroundColor: theme.secondaryActionBackground }]}
+              onPress={() => exportBackupMutation.mutate({ id: item.id, name: item.name })}
+              disabled={cloneMutation.isPending || deleteMutation.isPending || exportBackupMutation.isPending}
+            >
+              <Text style={[styles.cloneButtonText, { color: theme.secondaryActionText }]}>
+                {exportBackupMutation.isPending ? "..." : "Backup"}
+              </Text>
+            </Pressable>
+            <Pressable
               style={[styles.deleteButton, { borderColor: theme.borderColor, backgroundColor: theme.dangerActionBackground }]}
               onPress={() => confirmDelete(item.id, item.name)}
-              disabled={cloneMutation.isPending || deleteMutation.isPending}
+              disabled={cloneMutation.isPending || deleteMutation.isPending || exportBackupMutation.isPending}
             >
               <Text style={[styles.deleteButtonText, { color: theme.dangerActionText }]}>x</Text>
             </Pressable>
@@ -169,13 +266,61 @@ export default function GardensTabScreen() {
           </View>
         </View>
       </Modal>
+      <Modal visible={Boolean(importDraft)} transparent animationType="fade" onRequestClose={() => setImportDraft(null)}>
+        <View style={[styles.modalBackdrop, { backgroundColor: theme.modalBackdrop }]}>
+          <View style={[styles.modalCard, { backgroundColor: theme.modalSurfaceBackground, borderColor: theme.modalSurfaceBorder }]}>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Import Garden Backup</Text>
+            <Text style={[styles.modalText, { color: theme.textMuted }]}>
+              {importDraft ? `Import full data from "${importDraft.bundle.garden.name}".` : ""}
+            </Text>
+            <TextInput
+              value={importDraft?.name ?? ""}
+              onChangeText={(value) => setImportDraft((prev) => (prev ? { ...prev, name: value } : prev))}
+              placeholder="Imported garden name"
+              placeholderTextColor={theme.textMuted}
+              autoCapitalize="words"
+              editable={!importBackupMutation.isPending}
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: theme.appBackground,
+                  borderColor: theme.borderColor,
+                  color: theme.textPrimary,
+                },
+              ]}
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalButtonSecondary, { backgroundColor: theme.secondaryActionBackground }]}
+                onPress={() => setImportDraft(null)}
+                disabled={importBackupMutation.isPending}
+              >
+                <Text style={[styles.modalButtonText, { color: theme.secondaryActionText }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalButtonPrimary, { backgroundColor: theme.primaryActionBackground }]}
+                onPress={submitImport}
+                disabled={importBackupMutation.isPending}
+              >
+                <Text style={[styles.modalButtonText, { color: theme.primaryActionText }]}>
+                  {importBackupMutation.isPending ? "Importing..." : "Import"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
+  topActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   addLink: { marginBottom: 12, fontWeight: "700" },
+  noteText: { fontSize: 12, marginTop: -8, marginBottom: 8 },
+  importButton: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  importButtonText: { fontWeight: "700", fontSize: 12 },
   card: {
     position: "relative",
     borderRadius: 12,
@@ -184,7 +329,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   cardActive: { borderWidth: 2 },
-  cardMain: { padding: 14, paddingRight: 92, gap: 7 },
+  cardMain: { padding: 14, paddingRight: 164, gap: 7 },
   name: { fontSize: 18, fontWeight: "700", marginBottom: 4 },
   locationText: { fontWeight: "600" },
   coordsText: { fontSize: 12, marginTop: -1 },
@@ -201,9 +346,9 @@ const styles = StyleSheet.create({
   statusText: { fontWeight: "700", marginTop: 2 },
   cloneButton: {
     position: "absolute",
-    right: 48,
+    right: 124,
     top: 10,
-    width: 42,
+    width: 66,
     height: 30,
     borderRadius: 999,
     borderWidth: 1,
@@ -211,6 +356,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   cloneButtonText: { fontWeight: "800", fontSize: 11, lineHeight: 14 },
+  backupButton: {
+    position: "absolute",
+    right: 48,
+    top: 10,
+    width: 74,
+    height: 30,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   deleteButton: {
     position: "absolute",
     right: 10,
@@ -234,3 +390,4 @@ const styles = StyleSheet.create({
   modalButtonSecondary: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   modalButtonText: { fontWeight: "700", fontSize: 12 },
 });
+

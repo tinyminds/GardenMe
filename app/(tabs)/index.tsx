@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { useMemo, useRef, useState } from "react";
@@ -8,8 +8,11 @@ import { useGardensQuery } from "@/features/gardens/hooks/useGardensQuery";
 import { fetchCurrentWeather, fetchDailyForecast } from "@/features/weather/services/openMeteo";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
+import { SqlitePlantCatalogRepository } from "@/infra/repositories/sqlite/SqlitePlantCatalogRepository";
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
 import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGardenTaskRepository";
+import { searchGrowstuffPlants } from "@/features/plants/services/growstuff";
+import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 import { ChoiceChip } from "@/ui/components/ChoiceChip";
@@ -20,7 +23,22 @@ import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPrev
 const bedRepository = new SqliteBedRepository();
 const featureRepository = new SqliteGardenFeatureRepository();
 const growRepository = new SqliteGardenCropWishlistRepository();
+const plantCatalogRepository = new SqlitePlantCatalogRepository();
 const taskRepository = new SqliteGardenTaskRepository();
+const SEASONAL_DISCOVERY_BY_MONTH: Record<number, string[]> = {
+  1: ["Onion", "Shallot", "Broad Bean", "Leek", "Lettuce"],
+  2: ["Tomato", "Pepper", "Basil", "Aubergine", "Broad Bean"],
+  3: ["Pea", "Carrot", "Beetroot", "Spinach", "Potato"],
+  4: ["Courgette", "Cucumber", "Bean", "Sweetcorn", "Tomatillo"],
+  5: ["Bean", "Corn", "Squash", "Pumpkin", "Nasturtium"],
+  6: ["Kale", "Spring Onion", "Chard", "French Bean", "Basil"],
+  7: ["Kale", "Chard", "Beetroot", "Carrot", "Coriander"],
+  8: ["Spinach", "Lettuce", "Spring Onion", "Rocket", "Mizuna"],
+  9: ["Garlic", "Onion", "Broad Bean", "Lettuce", "Spinach"],
+  10: ["Garlic", "Onion", "Broad Bean", "Pea", "Lambs Lettuce"],
+  11: ["Garlic", "Onion", "Broad Bean", "Winter Lettuce", "Spinach"],
+  12: ["Garlic", "Onion", "Broad Bean", "Lettuce", "Pea"],
+};
 
 export default function DashboardScreen() {
   const { theme } = useTheme();
@@ -180,6 +198,49 @@ export default function DashboardScreen() {
     }
     return map;
   }, [bedsQuery.data, growList]);
+  const seasonalDiscoveryNames = useMemo(() => {
+    const month = new Date().getMonth() + 1;
+    const names = SEASONAL_DISCOVERY_BY_MONTH[month] ?? [];
+    const existing = new Set(growList.map((entry) => normalizeSearchText(entry.plant.commonName)));
+    return names.filter((name) => !existing.has(normalizeSearchText(name)));
+  }, [growList]);
+  const addSeasonalSuggestionMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!activeGardenId) throw new Error("No active garden");
+      const normalized = normalizeSearchText(name);
+      const existing = await growRepository.listByGarden(activeGardenId);
+      if (existing.some((item) => normalizeSearchText(item.plant.commonName) === normalized)) return "exists" as const;
+      const localMatches = await plantCatalogRepository.searchByName(name, 10);
+      let catalog = localMatches.find((entry) => normalizeSearchText(entry.commonName) === normalized) ?? localMatches[0] ?? null;
+      if (!catalog) {
+        const hits = await searchGrowstuffPlants(name, 1, 6);
+        const first = hits.find((hit) => normalizeSearchText(hit.commonName) === normalized) ?? hits[0];
+        if (first) {
+          catalog = await plantCatalogRepository.upsert({
+            source: "growstuff",
+            externalId: first.externalId,
+            commonName: first.commonName,
+            ...(first.scientificName ? { scientificName: first.scientificName } : {}),
+            ...(first.familyName ? { familyName: first.familyName } : {}),
+            ...(first.imageUrl ? { imageUrl: first.imageUrl } : {}),
+            metaJson: first.rawJson,
+          });
+        }
+      }
+      if (!catalog) {
+        catalog = await plantCatalogRepository.upsert({ source: "manual", commonName: name.trim() });
+      }
+      await growRepository.add({
+        gardenId: activeGardenId,
+        plantCatalogId: catalog.id,
+        status: "wanted",
+      });
+      return "added" as const;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", activeGardenId] });
+    },
+  });
 
   const exportLayoutImage = async () => {
     if (Platform.OS === "web") {
@@ -309,6 +370,29 @@ export default function DashboardScreen() {
           >
             Open Tasks
           </Link>
+        </View>
+      ) : null}
+
+      {selectedGarden ? (
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Seasonal Discovery</Text>
+          <Text style={[styles.helper, { color: theme.textMuted }]}>What can I sow now?</Text>
+          {seasonalDiscoveryNames.length === 0 ? (
+            <Text style={[styles.helper, { color: theme.textMuted }]}>You already have this month’s common picks in your grow list.</Text>
+          ) : (
+            <View style={styles.metricsRow}>
+              {seasonalDiscoveryNames.map((name) => (
+                <Pressable
+                  key={`seasonal-${name}`}
+                  style={[styles.seasonChip, { backgroundColor: theme.secondaryActionBackground }]}
+                  onPress={() => addSeasonalSuggestionMutation.mutate(name)}
+                  disabled={addSeasonalSuggestionMutation.isPending}
+                >
+                  <Text style={[styles.seasonChipText, { color: theme.secondaryActionText }]}>{name}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
       ) : null}
 
@@ -536,6 +620,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   layoutExportButtonText: { fontWeight: "700", fontSize: 12 },
+  seasonChip: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  seasonChipText: { fontSize: 12, fontWeight: "700" },
   weatherRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   weatherIcon: { fontSize: 17, width: 20, textAlign: "center" },
   exportHiddenContainer: {
@@ -549,3 +635,12 @@ const styles = StyleSheet.create({
   },
   weatherNow: { fontSize: 16, fontWeight: "700" },
 });
+
+function normalizeSearchText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[()[\],.:;'"`]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}

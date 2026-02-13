@@ -2,9 +2,11 @@
 import { Link, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { loadGardenBedPlannerSettings, saveGardenBedPlannerSettings, type GardenBedPlannerSettings } from "@/core/settings/gardenBedPlannerSettings";
+import { loadBedPhotoLogSettings, saveBedPhotoLogSettings, type BedPhotoLogEntry, type BedPhotoLogSettings } from "@/core/settings/bedPhotoLogSettings";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/SqliteCompanionPlantingRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
@@ -155,6 +157,10 @@ export default function BedsListScreen() {
   const bedPlannerSettingsQuery = useQuery({
     queryKey: ["garden-bed-planner-settings"],
     queryFn: loadGardenBedPlannerSettings,
+  });
+  const bedPhotoLogSettingsQuery = useQuery({
+    queryKey: ["bed-photo-log-settings"],
+    queryFn: loadBedPhotoLogSettings,
   });
 
   const planInBedMutation = useMutation({
@@ -763,6 +769,70 @@ export default function BedsListScreen() {
     return map;
   }, [bedCards]);
 
+  const bedPhotoRowsByBedId = useMemo(() => {
+    const map = new Map<string, BedPhotoLogEntry[]>();
+    if (!gardenId) return map;
+    const rows = bedPhotoLogSettingsQuery.data?.[gardenId] ?? [];
+    for (const row of rows) {
+      const existing = map.get(row.bedId) ?? [];
+      existing.push(row);
+      map.set(row.bedId, existing);
+    }
+    for (const [bedId, rowsForBed] of map.entries()) {
+      rowsForBed.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      map.set(bedId, rowsForBed);
+    }
+    return map;
+  }, [bedPhotoLogSettingsQuery.data, gardenId]);
+
+  const addBedPhoto = async (bedId: string, source: "camera" | "gallery") => {
+    if (!gardenId) return;
+    if (source === "camera") {
+      const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!cameraPermission.granted) {
+        Alert.alert("Camera permission needed", "Enable camera access to take a bed photo.");
+        return;
+      }
+    } else {
+      const galleryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!galleryPermission.granted) {
+        Alert.alert("Photos permission needed", "Enable photo library access to attach bed photos.");
+        return;
+      }
+    }
+
+    const result =
+      source === "camera"
+        ? await ImagePicker.launchCameraAsync({
+            mediaTypes: ["images"],
+            quality: 0.85,
+          })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ["images"],
+            allowsMultipleSelection: false,
+            quality: 0.85,
+          });
+    if (result.canceled) return;
+    const asset = result.assets?.[0];
+    if (!asset?.uri) return;
+
+    const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
+    const current = cached ?? (await loadBedPhotoLogSettings());
+    const nextRow: BedPhotoLogEntry = {
+      id: `bed-photo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      bedId,
+      uri: asset.uri,
+      source,
+      createdAt: new Date().toISOString(),
+    };
+    const next: BedPhotoLogSettings = {
+      ...current,
+      [gardenId]: [nextRow, ...(current[gardenId] ?? [])],
+    };
+    await saveBedPhotoLogSettings(next);
+    queryClient.setQueryData(["bed-photo-log-settings"], next);
+  };
+
   const selectedVisualCard = useMemo(
     () => bedCards.find((card) => card.bed.id === selectedVisualBedId) ?? null,
     [bedCards, selectedVisualBedId]
@@ -982,6 +1052,33 @@ export default function BedsListScreen() {
 
               <View style={styles.block}>
                 <View style={styles.rowBetween}>
+                  <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Bed photos</Text>
+                  <View style={styles.row}>
+                    <Pressable style={[styles.smallActionButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => void addBedPhoto(card.bed.id, "camera")}>
+                      <Text style={[styles.smallActionButtonText, { color: theme.secondaryActionText }]}>Take photo</Text>
+                    </Pressable>
+                    <Pressable style={[styles.smallActionButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => void addBedPhoto(card.bed.id, "gallery")}>
+                      <Text style={[styles.smallActionButtonText, { color: theme.secondaryActionText }]}>Upload</Text>
+                    </Pressable>
+                  </View>
+                </View>
+                {(bedPhotoRowsByBedId.get(card.bed.id) ?? []).length === 0 ? (
+                  <Text style={[styles.blockText, { color: theme.textMuted }]}>No photos yet.</Text>
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>
+                    {(bedPhotoRowsByBedId.get(card.bed.id) ?? []).map((photo) => (
+                      <View key={photo.id} style={[styles.photoCard, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
+                        <Image source={{ uri: photo.uri }} style={styles.photoThumb} />
+                        <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{formatDate(photo.createdAt)}</Text>
+                        <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{photo.source === "camera" ? "Camera" : "Gallery"}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
+              </View>
+
+              <View style={styles.block}>
+                <View style={styles.rowBetween}>
                   <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Suggested plans</Text>
                   {rejectedCount > 0 && (
                     <Pressable
@@ -1197,6 +1294,32 @@ export default function BedsListScreen() {
                       </View>
                     </View>
                   )}
+                  <View style={styles.block}>
+                    <View style={styles.rowBetween}>
+                      <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Bed photos</Text>
+                      <View style={styles.row}>
+                        <Pressable style={[styles.smallActionButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => void addBedPhoto(card.bed.id, "camera")}>
+                          <Text style={[styles.smallActionButtonText, { color: theme.secondaryActionText }]}>Take photo</Text>
+                        </Pressable>
+                        <Pressable style={[styles.smallActionButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => void addBedPhoto(card.bed.id, "gallery")}>
+                          <Text style={[styles.smallActionButtonText, { color: theme.secondaryActionText }]}>Upload</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    {(bedPhotoRowsByBedId.get(card.bed.id) ?? []).length === 0 ? (
+                      <Text style={[styles.blockText, { color: theme.textMuted }]}>No photos yet.</Text>
+                    ) : (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>
+                        {(bedPhotoRowsByBedId.get(card.bed.id) ?? []).map((photo) => (
+                          <View key={`visual-${photo.id}`} style={[styles.photoCard, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
+                            <Image source={{ uri: photo.uri }} style={styles.photoThumb} />
+                            <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{formatDate(photo.createdAt)}</Text>
+                            <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{photo.source === "camera" ? "Camera" : "Gallery"}</Text>
+                          </View>
+                        ))}
+                      </ScrollView>
+                    )}
+                  </View>
                   <View style={styles.block}>
                     <View style={styles.rowBetween}>
                       <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Suggested</Text>
@@ -1784,6 +1907,10 @@ const styles = StyleSheet.create({
   optionChip: { backgroundColor: "#D9E7D8", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
   optionChipText: { color: "#264433", textTransform: "capitalize", fontSize: 12 },
   optionsScroll: { maxHeight: 170 },
+  photoStrip: { gap: 8, paddingRight: 6 },
+  photoCard: { borderWidth: 1, borderRadius: 10, padding: 6, gap: 2, width: 120 },
+  photoThumb: { width: 106, height: 72, borderRadius: 7, backgroundColor: "#D9E7D8" },
+  photoMeta: { fontSize: 10 },
   linkText: { color: "#2A5E40", fontWeight: "700", marginTop: 2 },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   zoomButton: { backgroundColor: "#DFEADF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },

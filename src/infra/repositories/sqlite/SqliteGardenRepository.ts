@@ -89,6 +89,54 @@ type SettingsRow = {
   value_json: string;
 };
 
+type PlantCatalogBackupRow = {
+  id: string;
+  source: "growstuff" | "manual";
+  external_id: string | null;
+  common_name: string;
+  scientific_name: string | null;
+  family_name: string | null;
+  image_url: string | null;
+  meta_json: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type GardenProgressFlags = {
+  mapperDone?: boolean;
+  growDone?: boolean;
+};
+
+type GardenBedPlannerFlags = {
+  spareSpaceByBedId?: Record<string, boolean>;
+  rejectedSuggestionIdsByBed?: Record<string, string[]>;
+};
+
+type BedPhotoLogEntry = {
+  id: string;
+  bedId: string;
+  uri: string;
+  source: "camera" | "gallery";
+  createdAt: string;
+};
+
+export type GardenBackupBundle = {
+  format: "gardenme-garden-backup-v1";
+  exportedAt: string;
+  garden: Omit<Garden, "id">;
+  beds: BedCloneRow[];
+  features: FeatureCloneRow[];
+  plants: PlantCatalogBackupRow[];
+  entries: EntryCloneRow[];
+  plantings: PlantingCloneRow[];
+  tasks: TaskCloneRow[];
+  settings?: {
+    gardenProgress?: GardenProgressFlags;
+    bedPlanner?: GardenBedPlannerFlags;
+    bedPhotoLog?: BedPhotoLogEntry[];
+  };
+};
+
 export class SqliteGardenRepository implements GardenRepository {
   async list(): Promise<Garden[]> {
     const db = getDatabase();
@@ -334,6 +382,386 @@ export class SqliteGardenRepository implements GardenRepository {
       ...(source.scale_calibration_json
         ? { scaleCalibration: JSON.parse(source.scale_calibration_json) as GardenScaleCalibration }
         : {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  async exportBackupBundle(gardenId: string): Promise<GardenBackupBundle> {
+    const db = getDatabase();
+    const source = await db.getFirstAsync<GardenRow>("SELECT * FROM gardens WHERE id = ? LIMIT 1", [gardenId]);
+    if (!source) throw new Error("Garden not found");
+
+    const beds = await db.getAllAsync<BedCloneRow>(
+      `SELECT
+         id, name, polygon_json, sun_exposure, drainage, contains_perennials, perennial_plants_csv,
+         is_raised_bed, has_irrigation, soil_notes, created_at, updated_at
+       FROM beds
+       WHERE garden_id = ?`,
+      [gardenId]
+    );
+    const features = await db.getAllAsync<FeatureCloneRow>(
+      "SELECT id, type, name, polygon_json, created_at, updated_at FROM garden_features WHERE garden_id = ?",
+      [gardenId]
+    );
+    const entries = await db.getAllAsync<EntryCloneRow>(
+      `SELECT
+         id, plant_catalog_id, status, started_indoors_at, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
+       FROM garden_crop_entries
+       WHERE garden_id = ?`,
+      [gardenId]
+    );
+    const plantings = await db.getAllAsync<PlantingCloneRow>(
+      `SELECT
+         id, entry_id, bed_id, planted_at, ended_at, end_state, notes, created_at, updated_at
+       FROM garden_crop_plantings
+       WHERE garden_id = ?`,
+      [gardenId]
+    );
+    const tasks = await db.getAllAsync<TaskCloneRow>(
+      `SELECT
+         id, entry_id, bed_id, task_type, title, detail, due_date, priority, status, source, rule_key,
+         seen_at, completed_at, created_at, updated_at
+       FROM garden_tasks
+       WHERE garden_id = ?`,
+      [gardenId]
+    );
+
+    const plantCatalogIds = Array.from(new Set(entries.map((entry) => entry.plant_catalog_id)));
+    const plants: PlantCatalogBackupRow[] = [];
+    for (const id of plantCatalogIds) {
+      const row = await db.getFirstAsync<PlantCatalogBackupRow>(
+        `SELECT
+           id, source, external_id, common_name, scientific_name, family_name, image_url, meta_json, created_at, updated_at
+         FROM plant_catalog_cache
+         WHERE id = ?`,
+        [id]
+      );
+      if (row) plants.push(row);
+    }
+
+    const progressRow = await db.getFirstAsync<SettingsRow>(
+      "SELECT value_json FROM app_settings WHERE key = ? LIMIT 1",
+      ["garden_progress_v1"]
+    );
+    const bedPlannerRow = await db.getFirstAsync<SettingsRow>(
+      "SELECT value_json FROM app_settings WHERE key = ? LIMIT 1",
+      ["garden_bed_planner_v1"]
+    );
+    const bedPhotoRow = await db.getFirstAsync<SettingsRow>(
+      "SELECT value_json FROM app_settings WHERE key = ? LIMIT 1",
+      ["bed_photo_log_v1"]
+    );
+
+    let gardenProgress: GardenProgressFlags | undefined;
+    let bedPlanner: GardenBedPlannerFlags | undefined;
+    let bedPhotoLog: BedPhotoLogEntry[] | undefined;
+    try {
+      if (progressRow?.value_json) {
+        const parsed = JSON.parse(progressRow.value_json) as Record<string, GardenProgressFlags>;
+        gardenProgress = parsed[gardenId];
+      }
+    } catch {}
+    try {
+      if (bedPlannerRow?.value_json) {
+        const parsed = JSON.parse(bedPlannerRow.value_json) as Record<string, GardenBedPlannerFlags>;
+        bedPlanner = parsed[gardenId];
+      }
+    } catch {}
+    try {
+      if (bedPhotoRow?.value_json) {
+        const parsed = JSON.parse(bedPhotoRow.value_json) as Record<string, BedPhotoLogEntry[]>;
+        bedPhotoLog = parsed[gardenId];
+      }
+    } catch {}
+
+    return {
+      format: "gardenme-garden-backup-v1",
+      exportedAt: new Date().toISOString(),
+      garden: {
+        name: source.name,
+        latitude: source.latitude,
+        longitude: source.longitude,
+        ...(source.location_label ? { locationLabel: source.location_label } : {}),
+        ...(source.photo_uri ? { photoUri: source.photo_uri } : {}),
+        ...(source.image_source_type ? { imageSourceType: source.image_source_type } : {}),
+        ...(source.scale_calibration_json
+          ? { scaleCalibration: JSON.parse(source.scale_calibration_json) as GardenScaleCalibration }
+          : {}),
+        createdAt: source.created_at,
+        updatedAt: source.updated_at,
+      },
+      beds,
+      features,
+      plants,
+      entries,
+      plantings,
+      tasks,
+      settings: {
+        ...(gardenProgress ? { gardenProgress } : {}),
+        ...(bedPlanner ? { bedPlanner } : {}),
+        ...(bedPhotoLog ? { bedPhotoLog } : {}),
+      },
+    };
+  }
+
+  async importBackupBundle(bundle: GardenBackupBundle, options?: { name?: string }): Promise<Garden> {
+    if (!bundle || bundle.format !== "gardenme-garden-backup-v1") {
+      throw new Error("Unsupported backup format");
+    }
+    const db = getDatabase();
+    const requestedName = options?.name?.trim();
+    const sourceName = bundle.garden?.name?.trim() || "Imported Garden";
+    const importName = await this.resolveCloneName(sourceName, requestedName);
+    const now = new Date().toISOString();
+    const importedGardenId = makeId("garden");
+    const bedIdMap = new Map<string, string>();
+    const entryIdMap = new Map<string, string>();
+    const plantIdMap = new Map<string, string>();
+
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        `INSERT INTO gardens (
+           id, name, latitude, longitude, location_label, photo_uri, image_source_type, scale_calibration_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          importedGardenId,
+          importName,
+          bundle.garden.latitude,
+          bundle.garden.longitude,
+          bundle.garden.locationLabel ?? null,
+          bundle.garden.photoUri ?? null,
+          bundle.garden.imageSourceType ?? null,
+          bundle.garden.scaleCalibration ? JSON.stringify(bundle.garden.scaleCalibration) : null,
+          now,
+          now,
+        ]
+      );
+
+      for (const plant of bundle.plants ?? []) {
+        const existingByExternal =
+          plant.external_id && plant.source
+            ? await db.getFirstAsync<{ id: string }>(
+                "SELECT id FROM plant_catalog_cache WHERE source = ? AND external_id = ? LIMIT 1",
+                [plant.source, plant.external_id]
+              )
+            : null;
+        const existingByManualName =
+          !plant.external_id
+            ? await db.getFirstAsync<{ id: string }>(
+                "SELECT id FROM plant_catalog_cache WHERE source = ? AND external_id IS NULL AND lower(common_name) = lower(?) LIMIT 1",
+                [plant.source, plant.common_name]
+              )
+            : null;
+        const targetId = existingByExternal?.id ?? existingByManualName?.id ?? makeId("plant");
+        plantIdMap.set(plant.id, targetId);
+        if (existingByExternal?.id || existingByManualName?.id) {
+          await db.runAsync(
+            `UPDATE plant_catalog_cache
+             SET common_name = ?, scientific_name = ?, family_name = ?, image_url = ?, meta_json = ?, updated_at = ?
+             WHERE id = ?`,
+            [
+              plant.common_name,
+              plant.scientific_name,
+              plant.family_name,
+              plant.image_url,
+              plant.meta_json,
+              now,
+              targetId,
+            ]
+          );
+        } else {
+          await db.runAsync(
+            `INSERT INTO plant_catalog_cache (
+               id, source, external_id, common_name, scientific_name, family_name, image_url, meta_json, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              targetId,
+              plant.source,
+              plant.external_id,
+              plant.common_name,
+              plant.scientific_name,
+              plant.family_name,
+              plant.image_url,
+              plant.meta_json,
+              now,
+              now,
+            ]
+          );
+        }
+      }
+
+      for (const bed of bundle.beds ?? []) {
+        const nextBedId = makeId("bed");
+        bedIdMap.set(bed.id, nextBedId);
+        await db.runAsync(
+          `INSERT INTO beds (
+             id, garden_id, name, polygon_json, sun_exposure, drainage,
+             contains_perennials, perennial_plants_csv, is_raised_bed, has_irrigation,
+             soil_notes, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            nextBedId,
+            importedGardenId,
+            bed.name,
+            bed.polygon_json,
+            bed.sun_exposure,
+            bed.drainage,
+            bed.contains_perennials,
+            bed.perennial_plants_csv,
+            bed.is_raised_bed,
+            bed.has_irrigation,
+            bed.soil_notes,
+            now,
+            now,
+          ]
+        );
+      }
+
+      for (const feature of bundle.features ?? []) {
+        await db.runAsync(
+          `INSERT INTO garden_features (id, garden_id, type, name, polygon_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [makeId("feature"), importedGardenId, feature.type, feature.name, feature.polygon_json, now, now]
+        );
+      }
+
+      for (const entry of bundle.entries ?? []) {
+        const nextEntryId = makeId("crop");
+        entryIdMap.set(entry.id, nextEntryId);
+        const mappedPlantId = plantIdMap.get(entry.plant_catalog_id);
+        if (!mappedPlantId) continue;
+        await db.runAsync(
+          `INSERT INTO garden_crop_entries (
+             id, garden_id, plant_catalog_id, status, started_indoors_at, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            nextEntryId,
+            importedGardenId,
+            mappedPlantId,
+            entry.status,
+            entry.started_indoors_at,
+            entry.bed_id ? bedIdMap.get(entry.bed_id) ?? null : null,
+            entry.is_perennial,
+            entry.variety_name,
+            entry.support_needed,
+            entry.quantity,
+            entry.notes,
+            now,
+            now,
+          ]
+        );
+      }
+
+      for (const planting of bundle.plantings ?? []) {
+        const nextEntryId = entryIdMap.get(planting.entry_id);
+        if (!nextEntryId) continue;
+        await db.runAsync(
+          `INSERT INTO garden_crop_plantings (
+             id, entry_id, garden_id, bed_id, planted_at, ended_at, end_state, notes, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            makeId("planting"),
+            nextEntryId,
+            importedGardenId,
+            planting.bed_id ? bedIdMap.get(planting.bed_id) ?? null : null,
+            planting.planted_at,
+            planting.ended_at,
+            planting.end_state,
+            planting.notes,
+            now,
+            now,
+          ]
+        );
+      }
+
+      for (const task of bundle.tasks ?? []) {
+        await db.runAsync(
+          `INSERT INTO garden_tasks (
+             id, garden_id, entry_id, bed_id, task_type, title, detail, due_date,
+             priority, status, source, rule_key, seen_at, completed_at, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            makeId("task"),
+            importedGardenId,
+            task.entry_id ? entryIdMap.get(task.entry_id) ?? null : null,
+            task.bed_id ? bedIdMap.get(task.bed_id) ?? null : null,
+            task.task_type,
+            task.title,
+            task.detail,
+            task.due_date,
+            task.priority,
+            task.status,
+            task.source,
+            `${task.rule_key}:import:${importedGardenId}`,
+            task.seen_at,
+            task.completed_at,
+            now,
+            now,
+          ]
+        );
+      }
+
+      const progressRow = await db.getFirstAsync<SettingsRow>(
+        "SELECT value_json FROM app_settings WHERE key = ? LIMIT 1",
+        ["garden_progress_v1"]
+      );
+      const progressParsed = progressRow?.value_json ? (JSON.parse(progressRow.value_json) as Record<string, unknown>) : {};
+      if (bundle.settings?.gardenProgress) {
+        const next = { ...progressParsed, [importedGardenId]: bundle.settings.gardenProgress };
+        await db.runAsync(
+          `INSERT INTO app_settings (key, value_json, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+          ["garden_progress_v1", JSON.stringify(next), now]
+        );
+      }
+
+      const bedPlannerRow = await db.getFirstAsync<SettingsRow>(
+        "SELECT value_json FROM app_settings WHERE key = ? LIMIT 1",
+        ["garden_bed_planner_v1"]
+      );
+      const bedPlannerParsed = bedPlannerRow?.value_json ? (JSON.parse(bedPlannerRow.value_json) as Record<string, unknown>) : {};
+      if (bundle.settings?.bedPlanner) {
+        const next = { ...bedPlannerParsed, [importedGardenId]: bundle.settings.bedPlanner };
+        await db.runAsync(
+          `INSERT INTO app_settings (key, value_json, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+          ["garden_bed_planner_v1", JSON.stringify(next), now]
+        );
+      }
+
+      const bedPhotoRow = await db.getFirstAsync<SettingsRow>(
+        "SELECT value_json FROM app_settings WHERE key = ? LIMIT 1",
+        ["bed_photo_log_v1"]
+      );
+      const bedPhotoParsed = bedPhotoRow?.value_json ? (JSON.parse(bedPhotoRow.value_json) as Record<string, unknown>) : {};
+      if (bundle.settings?.bedPhotoLog) {
+        const remappedPhotos = bundle.settings.bedPhotoLog.map((row) => ({
+          ...row,
+          id: makeId("bed-photo"),
+          bedId: bedIdMap.get(row.bedId) ?? row.bedId,
+        }));
+        const next = { ...bedPhotoParsed, [importedGardenId]: remappedPhotos };
+        await db.runAsync(
+          `INSERT INTO app_settings (key, value_json, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+          ["bed_photo_log_v1", JSON.stringify(next), now]
+        );
+      }
+    });
+
+    return {
+      id: importedGardenId,
+      name: importName,
+      latitude: bundle.garden.latitude,
+      longitude: bundle.garden.longitude,
+      ...(bundle.garden.locationLabel ? { locationLabel: bundle.garden.locationLabel } : {}),
+      ...(bundle.garden.photoUri ? { photoUri: bundle.garden.photoUri } : {}),
+      ...(bundle.garden.imageSourceType ? { imageSourceType: bundle.garden.imageSourceType } : {}),
+      ...(bundle.garden.scaleCalibration ? { scaleCalibration: bundle.garden.scaleCalibration } : {}),
       createdAt: now,
       updatedAt: now,
     };

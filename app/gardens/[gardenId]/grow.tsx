@@ -87,7 +87,7 @@ type GrowListCsvRow = {
   isPerennial: boolean;
 };
 
-type ListStatusFilter = "all" | "planned" | "growing";
+type ListStatusFilter = "all" | "planned" | "growing" | "started_indoors";
 type SuggestionTab = "companions" | "common" | "unusual";
 
 const COMMON_CROP_SUGGESTIONS = [
@@ -168,6 +168,7 @@ export default function GardenGrowListScreen() {
   const [listSearch, setListSearch] = useState("");
   const [listSortDirection, setListSortDirection] = useState<"asc" | "desc">("asc");
   const [listStatusFilter, setListStatusFilter] = useState<ListStatusFilter>("all");
+  const [selectedWishlistIds, setSelectedWishlistIds] = useState<Record<string, boolean>>({});
   const [suggestionTab, setSuggestionTab] = useState<SuggestionTab>("companions");
   const [suggestionRefreshKey, setSuggestionRefreshKey] = useState(0);
   const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
@@ -902,8 +903,10 @@ export default function GardenGrowListScreen() {
     const searchTerm = listSearch.trim().toLowerCase();
     const list = [...(wishlistQuery.data ?? [])].filter((item) => {
       const effectiveStatus = entryDrafts[item.id]?.status ?? item.status;
+      const effectiveStartedIndoorsAt = entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt;
       if (listStatusFilter === "planned" && effectiveStatus !== "wanted") return false;
       if (listStatusFilter === "growing" && effectiveStatus !== "already_growing") return false;
+      if (listStatusFilter === "started_indoors" && !effectiveStartedIndoorsAt) return false;
       if (!searchTerm) return true;
       const haystack = [
         item.plant.commonName,
@@ -926,6 +929,66 @@ export default function GardenGrowListScreen() {
     });
     return list;
   }, [entryDrafts, listNameCollator, listStatusFilter, wishlistQuery.data, listSearch, listSortDirection]);
+
+  useEffect(() => {
+    const validIds = new Set((wishlistQuery.data ?? []).map((item) => item.id));
+    setSelectedWishlistIds((prev) => {
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      for (const [id, selected] of Object.entries(prev)) {
+        if (!selected || !validIds.has(id)) continue;
+        next[id] = true;
+        if (!prev[id]) changed = true;
+      }
+      if (Object.keys(next).length !== Object.keys(prev).filter((id) => prev[id]).length) changed = true;
+      return changed ? next : prev;
+    });
+  }, [wishlistQuery.data]);
+
+  const selectedCount = useMemo(
+    () => Object.values(selectedWishlistIds).filter(Boolean).length,
+    [selectedWishlistIds]
+  );
+
+  const bulkApplyMutation = useMutation({
+    mutationFn: async (action: "set_planned" | "set_growing" | "support_on" | "support_off" | "perennial_on" | "perennial_off" | "remove") => {
+      const selectedItems = (wishlistQuery.data ?? []).filter((item) => selectedWishlistIds[item.id]);
+      for (const item of selectedItems) {
+        if (action === "remove") {
+          await wishlistRepository.remove(item.id);
+          continue;
+        }
+        const draft = entryDrafts[item.id];
+        const status = draft?.status ?? item.status;
+        const startedIndoorsAt = draft?.startedIndoorsAt ?? item.startedIndoorsAt ?? null;
+        const bedId = status === "already_growing" ? draft?.bedId ?? item.bedId ?? null : null;
+        const isPerennial = draft?.isPerennial ?? item.isPerennial;
+        const supportNeeded = draft?.supportNeeded ?? item.supportNeeded;
+        const quantity = Math.max(1, draft?.quantity ?? item.quantity ?? 1);
+        const varietyName = (draft?.varietyName ?? item.varietyName ?? "").trim();
+
+        await wishlistRepository.update({
+          id: item.id,
+          status: action === "set_planned" ? "wanted" : action === "set_growing" ? "already_growing" : status,
+          startedIndoorsAt,
+          ...(action === "set_planned"
+            ? {}
+            : (action === "set_growing" || status === "already_growing") && bedId
+              ? { bedId }
+              : {}),
+          isPerennial: action === "perennial_on" ? true : action === "perennial_off" ? false : isPerennial,
+          varietyName,
+          supportNeeded: action === "support_on" ? true : action === "support_off" ? false : supportNeeded,
+          quantity,
+        });
+      }
+    },
+    onSuccess: async () => {
+      setSelectedWishlistIds({});
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+    },
+  });
 
   const suggestionBuckets = useMemo(() => {
     const currentNames = new Set((wishlistQuery.data ?? []).map((item) => normalizeSearchText(item.plant.commonName)));
@@ -1212,7 +1275,42 @@ export default function GardenGrowListScreen() {
               <FilterPill label="Both" selected={listStatusFilter === "all"} onPress={() => setListStatusFilter("all")} />
               <FilterPill label="Planned" selected={listStatusFilter === "planned"} onPress={() => setListStatusFilter("planned")} />
               <FilterPill label="Growing" selected={listStatusFilter === "growing"} onPress={() => setListStatusFilter("growing")} />
+              <FilterPill label="Started indoors" selected={listStatusFilter === "started_indoors"} onPress={() => setListStatusFilter("started_indoors")} />
             </View>
+            <View style={[styles.bulkDivider, { backgroundColor: theme.borderColor }]} />
+            <View style={styles.configChips}>
+              <Pressable
+                style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                onPress={() =>
+                  setSelectedWishlistIds(
+                    Object.fromEntries(visibleWishlistItems.map((item) => [item.id, true]))
+                  )
+                }
+              >
+                <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Select visible</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                onPress={() => setSelectedWishlistIds({})}
+              >
+                <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Clear selected</Text>
+              </Pressable>
+            </View>
+            {selectedCount > 0 && (
+              <>
+                <View style={[styles.bulkDivider, { backgroundColor: theme.borderColor }]} />
+                <View style={styles.configChips}>
+                  <Text style={[styles.helper, { color: theme.textMuted }]}>{selectedCount} selected</Text>
+                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("set_planned")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Set planned</Text></Pressable>
+                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("set_growing")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Set growing</Text></Pressable>
+                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("support_on")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Support on</Text></Pressable>
+                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("support_off")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Support off</Text></Pressable>
+                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("perennial_on")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Perennial</Text></Pressable>
+                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("perennial_off")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Annual</Text></Pressable>
+                  <Pressable style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.dangerActionBackground }]} onPress={() => bulkApplyMutation.mutate("remove")} disabled={bulkApplyMutation.isPending}><Text style={[styles.removeButtonText, { color: theme.dangerActionText }]}>Remove</Text></Pressable>
+                </View>
+              </>
+            )}
           </View>
           {wishlistQuery.isLoading && <Text style={[styles.helper, { color: theme.textMuted }]}>Loading...</Text>}
           {!wishlistQuery.isLoading && (wishlistQuery.data?.length ?? 0) === 0 && (
@@ -1232,6 +1330,19 @@ export default function GardenGrowListScreen() {
                   }))
                 }
               >
+                <Pressable
+                  style={[styles.rowSelector, { borderColor: theme.borderColor, backgroundColor: selectedWishlistIds[item.id] ? theme.primaryActionBackground : theme.surfaceBackground }]}
+                  onPress={() =>
+                    setSelectedWishlistIds((prev) => ({
+                      ...prev,
+                      [item.id]: !prev[item.id],
+                    }))
+                  }
+                >
+                  <Text style={[styles.rowSelectorText, { color: selectedWishlistIds[item.id] ? theme.primaryActionText : theme.textMuted }]}>
+                    {selectedWishlistIds[item.id] ? "☑" : "☐"}
+                  </Text>
+                </Pressable>
                 <View style={styles.compactHeaderMain}>
                   <Text style={[styles.wishName, { color: theme.textPrimary }]}>{item.plant.commonName}</Text>
                   <Text style={[styles.compactHeaderMeta, { color: theme.textMuted }]}>
@@ -1477,6 +1588,13 @@ export default function GardenGrowListScreen() {
                   {(entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded) ? " - Needs support" : ""}
                   {` - Qty ${Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}`}
                 </Text>
+                <View style={styles.timelineChips}>
+                  {buildGrowTimelineChips(item, entryDrafts[item.id]).map((chip) => (
+                    <View key={`${item.id}-timeline-${chip}`} style={[styles.timelineChip, { backgroundColor: theme.secondaryActionBackground }]}>
+                      <Text style={[styles.timelineChipText, { color: theme.secondaryActionText }]}>{chip}</Text>
+                    </View>
+                  ))}
+                </View>
                 <View style={styles.inlineControls}>
                   <View style={styles.qtyRow}>
                     <Text style={[styles.qtyLabel, { color: theme.textPrimary }]}>Quantity</Text>
@@ -3037,6 +3155,29 @@ function ToggleSwitch(props: {
   );
 }
 
+function buildGrowTimelineChips(item: GardenCropWishlistItemView, draft?: CropEntryDraft): string[] {
+  const chips: string[] = [];
+  const status = draft?.status ?? item.status;
+  const startedIndoorsAt = draft?.startedIndoorsAt ?? item.startedIndoorsAt;
+  if (status === "wanted") {
+    chips.push(startedIndoorsAt ? `Started indoors ${formatShortDate(startedIndoorsAt)}` : "Start indoors pending");
+    chips.push("Plant out pending");
+  } else {
+    chips.push(`Planted${item.bedName ? ` in ${item.bedName}` : ""}`);
+  }
+  const timingLines = extractTimingDisplayLines(item.plant.metaJson);
+  for (const line of timingLines.slice(0, 2)) {
+    chips.push(line);
+  }
+  return chips;
+}
+
+function formatShortDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
+
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#F0F6EE" },
   container: { padding: 16, gap: 12, paddingBottom: 28 },
@@ -3095,6 +3236,7 @@ const styles = StyleSheet.create({
   configRow: { gap: 6 },
   configLabel: { color: "#244130", fontWeight: "700" },
   configChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  bulkDivider: { height: 1, width: "100%", marginVertical: 2 },
   suggestionsBox: {
     borderWidth: 1,
     borderColor: "#D4E2D2",
@@ -3157,6 +3299,15 @@ const styles = StyleSheet.create({
   compactHeaderMain: { flex: 1, gap: 2 },
   compactHeaderMeta: { fontSize: 12 },
   compactHeaderCaret: { fontSize: 16, fontWeight: "700" },
+  rowSelector: {
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowSelectorText: { fontSize: 14, fontWeight: "700" },
   wishMain: { flex: 1, gap: 2 },
   wishName: { color: "#20402F", fontWeight: "700" },
   descriptionToggle: { marginTop: 2 },
@@ -3182,6 +3333,9 @@ const styles = StyleSheet.create({
   dataLabel: { fontSize: 12, fontWeight: "700" },
   dataActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
   wishMeta: { color: "#5A7363", fontSize: 12 },
+  timelineChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  timelineChip: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  timelineChipText: { fontSize: 11, fontWeight: "700" },
   inlineControls: { marginTop: 6, gap: 6 },
   qtyRow: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start" },
   qtyLabel: { color: "#355847", fontWeight: "700", fontSize: 12 },
@@ -3260,8 +3414,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  removeButtonText: { color: "#8C3A2D", fontWeight: "700", fontSize: 12 },
+  removeButtonText: { color: "#8C3A2D", fontWeight: "700", fontSize: 12, lineHeight: 14 },
   blockingOverlay: {
     position: "absolute",
     left: 0,
