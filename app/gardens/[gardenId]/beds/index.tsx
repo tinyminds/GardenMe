@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
+import { loadGardenBedPlannerSettings, saveGardenBedPlannerSettings, type GardenBedPlannerSettings } from "@/core/settings/gardenBedPlannerSettings";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/SqliteCompanionPlantingRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
@@ -87,6 +88,7 @@ type FinishDialogState = {
   diseaseName: string;
   notes: string;
 };
+type PlannerMode = "list" | "visual";
 
 const MAX_SUGGESTIONS_PER_BED = 2;
 
@@ -98,12 +100,14 @@ export default function BedsListScreen() {
   const [historyExpandedByBed, setHistoryExpandedByBed] = useState<Record<string, boolean>>({});
   const [bedExpandedById, setBedExpandedById] = useState<Record<string, boolean>>({});
   const [scoreExpandedByKey, setScoreExpandedByKey] = useState<Record<string, boolean>>({});
-  const [pinnedSuggestionIdsByBed, setPinnedSuggestionIdsByBed] = useState<Record<string, string[]>>({});
   const [rejectedSuggestionIdsByBed, setRejectedSuggestionIdsByBed] = useState<Record<string, string[]>>({});
   const [dismissedSpaceWarningSig, setDismissedSpaceWarningSig] = useState<string | null>(null);
   const [undoToast, setUndoToast] = useState<UndoToastState | null>(null);
   const [undoPending, setUndoPending] = useState(false);
   const [finishDialog, setFinishDialog] = useState<FinishDialogState | null>(null);
+  const [plannerMode, setPlannerMode] = useState<PlannerMode>("list");
+  const [selectedVisualBedId, setSelectedVisualBedId] = useState<string | null>(null);
+  const [plannerSettingsHydratedGardenId, setPlannerSettingsHydratedGardenId] = useState<string | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bedsQuery = useQuery({
@@ -147,6 +151,10 @@ export default function BedsListScreen() {
     queryFn: async () => {
       return companionRepository.listAll();
     },
+  });
+  const bedPlannerSettingsQuery = useQuery({
+    queryKey: ["garden-bed-planner-settings"],
+    queryFn: loadGardenBedPlannerSettings,
   });
 
   const planInBedMutation = useMutation({
@@ -534,21 +542,9 @@ export default function BedsListScreen() {
     const globallySuggestedEntryIds = new Set<string>();
     return draftCards.map((card) => {
       const suggestions: BedSuggestion[] = [];
-      const pinnedIds = pinnedSuggestionIdsByBed[card.bed.id] ?? [];
       const rejectedIds = new Set(rejectedSuggestionIdsByBed[card.bed.id] ?? []);
-      const candidateById = new Map(card.rankedCandidates.map((candidate) => [candidate.entry.id, candidate]));
-      for (const pinnedId of pinnedIds) {
-        if (suggestions.length >= MAX_SUGGESTIONS_PER_BED) break;
-        if (rejectedIds.has(pinnedId)) continue;
-        const pinnedCandidate = candidateById.get(pinnedId);
-        if (!pinnedCandidate) continue;
-        if (globallySuggestedEntryIds.has(pinnedCandidate.entry.id)) continue;
-        suggestions.push(pinnedCandidate);
-        globallySuggestedEntryIds.add(pinnedCandidate.entry.id);
-      }
       for (const candidate of card.rankedCandidates) {
         if (suggestions.length >= MAX_SUGGESTIONS_PER_BED) break;
-        if (pinnedIds.includes(candidate.entry.id)) continue;
         if (rejectedIds.has(candidate.entry.id)) continue;
         if (globallySuggestedEntryIds.has(candidate.entry.id)) continue;
         suggestions.push(candidate);
@@ -559,6 +555,9 @@ export default function BedsListScreen() {
       const contraryOptions = card.rankedCandidates
         .filter((candidate) => !localSuggestionIds.has(candidate.entry.id))
         .slice(0, 6)
+        .map((candidate) => candidate.entry);
+      const allOtherOptions = card.rankedCandidates
+        .filter((candidate) => !localSuggestionIds.has(candidate.entry.id))
         .map((candidate) => candidate.entry);
       const whyNot: WhyNotCandidate[] = card.rankedCandidates
         .filter((candidate) => !rejectedIds.has(candidate.entry.id))
@@ -577,23 +576,76 @@ export default function BedsListScreen() {
         activeGrowingRows: card.activeGrowingRows,
         plannedInBed: card.plannedInBed,
         suggestions,
-        pinnedSuggestionIds: pinnedIds,
         rejectedSuggestionIds: Array.from(rejectedIds),
         contraryOptions,
+        allOtherOptions,
         whyNot,
         candidateEntryIds: card.rankedCandidates.map((candidate) => candidate.entry.id),
         diseaseProfile: card.diseaseProfile,
         historicalRows: card.historicalRows,
       };
     });
-  }, [beds, companionRelations, gardenQuery.data?.scaleCalibration, plannedPool, wishlist, activePlantingByEntryId, historicalByBedId, pinnedSuggestionIdsByBed, rejectedSuggestionIdsByBed]);
+  }, [beds, companionRelations, gardenQuery.data?.scaleCalibration, plannedPool, wishlist, activePlantingByEntryId, historicalByBedId, rejectedSuggestionIdsByBed]);
+
+  useEffect(() => {
+    if (bedCards.length === 0) {
+      setSelectedVisualBedId(null);
+      return;
+    }
+    if (!selectedVisualBedId || !bedCards.some((card) => card.bed.id === selectedVisualBedId)) {
+      setSelectedVisualBedId(bedCards[0]?.bed.id ?? null);
+    }
+  }, [bedCards, selectedVisualBedId]);
+
+  useEffect(() => {
+    if (!gardenId) {
+      setPlannerSettingsHydratedGardenId(null);
+      return;
+    }
+    if (!bedPlannerSettingsQuery.isSuccess) return;
+    if (plannerSettingsHydratedGardenId === gardenId) return;
+    const saved = bedPlannerSettingsQuery.data?.[gardenId] ?? {};
+    setHasSpareSpaceByBed(saved.spareSpaceByBedId ?? {});
+    setRejectedSuggestionIdsByBed(saved.rejectedSuggestionIdsByBed ?? {});
+    setPlannerSettingsHydratedGardenId(gardenId);
+  }, [gardenId, bedPlannerSettingsQuery.data, bedPlannerSettingsQuery.isSuccess, plannerSettingsHydratedGardenId]);
+
+  useEffect(() => {
+    if (!gardenId || plannerSettingsHydratedGardenId !== gardenId) return;
+    void (async () => {
+      const cached = queryClient.getQueryData<GardenBedPlannerSettings>(["garden-bed-planner-settings"]);
+      const current = cached ?? (await loadGardenBedPlannerSettings());
+      const existing = current[gardenId] ?? {};
+      const next: GardenBedPlannerSettings = {
+        ...current,
+        [gardenId]: {
+          ...existing,
+          spareSpaceByBedId: hasSpareSpaceByBed,
+          rejectedSuggestionIdsByBed,
+        },
+      };
+      await saveGardenBedPlannerSettings(next);
+      queryClient.setQueryData(["garden-bed-planner-settings"], next);
+    })();
+  }, [gardenId, plannerSettingsHydratedGardenId, hasSpareSpaceByBed, rejectedSuggestionIdsByBed]);
 
   useEffect(() => {
     if (bedCards.length === 0) return;
+    const savedByBed = gardenId
+      ? bedPlannerSettingsQuery.data?.[gardenId]?.spareSpaceByBedId ?? {}
+      : {};
     setHasSpareSpaceByBed((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const card of bedCards) {
+        const savedValue = savedByBed[card.bed.id];
+        if (typeof savedValue === "boolean") {
+          if (next[card.bed.id] !== savedValue) {
+            next[card.bed.id] = savedValue;
+            changed = true;
+          }
+          continue;
+        }
         if (next[card.bed.id] === undefined) {
           next[card.bed.id] = card.growingNames.length === 0;
           changed = true;
@@ -601,7 +653,7 @@ export default function BedsListScreen() {
       }
       return changed ? next : prev;
     });
-  }, [bedCards]);
+  }, [bedCards, bedPlannerSettingsQuery.data, gardenId]);
 
   useEffect(() => {
     if (bedCards.length === 0) return;
@@ -611,24 +663,6 @@ export default function BedsListScreen() {
       for (const card of bedCards) {
         if (next[card.bed.id] === undefined) {
           next[card.bed.id] = false;
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [bedCards]);
-
-  useEffect(() => {
-    if (bedCards.length === 0) return;
-    setPinnedSuggestionIdsByBed((prev) => {
-      let changed = false;
-      const next: Record<string, string[]> = { ...prev };
-      for (const card of bedCards) {
-        const validIds = new Set(card.candidateEntryIds);
-        const existing = next[card.bed.id] ?? [];
-        const filtered = existing.filter((id) => validIds.has(id));
-        if (filtered.length !== existing.length) {
-          next[card.bed.id] = filtered;
           changed = true;
         }
       }
@@ -660,25 +694,11 @@ export default function BedsListScreen() {
     };
   }, []);
 
-  const togglePinSuggestion = (bedId: string, entryId: string) => {
-    setPinnedSuggestionIdsByBed((prev) => {
-      const existing = prev[bedId] ?? [];
-      const alreadyPinned = existing.includes(entryId);
-      const updated = alreadyPinned ? existing.filter((id) => id !== entryId) : [entryId, ...existing];
-      return { ...prev, [bedId]: updated };
-    });
-  };
-
   const rejectSuggestion = (bedId: string, entryId: string) => {
     setRejectedSuggestionIdsByBed((prev) => {
       const existing = prev[bedId] ?? [];
       if (existing.includes(entryId)) return prev;
       return { ...prev, [bedId]: [entryId, ...existing] };
-    });
-    setPinnedSuggestionIdsByBed((prev) => {
-      const existing = prev[bedId] ?? [];
-      if (!existing.includes(entryId)) return prev;
-      return { ...prev, [bedId]: existing.filter((id) => id !== entryId) };
     });
   };
 
@@ -686,6 +706,13 @@ export default function BedsListScreen() {
     setRejectedSuggestionIdsByBed((prev) => {
       if (!prev[bedId] || prev[bedId].length === 0) return prev;
       return { ...prev, [bedId]: [] };
+    });
+  };
+
+  const setSpareSpace = (bedId: string, hasSpare: boolean) => {
+    setHasSpareSpaceByBed((prev) => {
+      if (prev[bedId] === hasSpare) return prev;
+      return { ...prev, [bedId]: hasSpare };
     });
   };
 
@@ -710,10 +737,41 @@ export default function BedsListScreen() {
     return map;
   }, [bedCards, hasSpareSpaceByBed]);
 
+  const bedStatusById = useMemo(() => {
+    const map: Record<string, { growingCount: number; plannedCount: number; suggestionCount: number }> = {};
+    for (const card of bedCards) {
+      const hasExistingPlants = card.growingNames.length > 0;
+      const hasSpareSpace = hasSpareSpaceByBed[card.bed.id] ?? false;
+      const showSuggestions = !hasExistingPlants || hasSpareSpace;
+      map[card.bed.id] = {
+        growingCount: card.activeGrowingRows.length,
+        plannedCount: card.plannedInBed.length,
+        suggestionCount: showSuggestions ? card.suggestions.length : 0,
+      };
+    }
+    return map;
+  }, [bedCards, hasSpareSpaceByBed]);
+
+  const bedPlantDotsById = useMemo(() => {
+    const map: Record<string, { plantedCount: number; perennialCount: number; plannedCount: number }> = {};
+    for (const card of bedCards) {
+      const plantedCount = card.activeGrowingRows.length;
+      const perennialCount = card.activeGrowingRows.filter((row) => row.entry.isPerennial).length;
+      const plannedCount = card.plannedInBed.length;
+      map[card.bed.id] = { plantedCount, perennialCount, plannedCount };
+    }
+    return map;
+  }, [bedCards]);
+
+  const selectedVisualCard = useMemo(
+    () => bedCards.find((card) => card.bed.id === selectedVisualBedId) ?? null,
+    [bedCards, selectedVisualBedId]
+  );
+
   const growListCount = wishlist.length;
   const plannedCount = wishlist.filter((item) => item.status === "wanted" && Boolean(item.bedId)).length;
   const plantedCount = wishlist.filter((item) => item.status === "already_growing").length;
-  const pinnedCount = Object.values(pinnedSuggestionIdsByBed).reduce((sum, ids) => sum + ids.length, 0);
+  const unplannedCount = wishlist.filter((item) => item.status === "wanted" && !item.bedId).length;
 
   const spaceWarning = useMemo(() => {
     const overBeds: string[] = [];
@@ -753,9 +811,25 @@ export default function BedsListScreen() {
           <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
             <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Planted {plantedCount}</Text>
           </View>
-          <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
-            <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Pinned {pinnedCount}</Text>
-          </View>
+        </View>
+        <View style={styles.row}>
+          <Pressable
+            style={[styles.toggleChip, { backgroundColor: plannerMode === "list" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+            onPress={() => setPlannerMode("list")}
+          >
+            <Text style={[styles.toggleChipText, { color: plannerMode === "list" ? theme.primaryActionText : theme.secondaryActionText }]}>List</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.toggleChip, { backgroundColor: plannerMode === "visual" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+            onPress={() => setPlannerMode("visual")}
+          >
+            <Text style={[styles.toggleChipText, { color: plannerMode === "visual" ? theme.primaryActionText : theme.secondaryActionText }]}>Visual</Text>
+          </Pressable>
+          {plannerMode === "visual" && (
+            <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
+              <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Unplanned {unplannedCount}</Text>
+            </View>
+          )}
         </View>
         {showSpaceWarning && (
           <View style={[styles.warningCard, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]}>
@@ -779,7 +853,7 @@ export default function BedsListScreen() {
           <Text style={[styles.empty, { color: theme.textMuted }]}>No beds yet. Add beds in Garden Design.</Text>
         )}
 
-        {bedCards.map((card) => {
+        {plannerMode === "list" && bedCards.map((card) => {
           const hasExistingPlants = card.growingNames.length > 0;
           const hasSpareSpace = hasSpareSpaceByBed[card.bed.id] ?? false;
           const showSuggestions = !hasExistingPlants || hasSpareSpace;
@@ -859,8 +933,8 @@ export default function BedsListScreen() {
                 <View style={styles.block}>
                   <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Spare space</Text>
                   <View style={styles.row}>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setHasSpareSpaceByBed((prev) => ({ ...prev, [card.bed.id]: true }))}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>Yes</Text></Pressable>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setHasSpareSpaceByBed((prev) => ({ ...prev, [card.bed.id]: false }))}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>No</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setSpareSpace(card.bed.id, true)}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>Yes</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setSpareSpace(card.bed.id, false)}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>No</Text></Pressable>
                   </View>
                 </View>
               )}
@@ -990,14 +1064,6 @@ export default function BedsListScreen() {
                           <Text style={[styles.suggestionButtonText, { color: theme.dangerActionText }]}>Reject</Text>
                         </Pressable>
                         <Pressable
-                          style={[styles.suggestionButton, { backgroundColor: theme.appBackground, borderColor: theme.borderColor, borderWidth: 1 }]}
-                          onPress={() => togglePinSuggestion(card.bed.id, suggestion.entry.id)}
-                        >
-                          <Text style={[styles.suggestionButtonText, { color: theme.textPrimary }]}>
-                            {card.pinnedSuggestionIds.includes(suggestion.entry.id) ? "Unpin" : "Pin"}
-                          </Text>
-                        </Pressable>
-                        <Pressable
                           style={[styles.suggestionButton, { backgroundColor: theme.secondaryActionBackground }]}
                           onPress={() => planInBedMutation.mutate({ entry: suggestion.entry, bedId: card.bed.id })}
                           disabled={planInBedMutation.isPending}
@@ -1050,6 +1116,192 @@ export default function BedsListScreen() {
           );
         })}
 
+        {plannerMode === "visual" && (
+          <>
+            <BedPlanPreview
+              beds={beds}
+              {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
+                ? { boundaryPolygon: gardenQuery.data.scaleCalibration.boundaryPolygon }
+                : {})}
+              {...(gardenQuery.data?.scaleCalibration?.baseWidth && gardenQuery.data?.scaleCalibration?.baseHeight
+                ? { previewRatio: gardenQuery.data.scaleCalibration.baseHeight / gardenQuery.data.scaleCalibration.baseWidth }
+                : {})}
+              infoByBedId={bedPreviewInfoById}
+              bedStatusById={bedStatusById}
+              bedPlantDotsById={bedPlantDotsById}
+              {...(selectedVisualBedId ? { selectedBedId: selectedVisualBedId } : {})}
+              onBedPress={setSelectedVisualBedId}
+              subtitle="Tap a bed to view and place crops. Planted crops appear as in-bed dots."
+            />
+            {selectedVisualCard && (() => {
+              const card = selectedVisualCard;
+              const hasExistingPlants = card.growingNames.length > 0;
+              const hasSpareSpace = hasSpareSpaceByBed[card.bed.id] ?? false;
+              const showSuggestions = !hasExistingPlants || hasSpareSpace;
+              const rejectedCount = card.rejectedSuggestionIds.length;
+              return (
+                <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+                  <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{card.bed.name}</Text>
+                  <Text style={[styles.meta, { color: theme.textMuted }]}>
+                    {card.activeGrowingRows.length} growing - {card.plannedInBed.length} planned - {showSuggestions ? `${card.suggestions.length} suggestions` : "suggestions hidden"}
+                  </Text>
+                  <View style={styles.row}>
+                    <Text style={[styles.blockText, { color: theme.textMuted }]}>Spare space</Text>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setSpareSpace(card.bed.id, true)}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>Yes</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setSpareSpace(card.bed.id, false)}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>No</Text></Pressable>
+                  </View>
+                  <View style={styles.block}>
+                    <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Growing now</Text>
+                    {card.activeGrowingRows.length === 0 ? (
+                      <Text style={[styles.blockText, { color: theme.textMuted }]}>Nothing growing here yet.</Text>
+                    ) : (
+                      <View style={styles.block}>
+                        {card.activeGrowingRows.map((row) => (
+                          <View key={`visual-grow-${row.entry.id}`} style={[styles.growingRow, { borderColor: theme.borderColor }]}>
+                            <View style={styles.growingMain}>
+                              <Text style={[styles.growingName, { color: theme.textPrimary }]}>{formatEntryName(row.entry)}</Text>
+                              <Text style={[styles.blockText, { color: theme.textMuted }]}>{row.plantedAt ? `Planted ${formatDate(row.plantedAt)}` : "Planted date not set"}</Text>
+                            </View>
+                            <View style={styles.row}>
+                              <Pressable style={[styles.finishChip, { backgroundColor: theme.secondaryActionBackground }]} disabled={finishPlantingMutation.isPending} onPress={() => openFinishDialog(row, "harvested")}><Text style={[styles.finishChipText, { color: theme.secondaryActionText }]}>Harvested</Text></Pressable>
+                              <Pressable style={[styles.finishChip, { backgroundColor: theme.secondaryActionBackground }]} disabled={finishPlantingMutation.isPending} onPress={() => openFinishDialog(row, "done")}><Text style={[styles.finishChipText, { color: theme.secondaryActionText }]}>Done</Text></Pressable>
+                              <Pressable style={[styles.finishChipDanger, { backgroundColor: theme.dangerActionBackground }]} disabled={finishPlantingMutation.isPending} onPress={() => openFinishDialog(row, "dead")}><Text style={[styles.finishChipDangerText, { color: theme.dangerActionText }]}>Lost</Text></Pressable>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                  {card.plannedInBed.length > 0 && (
+                    <View style={styles.block}>
+                      <View style={styles.rowBetween}>
+                        <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Planned for this bed</Text>
+                        {card.plannedInBed.length > 1 && (
+                          <Pressable
+                            style={[styles.smallActionButton, { backgroundColor: theme.primaryActionBackground }]}
+                            onPress={() => plantAllInBedMutation.mutate({ entries: card.plannedInBed, bedId: card.bed.id })}
+                            disabled={plantAllInBedMutation.isPending}
+                          >
+                            <Text style={[styles.smallActionButtonText, { color: theme.primaryActionText }]}>Plant all</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                      <View style={styles.chips}>
+                        {card.plannedInBed.map((entry) => (
+                          <View key={`visual-plan-${entry.id}`} style={[styles.planChip, { backgroundColor: theme.secondaryActionBackground }]}>
+                            <Text style={[styles.planChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text>
+                            <Pressable style={[styles.planChipPlantButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => handleMarkPlanted(entry, card.bed.id)} disabled={markPlantedMutation.isPending}><Text style={[styles.planChipPlantButtonText, { color: theme.primaryActionText }]}>Planted</Text></Pressable>
+                            <Pressable style={[styles.planChipButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => handleClearPlan(entry)} disabled={clearPlanMutation.isPending}><Text style={[styles.planChipButtonText, { color: theme.dangerActionText }]}>Clear</Text></Pressable>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                  <View style={styles.block}>
+                    <View style={styles.rowBetween}>
+                      <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Suggested</Text>
+                      {rejectedCount > 0 && (
+                        <Pressable
+                          style={[styles.smallActionButton, { backgroundColor: theme.secondaryActionBackground }]}
+                          onPress={() => clearRejectedSuggestionsForBed(card.bed.id)}
+                        >
+                          <Text style={[styles.smallActionButtonText, { color: theme.secondaryActionText }]}>Reset hidden ({rejectedCount})</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                    {!showSuggestions ? (
+                      <Text style={[styles.blockText, { color: theme.textMuted }]}>Suggestions hidden while this bed is marked full.</Text>
+                    ) : card.suggestions.length === 0 ? (
+                      <Text style={[styles.blockText, { color: theme.textMuted }]}>No clear suggestions yet.</Text>
+                    ) : (
+                      <View style={styles.chips}>
+                        {card.suggestions.map((suggestion) => {
+                          const scoreKey = `visual:${card.bed.id}:${suggestion.entry.id}`;
+                          const scoreExpanded = Boolean(scoreExpandedByKey[scoreKey]);
+                          return (
+                            <View key={`visual-suggestion-${suggestion.entry.id}`} style={[styles.suggestionRow, { borderColor: theme.borderColor, width: "100%" }]}>
+                              <View style={styles.suggestionMain}>
+                                <View style={styles.rowBetween}>
+                                  <Text style={[styles.suggestionName, { color: theme.textPrimary }]}>{formatEntryName(suggestion.entry)}</Text>
+                                  <View style={styles.row}>
+                                    {(suggestion.companionGoodCount > 0 || suggestion.companionAvoidCount > 0) && (
+                                      <View style={[styles.companionSummaryChip, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
+                                        <Text style={[styles.companionSummaryChipText, { color: theme.textMuted }]}>
+                                          +{suggestion.companionGoodCount} / -{suggestion.companionAvoidCount}
+                                        </Text>
+                                      </View>
+                                    )}
+                                    <Text style={[styles.suggestionScore, { color: theme.textMuted }]}>{suggestion.scoreLabel}</Text>
+                                  </View>
+                                </View>
+                                <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>Confidence: {suggestion.confidenceLabel}</Text>
+                                <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.diseaseReason}</Text>
+                                <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.rotationReason}</Text>
+                                <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.sunReason}</Text>
+                                <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.spacingReason}</Text>
+                                <View style={styles.scoreChipRow}>
+                                  {suggestion.scoreComponents.map((part) => (
+                                    <View key={`${scoreKey}-${part.label}`} style={[styles.scoreChip, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
+                                      <Text style={[styles.scoreChipText, { color: theme.textMuted }]}>
+                                        {part.label} {formatSignedScore(part.value)}
+                                      </Text>
+                                    </View>
+                                  ))}
+                                </View>
+                                <Pressable
+                                  style={[styles.whyButton, { backgroundColor: theme.appBackground }]}
+                                  onPress={() => setScoreExpandedByKey((prev) => ({ ...prev, [scoreKey]: !scoreExpanded }))}
+                                >
+                                  <Text style={[styles.whyButtonText, { color: theme.textPrimary }]}>{scoreExpanded ? "Hide fit details" : "Why this fit?"}</Text>
+                                </Pressable>
+                                {scoreExpanded && (
+                                  <View style={[styles.whyPanel, { borderColor: theme.borderColor }]}>
+                                    {suggestion.scoreBreakdown.map((line) => (
+                                      <Text key={`${scoreKey}-${line}`} style={[styles.whyLine, { color: theme.textMuted }]}>
+                                        {line}
+                                      </Text>
+                                    ))}
+                                  </View>
+                                )}
+                              </View>
+                              <View style={styles.suggestionActions}>
+                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => rejectSuggestion(card.bed.id, suggestion.entry.id)}>
+                                  <Text style={[styles.suggestionButtonText, { color: theme.dangerActionText }]}>Reject</Text>
+                                </Pressable>
+                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => planInBedMutation.mutate({ entry: suggestion.entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}>
+                                  <Text style={[styles.suggestionButtonText, { color: theme.secondaryActionText }]}>Plan</Text>
+                                </Pressable>
+                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => handleMarkPlanted(suggestion.entry, card.bed.id)} disabled={markPlantedMutation.isPending}>
+                                  <Text style={[styles.suggestionButtonText, { color: theme.primaryActionText }]}>Plant</Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.block}>
+                    <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>All other grow list options</Text>
+                    {card.allOtherOptions.length === 0 ? (
+                      <Text style={[styles.blockText, { color: theme.textMuted }]}>No extra planned crops available.</Text>
+                    ) : (
+                      <ScrollView style={styles.optionsScroll} nestedScrollEnabled>
+                        <View style={styles.chips}>
+                          {card.allOtherOptions.map((entry) => (
+                            <Pressable key={`visual-option-${entry.id}`} style={[styles.optionChip, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => planInBedMutation.mutate({ entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={[styles.optionChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text></Pressable>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    )}
+                  </View>
+                </View>
+              );
+            })()}
+          </>
+        )}
+
+        {plannerMode === "list" && (
         <BedPlanPreview
           beds={beds}
           {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
@@ -1059,8 +1311,10 @@ export default function BedsListScreen() {
             ? { previewRatio: gardenQuery.data.scaleCalibration.baseHeight / gardenQuery.data.scaleCalibration.baseWidth }
             : {})}
           infoByBedId={bedPreviewInfoById}
+          bedPlantDotsById={bedPlantDotsById}
           subtitle="No image or grid here. This is a clean bed layout."
         />
+        )}
       </ScrollView>
       {finishDialog && (
         <View style={[styles.dialogOverlay, { backgroundColor: theme.appBackground }]}>
@@ -1529,6 +1783,7 @@ const styles = StyleSheet.create({
   suggestionButtonText: { color: "#2A5E40", fontWeight: "700", fontSize: 12 },
   optionChip: { backgroundColor: "#D9E7D8", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
   optionChipText: { color: "#264433", textTransform: "capitalize", fontSize: 12 },
+  optionsScroll: { maxHeight: 170 },
   linkText: { color: "#2A5E40", fontWeight: "700", marginTop: 2 },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   zoomButton: { backgroundColor: "#DFEADF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },

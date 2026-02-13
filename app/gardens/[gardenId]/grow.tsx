@@ -514,6 +514,21 @@ export default function GardenGrowListScreen() {
 
       const matched = await findBestPlantMatchForBulk(name, plantCatalogRepository);
       if (matched) {
+        const matchedName = normalizeSearchText(matched.commonName);
+        const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const strictMatch = matchedName === normalized || (escaped.length > 0 && new RegExp(`\\b${escaped}\\b`).test(matchedName));
+        if (!strictMatch) {
+          const manualEntry = await plantCatalogRepository.upsert({
+            source: "manual",
+            commonName: name.trim(),
+          });
+          await wishlistRepository.add({
+            gardenId,
+            plantCatalogId: manualEntry.id,
+            status: "wanted",
+          });
+          return { status: "added" as const };
+        }
         const duplicate = existing.some((item) => item.plantCatalogId === matched.id);
         if (duplicate) return { status: "exists" as const };
         await wishlistRepository.add({

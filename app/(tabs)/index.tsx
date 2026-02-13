@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "expo-router";
-import { useMemo } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import * as Sharing from "expo-sharing";
+import { useMemo, useRef, useState } from "react";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { captureRef } from "react-native-view-shot";
 import { useGardensQuery } from "@/features/gardens/hooks/useGardensQuery";
 import { fetchCurrentWeather, fetchDailyForecast } from "@/features/weather/services/openMeteo";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
@@ -22,6 +24,9 @@ const taskRepository = new SqliteGardenTaskRepository();
 
 export default function DashboardScreen() {
   const { theme } = useTheme();
+  const exportMapRef = useRef<View | null>(null);
+  const [isExportingMap, setIsExportingMap] = useState(false);
+  const [exportMapSize, setExportMapSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const gardensQuery = useGardensQuery();
   const gardens = gardensQuery.data ?? [];
   const selectedGardenId = useSelectedGardenStore((state) => state.selectedGardenId);
@@ -162,6 +167,57 @@ export default function DashboardScreen() {
     }
     return map;
   }, [bedsQuery.data, growList]);
+  const bedPlantDotsById = useMemo(() => {
+    const map: Record<string, { plantedCount: number; perennialCount: number; plannedCount: number }> = {};
+    for (const bed of bedsQuery.data ?? []) {
+      const plantedEntries = growList.filter((entry) => entry.bedId === bed.id && entry.status === "already_growing");
+      const plannedEntries = growList.filter((entry) => entry.bedId === bed.id && entry.status === "wanted");
+      map[bed.id] = {
+        plantedCount: plantedEntries.length,
+        perennialCount: plantedEntries.filter((entry) => entry.isPerennial).length,
+        plannedCount: plannedEntries.length,
+      };
+    }
+    return map;
+  }, [bedsQuery.data, growList]);
+
+  const exportLayoutImage = async () => {
+    if (Platform.OS === "web") {
+      Alert.alert("Not available on web", "Image export currently works on iOS and Android.");
+      return;
+    }
+    if (!exportMapRef.current) {
+      Alert.alert("Export unavailable", "Layout preview not ready yet.");
+      return;
+    }
+    try {
+      setIsExportingMap(true);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const exportWidth = Math.max(2200, Math.round((exportMapSize.width || 560) * 4));
+      const exportHeight = Math.max(1200, Math.round((exportMapSize.height || 360) * 4));
+      const uri = await captureRef(exportMapRef.current, {
+        format: "png",
+        quality: 1,
+        result: "tmpfile",
+        width: exportWidth,
+        height: exportHeight,
+      });
+      const shareAvailable = await Sharing.isAvailableAsync();
+      if (!shareAvailable) {
+        Alert.alert("Sharing unavailable", "This device does not support file sharing.");
+        return;
+      }
+      await Sharing.shareAsync(uri, {
+        mimeType: "image/png",
+        dialogTitle: "Garden layout export",
+        UTI: "public.png",
+      });
+    } catch (error) {
+      Alert.alert("Export failed", error instanceof Error ? error.message : "Could not export image.");
+    } finally {
+      setIsExportingMap(false);
+    }
+  };
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
@@ -285,18 +341,59 @@ export default function DashboardScreen() {
       ) : null}
 
       {selectedGarden && bedCount > 0 ? (
-        <BedPlanPreview
-          beds={bedsQuery.data ?? []}
-          {...(selectedGarden.scaleCalibration?.boundaryPolygon
-            ? { boundaryPolygon: selectedGarden.scaleCalibration.boundaryPolygon }
-            : {})}
-          {...(selectedGarden.scaleCalibration?.baseWidth && selectedGarden.scaleCalibration?.baseHeight
-            ? { previewRatio: selectedGarden.scaleCalibration.baseHeight / selectedGarden.scaleCalibration.baseWidth }
-            : {})}
-          infoByBedId={bedPreviewInfoById}
-          title="Bed Layout"
-          subtitle="Quick view of your planned and planted beds."
-        />
+        <View>
+          <BedPlanPreview
+            beds={bedsQuery.data ?? []}
+            features={featuresQuery.data ?? []}
+            {...(selectedGarden.scaleCalibration?.boundaryPolygon
+              ? { boundaryPolygon: selectedGarden.scaleCalibration.boundaryPolygon }
+              : {})}
+            {...(selectedGarden.scaleCalibration?.baseWidth && selectedGarden.scaleCalibration?.baseHeight
+              ? { previewRatio: selectedGarden.scaleCalibration.baseHeight / selectedGarden.scaleCalibration.baseWidth }
+              : {})}
+            infoByBedId={bedPreviewInfoById}
+            bedPlantDotsById={bedPlantDotsById}
+            title="Garden Layout"
+            subtitle="Beds, trees, lawn, and other mapped features."
+          />
+          <Pressable
+            style={[
+              styles.layoutExportButton,
+              {
+                backgroundColor: isExportingMap ? theme.disabledActionBackground : theme.secondaryActionBackground,
+              },
+            ]}
+            onPress={() => void exportLayoutImage()}
+            disabled={isExportingMap}
+          >
+            <Text style={[styles.layoutExportButtonText, { color: theme.secondaryActionText }]}>
+              {isExportingMap ? "Preparing image..." : "Download layout image"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {selectedGarden && bedCount > 0 ? (
+        <View style={styles.exportHiddenContainer} pointerEvents="none">
+          <View style={styles.exportHiddenPreview}>
+            <BedPlanPreview
+              beds={bedsQuery.data ?? []}
+              features={featuresQuery.data ?? []}
+              {...(selectedGarden.scaleCalibration?.boundaryPolygon
+                ? { boundaryPolygon: selectedGarden.scaleCalibration.boundaryPolygon }
+                : {})}
+              {...(selectedGarden.scaleCalibration?.baseWidth && selectedGarden.scaleCalibration?.baseHeight
+                ? { previewRatio: selectedGarden.scaleCalibration.baseHeight / selectedGarden.scaleCalibration.baseWidth }
+                : {})}
+              infoByBedId={bedPreviewInfoById}
+              bedPlantDotsById={bedPlantDotsById}
+              title="Garden Layout"
+              subtitle="Export preview"
+              mapCaptureRef={exportMapRef}
+              onMapLayout={setExportMapSize}
+              bedNameScale={0.7}
+            />
+          </View>
+        </View>
       ) : null}
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
@@ -405,6 +502,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 9,
     textAlign: "center",
+  },
+  layoutExportButton: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignSelf: "flex-start",
+    marginTop: 8,
+  },
+  layoutExportButtonText: { fontWeight: "700", fontSize: 12 },
+  exportHiddenContainer: {
+    position: "absolute",
+    left: -10000,
+    top: -10000,
+    opacity: 0,
+  },
+  exportHiddenPreview: {
+    width: 1400,
   },
   weatherNow: { fontSize: 16, fontWeight: "700" },
 });

@@ -224,6 +224,19 @@ export default function TasksTabScreen() {
     }
     return map;
   }, [bedsQuery.data, growList]);
+  const bedPlantDotsById = useMemo(() => {
+    const map: Record<string, { plantedCount: number; perennialCount: number; plannedCount: number }> = {};
+    for (const bed of bedsQuery.data ?? []) {
+      const plantedEntries = growList.filter((entry) => entry.bedId === bed.id && entry.status === "already_growing");
+      const plannedEntries = growList.filter((entry) => entry.bedId === bed.id && entry.status === "wanted");
+      map[bed.id] = {
+        plantedCount: plantedEntries.length,
+        perennialCount: plantedEntries.filter((entry) => entry.isPerennial).length,
+        plannedCount: plannedEntries.length,
+      };
+    }
+    return map;
+  }, [bedsQuery.data, growList]);
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
@@ -332,6 +345,7 @@ export default function TasksTabScreen() {
             ? { previewRatio: currentGarden.scaleCalibration.baseHeight / currentGarden.scaleCalibration.baseWidth }
             : {})}
           infoByBedId={bedPreviewInfoById}
+          bedPlantDotsById={bedPlantDotsById}
           title="Bed Layout"
           subtitle="Use this to match bed names when completing planting tasks."
         />
