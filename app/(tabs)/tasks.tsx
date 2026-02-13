@@ -14,6 +14,7 @@ import { fetchDailyForecast } from "@/features/weather/services/openMeteo";
 import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { AppButton } from "@/ui/components/AppButton";
 
 const gardenRepository = new SqliteGardenRepository();
 const bedRepository = new SqliteBedRepository();
@@ -248,14 +249,13 @@ export default function TasksTabScreen() {
 
       {gardensQuery.isLoading && <Text style={[styles.empty, { color: theme.textMuted }]}>Loading gardens...</Text>}
       {activeGardenId && (
-        <Pressable
-          style={[styles.button, { backgroundColor: theme.secondaryActionBackground }]}
+        <AppButton
+          label={generateMutation.isPending ? "Refreshing tasks..." : "Refresh tasks"}
+          variant="secondary"
+          size="sm"
+          style={styles.button}
           onPress={() => generateMutation.mutate(activeGardenId)}
-        >
-          <Text style={[styles.buttonText, { color: theme.secondaryActionText }]}>
-            {generateMutation.isPending ? "Refreshing tasks..." : "Refresh tasks"}
-          </Text>
-        </Pressable>
+        />
       )}
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
@@ -284,23 +284,25 @@ export default function TasksTabScreen() {
               })}
             </View>
             <View style={styles.actions}>
-              <Pressable
-                style={[styles.actionButton, { backgroundColor: theme.secondaryActionBackground }]}
+              <AppButton
+                label="Cancel"
+                variant="secondary"
+                size="sm"
+                style={styles.actionButton}
                 onPress={() => setBedPicker(null)}
-              >
-                <Text style={[styles.actionText, { color: theme.secondaryActionText }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.actionButton, { backgroundColor: theme.primaryActionBackground }]}
+              />
+              <AppButton
+                label="Done + Plant"
+                variant="primary"
+                size="sm"
+                style={styles.actionButton}
                 onPress={() => {
                   if (!bedPicker.bedId) return;
                   statusMutation.mutate({ task: bedPicker.task, status: "done", selectedBedId: bedPicker.bedId });
                   setBedPicker(null);
                 }}
                 disabled={!bedPicker.bedId || statusMutation.isPending}
-              >
-                <Text style={[styles.actionText, { color: theme.primaryActionText }]}>Done + Plant</Text>
-              </Pressable>
+              />
             </View>
           </View>
         ) : null}
@@ -315,20 +317,22 @@ export default function TasksTabScreen() {
                 {task.detail ? <Text style={[styles.taskMeta, { color: theme.textMuted }]}>{task.detail}</Text> : null}
               </View>
               <View style={styles.actions}>
-                <Pressable
-                  style={[styles.actionButton, { backgroundColor: theme.primaryActionBackground }]}
+                <AppButton
+                  label="Done"
+                  variant="primary"
+                  size="sm"
+                  style={styles.actionButton}
                   onPress={() => {
                     void handleDonePress(task);
                   }}
-                >
-                  <Text style={[styles.actionText, { color: theme.primaryActionText }]}>Done</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.actionButton, { backgroundColor: theme.dangerActionBackground }]}
+                />
+                <AppButton
+                  label="Dismiss"
+                  variant="danger"
+                  size="sm"
+                  style={styles.actionButton}
                   onPress={() => statusMutation.mutate({ task, status: "dismissed" })}
-                >
-                  <Text style={[styles.actionText, { color: theme.dangerActionText }]}>Dismiss</Text>
-                </Pressable>
+                />
               </View>
             </View>
           ))
@@ -355,8 +359,11 @@ export default function TasksTabScreen() {
         <View style={styles.historyHeader}>
           <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>History</Text>
           {activeGardenId && doneTasks.length > 0 && (
-            <Pressable
-              style={[styles.actionButton, { backgroundColor: theme.dangerActionBackground }]}
+            <AppButton
+              label={clearHistoryMutation.isPending ? "Clearing..." : "Clear history"}
+              variant="danger"
+              size="sm"
+              style={styles.actionButton}
               onPress={() =>
                 Alert.alert("Clear task history", `Delete ${doneTasks.length} completed/dismissed tasks?`, [
                   { text: "Cancel", style: "cancel" },
@@ -364,11 +371,7 @@ export default function TasksTabScreen() {
                 ])
               }
               disabled={clearHistoryMutation.isPending}
-            >
-              <Text style={[styles.actionText, { color: theme.dangerActionText }]}> 
-                {clearHistoryMutation.isPending ? "Clearing..." : "Clear history"}
-              </Text>
-            </Pressable>
+            />
           )}
         </View>
         {doneTasks.length === 0 ? (
@@ -408,8 +411,7 @@ const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 8 },
   cardTitle: { fontWeight: "800" },
   empty: { fontSize: 12 },
-  button: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, alignSelf: "flex-start" },
-  buttonText: { fontWeight: "700", fontSize: 12 },
+  button: { alignSelf: "flex-start" },
   taskRow: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, gap: 6 },
   taskMain: { gap: 2 },
   taskTitle: { fontWeight: "700", fontSize: 14 },
@@ -418,6 +420,5 @@ const styles = StyleSheet.create({
   bedPickerBox: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 8 },
   bedPickerChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   historyHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  actionButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  actionText: { fontSize: 12, fontWeight: "700" },
+  actionButton: {},
 });

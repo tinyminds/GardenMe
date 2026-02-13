@@ -8,7 +8,7 @@ import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedReposi
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { useTheme } from "@/ui/theme/ThemeProvider";
-import { ChoiceChip } from "@/ui/components/ChoiceChip";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
 
 const bedRepository = new SqliteBedRepository();
 const featureRepository = new SqliteGardenFeatureRepository();
@@ -82,25 +82,17 @@ export default function PlanTabScreen() {
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Active Garden</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-          {gardens.map((garden) => {
-            const selected = garden.id === activeGardenId;
-            return (
-              <ChoiceChip
-                key={garden.id}
-                label={garden.name}
-                selected={selected}
-                onPress={() => setSelectedGardenId(garden.id)}
-              />
-            );
-          })}
-        </ScrollView>
+        <SegmentedChoice
+          options={gardens.map((garden) => ({ id: garden.id, label: garden.name }))}
+          selectedId={activeGardenId}
+          onSelect={setSelectedGardenId}
+        />
       </View>
 
       {!selectedGarden ? (
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.state, { color: theme.textMuted }]}>No gardens yet.</Text>
-          <Link href="/gardens/new" style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+          <Link href="/gardens/new" style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
             Create Garden
           </Link>
         </View>
@@ -163,6 +155,7 @@ function StepCard(props: { title: string; helper: string; href: string; state: S
           styles.primaryLink,
           {
             backgroundColor: props.state === "not_ready" ? theme.disabledActionBackground : theme.primaryActionBackground,
+            borderColor: props.state === "not_ready" ? theme.disabledActionBackground : theme.primaryActionBackground,
             color: props.state === "not_ready" ? theme.disabledActionText : theme.primaryActionText,
           },
         ]}
@@ -197,6 +190,7 @@ const styles = StyleSheet.create({
   state: {},
   primaryLink: {
     fontWeight: "800",
+    borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,

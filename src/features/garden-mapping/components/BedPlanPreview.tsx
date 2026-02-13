@@ -106,13 +106,26 @@ export function BedPlanPreview(props: {
             <Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>+</Text>
           </Pressable>
         </View>
-        <Pressable
-          style={[styles.toggleChip, { backgroundColor: showBedNames ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-          onPress={() => setShowBedNames((prev) => !prev)}
-        >
-          <Text style={[styles.toggleChipText, { color: showBedNames ? theme.primaryActionText : theme.secondaryActionText }]}>
-            Bed names {showBedNames ? "on" : "off"}
-          </Text>
+        <Pressable style={styles.bedNamesToggleWrap} onPress={() => setShowBedNames((prev) => !prev)}>
+          <Text style={[styles.bedNamesToggleLabel, { color: theme.textPrimary }]}>Bed names</Text>
+          <View
+            style={[
+              styles.bedNamesToggleTrack,
+              {
+                backgroundColor: showBedNames ? theme.toggleOnBackground : theme.toggleOffBackground,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.bedNamesToggleThumb,
+                {
+                  backgroundColor: theme.toggleThumbColor,
+                  marginLeft: showBedNames ? 20 : 2,
+                },
+              ]}
+            />
+          </View>
         </Pressable>
       </View>
       <View
@@ -503,8 +516,10 @@ const styles = StyleSheet.create({
   zoomButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   zoomButtonText: { fontSize: 18, fontWeight: "700" },
   zoomText: { minWidth: 52, textAlign: "center", fontWeight: "700" },
-  toggleChip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  toggleChipText: { fontWeight: "700" },
+  bedNamesToggleWrap: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
+  bedNamesToggleLabel: { fontWeight: "700", fontSize: 12 },
+  bedNamesToggleTrack: { width: 42, height: 24, borderRadius: 999, paddingVertical: 2, paddingHorizontal: 2, justifyContent: "center" },
+  bedNamesToggleThumb: { width: 18, height: 18, borderRadius: 999 },
   previewViewport: { borderRadius: 12, overflow: "hidden", borderWidth: 1 },
   previewCanvas: { borderRadius: 12, overflow: "hidden", position: "relative" },
   bedNameBadge: {

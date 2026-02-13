@@ -6,6 +6,7 @@ import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGarden
 import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { SelectionRow } from "@/ui/components/SelectionRow";
 
 const gardenRepository = new SqliteGardenRepository();
 
@@ -63,49 +64,23 @@ export default function SettingsTabScreen() {
           {(gardensQuery.data ?? []).map((garden) => {
             const selected = garden.id === activeGardenId;
             return (
-              <Pressable
+              <SelectionRow
                 key={garden.id}
-                style={[
-                  styles.optionRow,
-                  {
-                    borderColor: theme.borderColor,
-                    backgroundColor: selected ? theme.primaryActionBackground : theme.appBackground,
-                  },
-                ]}
+                label={garden.name}
+                selected={selected}
                 onPress={() => setActiveGarden(garden.id)}
-              >
-                <Text style={{ color: selected ? theme.primaryActionText : theme.textPrimary, fontWeight: "700" }}>
-                  {garden.name}
-                </Text>
-              </Pressable>
+              />
             );
           })}
         </View>
 
         <View style={[styles.group, { borderColor: theme.borderColor }]}>
           <Text style={[styles.groupTitle, { color: theme.textPrimary }]}>Notifications</Text>
-          <Pressable
-            accessibilityRole="button"
+          <SelectionRow
+            label={preferencesQuery.data?.notificationsEnabled ? "Enabled" : "Disabled"}
+            selected={Boolean(preferencesQuery.data?.notificationsEnabled)}
             onPress={toggleNotifications}
-            style={[
-              styles.optionRow,
-              {
-                borderColor: theme.borderColor,
-                backgroundColor: preferencesQuery.data?.notificationsEnabled
-                  ? theme.primaryActionBackground
-                  : theme.appBackground,
-              },
-            ]}
-          >
-            <Text
-              style={{
-                color: preferencesQuery.data?.notificationsEnabled ? theme.primaryActionText : theme.textPrimary,
-                fontWeight: "700",
-              }}
-            >
-              {preferencesQuery.data?.notificationsEnabled ? "Enabled" : "Disabled"}
-            </Text>
-          </Pressable>
+          />
         </View>
 
         <Pressable
@@ -134,12 +109,6 @@ const styles = StyleSheet.create({
   },
   groupTitle: { fontWeight: "800", fontSize: 14 },
   groupMeta: { fontSize: 12 },
-  optionRow: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-  },
   linkRow: {
     borderWidth: 1,
     borderRadius: 10,

@@ -872,32 +872,32 @@ export default function BedsListScreen() {
         <Text style={[styles.title, { color: theme.textPrimary }]}>Bed Planner</Text>
         <Text style={[styles.subtitle, { color: theme.textMuted }]}>Review beds and place crops from your grow list.</Text>
         <View style={styles.statsRow}>
-          <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
-            <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Grow list {growListCount}</Text>
+          <View style={[styles.statChip, { backgroundColor: theme.statusChipBackground }]}>
+            <Text style={[styles.statChipText, { color: theme.statusChipText }]}>Grow list {growListCount}</Text>
           </View>
-          <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
-            <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Planned {plannedCount}</Text>
+          <View style={[styles.statChip, { backgroundColor: theme.statusChipBackground }]}>
+            <Text style={[styles.statChipText, { color: theme.statusChipText }]}>Planned {plannedCount}</Text>
           </View>
-          <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
-            <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Planted {plantedCount}</Text>
+          <View style={[styles.statChip, { backgroundColor: theme.statusChipBackground }]}>
+            <Text style={[styles.statChipText, { color: theme.statusChipText }]}>Planted {plantedCount}</Text>
           </View>
         </View>
         <View style={styles.row}>
           <Pressable
-            style={[styles.toggleChip, { backgroundColor: plannerMode === "list" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+            style={[styles.toggleChip, { backgroundColor: plannerMode === "list" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]}
             onPress={() => setPlannerMode("list")}
           >
-            <Text style={[styles.toggleChipText, { color: plannerMode === "list" ? theme.primaryActionText : theme.secondaryActionText }]}>List</Text>
+            <Text style={[styles.toggleChipText, { color: plannerMode === "list" ? theme.choiceControlActiveText : theme.choiceControlText }]}>List</Text>
           </Pressable>
           <Pressable
-            style={[styles.toggleChip, { backgroundColor: plannerMode === "visual" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+            style={[styles.toggleChip, { backgroundColor: plannerMode === "visual" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]}
             onPress={() => setPlannerMode("visual")}
           >
-            <Text style={[styles.toggleChipText, { color: plannerMode === "visual" ? theme.primaryActionText : theme.secondaryActionText }]}>Visual</Text>
+            <Text style={[styles.toggleChipText, { color: plannerMode === "visual" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Visual</Text>
           </Pressable>
           {plannerMode === "visual" && (
-            <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
-              <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Unplanned {unplannedCount}</Text>
+            <View style={[styles.statChip, { backgroundColor: theme.statusChipBackground }]}>
+              <Text style={[styles.statChipText, { color: theme.statusChipText }]}>Unplanned {unplannedCount}</Text>
             </View>
           )}
         </View>
@@ -958,18 +958,18 @@ export default function BedsListScreen() {
               <View style={styles.row}>
                 <Text style={[styles.meta, { color: theme.textMuted }]}>Perennial bed:</Text>
                 <Pressable
-                  style={[styles.toggleChip, { backgroundColor: card.bed.containsPerennials ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                  style={[styles.toggleChip, { backgroundColor: card.bed.containsPerennials ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]}
                   onPress={() => updateBedPerennialMutation.mutate({ bedId: card.bed.id, containsPerennials: true })}
                   disabled={updateBedPerennialMutation.isPending}
                 >
-                  <Text style={[styles.toggleChipText, { color: card.bed.containsPerennials ? theme.primaryActionText : theme.secondaryActionText }]}>Yes</Text>
+                  <Text style={[styles.toggleChipText, { color: card.bed.containsPerennials ? theme.choiceControlActiveText : theme.choiceControlText }]}>Yes</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.toggleChip, { backgroundColor: !card.bed.containsPerennials ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                  style={[styles.toggleChip, { backgroundColor: !card.bed.containsPerennials ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]}
                   onPress={() => updateBedPerennialMutation.mutate({ bedId: card.bed.id, containsPerennials: false })}
                   disabled={updateBedPerennialMutation.isPending}
                 >
-                  <Text style={[styles.toggleChipText, { color: !card.bed.containsPerennials ? theme.primaryActionText : theme.secondaryActionText }]}>No</Text>
+                  <Text style={[styles.toggleChipText, { color: !card.bed.containsPerennials ? theme.choiceControlActiveText : theme.choiceControlText }]}>No</Text>
                 </Pressable>
               </View>
               <Text style={[styles.meta, { color: theme.textMuted }]}>
@@ -1003,8 +1003,8 @@ export default function BedsListScreen() {
                 <View style={styles.block}>
                   <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Spare space</Text>
                   <View style={styles.row}>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setSpareSpace(card.bed.id, true)}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>Yes</Text></Pressable>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setSpareSpace(card.bed.id, false)}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>No</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setSpareSpace(card.bed.id, true)}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.choiceControlActiveText : theme.choiceControlText }]}>Yes</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setSpareSpace(card.bed.id, false)}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.choiceControlActiveText : theme.choiceControlText }]}>No</Text></Pressable>
                   </View>
                 </View>
               )}
@@ -1244,8 +1244,8 @@ export default function BedsListScreen() {
                   </Text>
                   <View style={styles.row}>
                     <Text style={[styles.blockText, { color: theme.textMuted }]}>Spare space</Text>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setSpareSpace(card.bed.id, true)}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>Yes</Text></Pressable>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setSpareSpace(card.bed.id, false)}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.primaryActionText : theme.secondaryActionText }]}>No</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setSpareSpace(card.bed.id, true)}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.choiceControlActiveText : theme.choiceControlText }]}>Yes</Text></Pressable>
+                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setSpareSpace(card.bed.id, false)}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.choiceControlActiveText : theme.choiceControlText }]}>No</Text></Pressable>
                   </View>
                   <View style={styles.block}>
                     <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Growing now</Text>
@@ -1447,21 +1447,21 @@ export default function BedsListScreen() {
             </Text>
             <View style={styles.row}>
               <Text style={[styles.blockText, { color: theme.textMuted }]}>Outcome:</Text>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "harvested" ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "harvested" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "harvested" ? theme.primaryActionText : theme.secondaryActionText }]}>Harvested</Text></Pressable>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "done" ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "done" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "done" ? theme.primaryActionText : theme.secondaryActionText }]}>Done</Text></Pressable>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "dead" ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "dead" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "dead" ? theme.primaryActionText : theme.secondaryActionText }]}>Lost</Text></Pressable>
+              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "harvested" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "harvested" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "harvested" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Harvested</Text></Pressable>
+              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "done" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "done" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "done" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Done</Text></Pressable>
+              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "dead" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "dead" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "dead" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Lost</Text></Pressable>
             </View>
             <View style={styles.row}>
               <Text style={[styles.blockText, { color: theme.textMuted }]}>Keep in bed:</Text>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.keepInBed ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, keepInBed: !prev.keepInBed } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.keepInBed ? theme.primaryActionText : theme.secondaryActionText }]}>{finishDialog.keepInBed ? "Yes" : "No"}</Text></Pressable>
+              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.keepInBed ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, keepInBed: !prev.keepInBed } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.keepInBed ? theme.choiceControlActiveText : theme.choiceControlText }]}>{finishDialog.keepInBed ? "Yes" : "No"}</Text></Pressable>
             </View>
             <View style={styles.row}>
               {finishDialog.endState === "harvested" && (
-                <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.goodHarvest ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, goodHarvest: !prev.goodHarvest } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.goodHarvest ? theme.primaryActionText : theme.secondaryActionText }]}>Good harvest</Text></Pressable>
+                <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.goodHarvest ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, goodHarvest: !prev.goodHarvest } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.goodHarvest ? theme.choiceControlActiveText : theme.choiceControlText }]}>Good harvest</Text></Pressable>
               )}
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.fertilized ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, fertilized: !prev.fertilized } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.fertilized ? theme.primaryActionText : theme.secondaryActionText }]}>Fertilized</Text></Pressable>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.bugsObserved ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, bugsObserved: !prev.bugsObserved } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.bugsObserved ? theme.primaryActionText : theme.secondaryActionText }]}>Bugs</Text></Pressable>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.diseaseObserved ? theme.primaryActionBackground : theme.secondaryActionBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, diseaseObserved: !prev.diseaseObserved } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.diseaseObserved ? theme.primaryActionText : theme.secondaryActionText }]}>Disease</Text></Pressable>
+              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.fertilized ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, fertilized: !prev.fertilized } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.fertilized ? theme.choiceControlActiveText : theme.choiceControlText }]}>Fertilized</Text></Pressable>
+              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.bugsObserved ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, bugsObserved: !prev.bugsObserved } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.bugsObserved ? theme.choiceControlActiveText : theme.choiceControlText }]}>Bugs</Text></Pressable>
+              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.diseaseObserved ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, diseaseObserved: !prev.diseaseObserved } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.diseaseObserved ? theme.choiceControlActiveText : theme.choiceControlText }]}>Disease</Text></Pressable>
             </View>
             {finishDialog.bugsObserved && (
               <TextInput
@@ -1866,26 +1866,26 @@ const styles = StyleSheet.create({
   growingRow: { gap: 6, borderWidth: 1, borderColor: "#DDE9DA", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9 },
   growingMain: { gap: 2 },
   growingName: { color: "#1E3E2E", fontWeight: "700" },
-  finishChip: { backgroundColor: "#E7EFE5", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  finishChip: { backgroundColor: "#E7EFE5", borderWidth: 1, borderColor: "#A9C3B0", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   finishChipText: { color: "#2A5E40", fontWeight: "700", fontSize: 12 },
-  finishChipDanger: { backgroundColor: "#F3E5E2", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  finishChipDanger: { backgroundColor: "#F3E5E2", borderWidth: 1, borderColor: "#D7A59C", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   finishChipDangerText: { color: "#8C3A2D", fontWeight: "700", fontSize: 12 },
   historyHeader: { backgroundColor: "#F4F8F2", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6 },
   historyRow: { borderWidth: 1, borderColor: "#E2EBDF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, gap: 2 },
   historyName: { color: "#274634", fontWeight: "700" },
   historyMeta: { color: "#587261", fontSize: 12 },
-  toggleChip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: "#DFEADF" },
+  toggleChip: { borderRadius: 10, borderWidth: 1, borderColor: "#9DB8A6", paddingHorizontal: 12, paddingVertical: 7, backgroundColor: "#D8E4D8" },
   toggleChipActive: { backgroundColor: "#2F6F4F" },
   toggleChipText: { color: "#2D4B3C", fontWeight: "700" },
   toggleChipTextActive: { color: "#FFFFFF" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   planChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#EAF2E7", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   planChipText: { color: "#2A5E40", fontWeight: "700", fontSize: 12 },
-  planChipPlantButton: { backgroundColor: "#D7E8D8", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  planChipPlantButton: { backgroundColor: "#D7E8D8", borderWidth: 1, borderColor: "#9DB8A6", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   planChipPlantButtonText: { color: "#1F5A3B", fontWeight: "700", fontSize: 11 },
-  planChipButton: { backgroundColor: "#F3E5E2", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  planChipButton: { backgroundColor: "#F3E5E2", borderWidth: 1, borderColor: "#D7A59C", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   planChipButtonText: { color: "#8C3A2D", fontWeight: "700", fontSize: 11 },
-  smallActionButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  smallActionButton: { borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", paddingHorizontal: 10, paddingVertical: 6 },
   smallActionButtonText: { fontWeight: "700", fontSize: 11 },
   suggestionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderWidth: 1, borderColor: "#DDE9DA", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9 },
   suggestionMain: { flex: 1, gap: 2 },
@@ -1902,9 +1902,9 @@ const styles = StyleSheet.create({
   whyPanel: { marginTop: 4, borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, gap: 2 },
   whyLine: { fontSize: 11 },
   suggestionActions: { alignItems: "flex-end", gap: 8 },
-  suggestionButton: { backgroundColor: "#E7EFE5", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  suggestionButton: { backgroundColor: "#E7EFE5", borderWidth: 1, borderColor: "#A9C3B0", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   suggestionButtonText: { color: "#2A5E40", fontWeight: "700", fontSize: 12 },
-  optionChip: { backgroundColor: "#D9E7D8", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  optionChip: { backgroundColor: "#D9E7D8", borderWidth: 1, borderColor: "#9DB8A6", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
   optionChipText: { color: "#264433", textTransform: "capitalize", fontSize: 12 },
   optionsScroll: { maxHeight: 170 },
   photoStrip: { gap: 8, paddingRight: 6 },
@@ -1934,7 +1934,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   undoToastText: { flex: 1, fontSize: 12, fontWeight: "600" },
-  undoButton: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  undoButton: { borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", paddingHorizontal: 12, paddingVertical: 7 },
   undoButtonText: { fontWeight: "700", fontSize: 12 },
   dialogOverlay: {
     position: "absolute",
@@ -1960,3 +1960,4 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
 });
+

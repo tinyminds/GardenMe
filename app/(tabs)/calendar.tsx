@@ -12,8 +12,9 @@ import { fetchDailyForecast } from "@/features/weather/services/openMeteo";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGardenTaskRepository";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
-import { ChoiceChip } from "@/ui/components/ChoiceChip";
 import { FilterPill } from "@/ui/components/FilterPill";
+import { AppButton } from "@/ui/components/AppButton";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 
 const wishlistRepository = new SqliteGardenCropWishlistRepository();
@@ -214,11 +215,11 @@ export default function CalendarTabScreen() {
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}> 
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Garden</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-          {gardens.map((garden) => (
-            <ChoiceChip key={garden.id} label={garden.name} selected={garden.id === activeGardenId} onPress={() => setSelectedGardenId(garden.id)} />
-          ))}
-        </ScrollView>
+        <SegmentedChoice
+          options={gardens.map((garden) => ({ id: garden.id, label: garden.name }))}
+          selectedId={activeGardenId}
+          onSelect={setSelectedGardenId}
+        />
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}> 
@@ -232,8 +233,11 @@ export default function CalendarTabScreen() {
         </View>
 
         <View style={styles.rowBetween}>
-          <Pressable
-            style={[styles.navButton, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
+          <AppButton
+            label="Prev"
+            size="sm"
+            variant="secondary"
+            style={styles.navButton}
             onPress={() =>
               setFocusDate((prev) =>
                 viewMode === "year"
@@ -243,12 +247,13 @@ export default function CalendarTabScreen() {
                     : new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
               )
             }
-          >
-            <Text style={[styles.navButtonText, { color: theme.textPrimary }]}>Prev</Text>
-          </Pressable>
+          />
           <Text style={[styles.monthTitle, { color: theme.textPrimary }]}>{headerLabel}</Text>
-          <Pressable
-            style={[styles.navButton, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
+          <AppButton
+            label="Next"
+            size="sm"
+            variant="secondary"
+            style={styles.navButton}
             onPress={() =>
               setFocusDate((prev) =>
                 viewMode === "year"
@@ -258,24 +263,38 @@ export default function CalendarTabScreen() {
                     : new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
               )
             }
-          >
-            <Text style={[styles.navButtonText, { color: theme.textPrimary }]}>Next</Text>
-          </Pressable>
+          />
         </View>
 
         <View style={styles.rowBetween}>
-          <Pressable
-            style={[styles.filterButton, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
+          <AppButton
+            label={showFilters ? "Hide filters" : "Show filters"}
+            size="sm"
+            variant="neutral"
+            style={[
+              styles.filterButton,
+              {
+                backgroundColor: theme.filterControlBackground,
+                borderColor: theme.filterControlBorder,
+              },
+            ]}
+            textStyle={{ color: theme.filterControlText }}
             onPress={() => setShowFilters((prev) => !prev)}
-          >
-            <Text style={[styles.filterButtonText, { color: theme.textPrimary }]}>{showFilters ? "Hide filters" : "Show filters"}</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.filterButton, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}
+          />
+          <AppButton
+            label="Show all"
+            size="sm"
+            variant="neutral"
+            style={[
+              styles.filterButton,
+              {
+                backgroundColor: theme.filterControlBackground,
+                borderColor: theme.filterControlBorder,
+              },
+            ]}
+            textStyle={{ color: theme.filterControlText }}
             onPress={() => setFilters(Object.fromEntries(FILTER_ORDER.map((kind) => [kind, true])) as Record<CalendarVisualKind, boolean>)}
-          >
-            <Text style={[styles.filterButtonText, { color: theme.textPrimary }]}>Show all</Text>
-          </Pressable>
+          />
         </View>
 
         {showFilters && (
@@ -484,12 +503,10 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   helper: { fontSize: 12 },
 
-  navButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  navButtonText: { fontWeight: "700", fontSize: 12 },
+  navButton: { borderRadius: 999, minWidth: 68 },
   monthTitle: { fontWeight: "800", fontSize: 15 },
 
-  filterButton: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  filterButtonText: { fontWeight: "700", fontSize: 12 },
+  filterButton: { borderRadius: 10 },
   filterPanel: { borderWidth: 1, borderRadius: 10, overflow: "hidden" },
   filterRow: { flexDirection: "row", alignItems: "center", gap: 8, borderTopWidth: 1, paddingHorizontal: 8, paddingVertical: 8 },
   checkbox: { width: 18, height: 18, borderWidth: 1, borderRadius: 4, alignItems: "center", justifyContent: "center" },

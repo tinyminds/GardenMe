@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import { useState } from "react";
 import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as FileSystem from "expo-file-system";
@@ -11,11 +11,14 @@ import { SqliteGardenRepository, type GardenBackupBundle } from "@/infra/reposit
 import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { StatusChip } from "@/ui/components/StatusChip";
+import { AppButton } from "@/ui/components/AppButton";
 
 const repository = new SqliteGardenRepository();
 
 export default function GardensTabScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
   const { data, isLoading, isError } = useGardensQuery();
   const gardens = data ?? [];
   const summariesQuery = useGardenSummariesQuery(gardens);
@@ -24,10 +27,12 @@ export default function GardensTabScreen() {
   const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
   const [cloneDraft, setCloneDraft] = useState<{ id: string; sourceName: string; name: string } | null>(null);
   const [importDraft, setImportDraft] = useState<{ bundle: GardenBackupBundle; name: string } | null>(null);
+  const [deleteDraft, setDeleteDraft] = useState<{ id: string; name: string } | null>(null);
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => repository.delete(id),
     onSuccess: async () => {
+      setDeleteDraft(null);
       await queryClient.invalidateQueries({ queryKey: ["gardens"] });
     },
   });
@@ -78,10 +83,7 @@ export default function GardensTabScreen() {
   });
 
   const confirmDelete = (id: string, name: string) => {
-    Alert.alert("Delete garden", `Delete "${name}" and all beds/features?`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => deleteMutation.mutate(id) },
-    ]);
+    setDeleteDraft({ id, name });
   };
 
   const confirmClone = (id: string, name: string) => {
@@ -137,20 +139,32 @@ export default function GardensTabScreen() {
     importBackupMutation.mutate({ bundle: importDraft.bundle, name: nextName });
   };
 
+  const submitDelete = () => {
+    if (!deleteDraft || deleteMutation.isPending) return;
+    deleteMutation.mutate(deleteDraft.id);
+  };
+
   if (isLoading) return <Text style={[styles.state, { color: theme.textMuted }]}>Loading gardens...</Text>;
   if (isError) return <Text style={[styles.state, { color: theme.textMuted }]}>Could not load gardens.</Text>;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.appBackground }]}>
       <View style={styles.topActions}>
-        <Link href="/gardens/new" style={[styles.addLink, { color: theme.primaryActionBackground }]}>+ New Garden</Link>
-        <Pressable
-          style={[styles.importButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+        <AppButton
+          label="+ New Garden"
+          variant="secondary"
+          style={styles.topActionButton}
+          textStyle={styles.topActionButtonText}
+          onPress={() => router.push("/gardens/new")}
+        />
+        <AppButton
+          label="Import backup"
+          variant="secondary"
+          style={styles.topActionButton}
+          textStyle={styles.topActionButtonText}
           onPress={() => void startImportBackup()}
           disabled={importBackupMutation.isPending || cloneMutation.isPending || deleteMutation.isPending}
-        >
-          <Text style={[styles.importButtonText, { color: theme.secondaryActionText }]}>Import backup</Text>
-        </Pressable>
+        />
       </View>
       <Text style={[styles.noteText, { color: theme.textMuted }]}>Backups do not include bed photos.</Text>
       {cloneMutation.isPending ? (
@@ -171,7 +185,7 @@ export default function GardensTabScreen() {
               selectedGardenId === item.id && styles.cardActive,
             ]}
           >
-            <Link href={`/gardens/${item.id}`} asChild>
+            <Link href="/(tabs)/plan" asChild>
               <Pressable
                 style={styles.cardMain}
                 onPress={() => {
@@ -182,9 +196,9 @@ export default function GardensTabScreen() {
                 {item.locationLabel && <Text style={[styles.locationText, { color: theme.textMuted }]}>{item.locationLabel}</Text>}
                 <Text style={[styles.coordsText, { color: theme.infoText }]}>Coordinates: {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}</Text>
                 <View style={styles.metaRow}>
-                  <Text style={[styles.metaChip, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Area {item.scaleCalibration?.boundaryAreaSqM ? `${item.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}</Text>
-                  <Text style={[styles.metaChip, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Beds {summaries[item.id]?.bedCount ?? 0}</Text>
-                  <Text style={[styles.metaChip, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>Features {summaries[item.id]?.featureCount ?? 0}</Text>
+                  <StatusChip label={`Area ${item.scaleCalibration?.boundaryAreaSqM ? `${item.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}`} />
+                  <StatusChip label={`Beds ${summaries[item.id]?.bedCount ?? 0}`} />
+                  <StatusChip label={`Features ${summaries[item.id]?.featureCount ?? 0}`} />
                 </View>
                 <Text style={[styles.statusText, { color: theme.textMuted }]}>
                   {item.scaleCalibration
@@ -193,24 +207,26 @@ export default function GardensTabScreen() {
                       : "Setup done, ready to design"
                     : "Needs setup"}
                 </Text>
+                <View style={styles.cardActionRow}>
+                  <Pressable
+                    style={[styles.cloneButton, { borderColor: theme.borderColor, backgroundColor: theme.secondaryActionBackground }]}
+                    onPress={() => confirmClone(item.id, item.name)}
+                    disabled={cloneMutation.isPending || deleteMutation.isPending || exportBackupMutation.isPending}
+                  >
+                    <Text style={[styles.cloneButtonText, { color: theme.secondaryActionText }]}>Copy</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.backupButton, { borderColor: theme.borderColor, backgroundColor: theme.secondaryActionBackground }]}
+                    onPress={() => exportBackupMutation.mutate({ id: item.id, name: item.name })}
+                    disabled={cloneMutation.isPending || deleteMutation.isPending || exportBackupMutation.isPending}
+                  >
+                    <Text style={[styles.cloneButtonText, { color: theme.secondaryActionText }]}>
+                      {exportBackupMutation.isPending ? "..." : "Backup"}
+                    </Text>
+                  </Pressable>
+                </View>
               </Pressable>
             </Link>
-            <Pressable
-              style={[styles.cloneButton, { borderColor: theme.borderColor, backgroundColor: theme.secondaryActionBackground }]}
-              onPress={() => confirmClone(item.id, item.name)}
-              disabled={cloneMutation.isPending || deleteMutation.isPending || exportBackupMutation.isPending}
-            >
-              <Text style={[styles.cloneButtonText, { color: theme.secondaryActionText }]}>Copy</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.backupButton, { borderColor: theme.borderColor, backgroundColor: theme.secondaryActionBackground }]}
-              onPress={() => exportBackupMutation.mutate({ id: item.id, name: item.name })}
-              disabled={cloneMutation.isPending || deleteMutation.isPending || exportBackupMutation.isPending}
-            >
-              <Text style={[styles.cloneButtonText, { color: theme.secondaryActionText }]}>
-                {exportBackupMutation.isPending ? "..." : "Backup"}
-              </Text>
-            </Pressable>
             <Pressable
               style={[styles.deleteButton, { borderColor: theme.borderColor, backgroundColor: theme.dangerActionBackground }]}
               onPress={() => confirmDelete(item.id, item.name)}
@@ -246,22 +262,18 @@ export default function GardensTabScreen() {
               ]}
             />
             <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalButtonSecondary, { backgroundColor: theme.secondaryActionBackground }]}
+              <AppButton
+                label="Cancel"
+                variant="danger"
                 onPress={() => setCloneDraft(null)}
                 disabled={cloneMutation.isPending}
-              >
-                <Text style={[styles.modalButtonText, { color: theme.secondaryActionText }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButtonPrimary, { backgroundColor: theme.primaryActionBackground }]}
+              />
+              <AppButton
+                label={cloneMutation.isPending ? "Cloning..." : "Clone"}
+                variant="secondary"
                 onPress={submitClone}
                 disabled={cloneMutation.isPending}
-              >
-                <Text style={[styles.modalButtonText, { color: theme.primaryActionText }]}>
-                  {cloneMutation.isPending ? "Cloning..." : "Clone"}
-                </Text>
-              </Pressable>
+              />
             </View>
           </View>
         </View>
@@ -290,22 +302,42 @@ export default function GardensTabScreen() {
               ]}
             />
             <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalButtonSecondary, { backgroundColor: theme.secondaryActionBackground }]}
+              <AppButton
+                label="Cancel"
+                variant="danger"
                 onPress={() => setImportDraft(null)}
                 disabled={importBackupMutation.isPending}
-              >
-                <Text style={[styles.modalButtonText, { color: theme.secondaryActionText }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButtonPrimary, { backgroundColor: theme.primaryActionBackground }]}
+              />
+              <AppButton
+                label={importBackupMutation.isPending ? "Importing..." : "Import"}
+                variant="secondary"
                 onPress={submitImport}
                 disabled={importBackupMutation.isPending}
-              >
-                <Text style={[styles.modalButtonText, { color: theme.primaryActionText }]}>
-                  {importBackupMutation.isPending ? "Importing..." : "Import"}
-                </Text>
-              </Pressable>
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={Boolean(deleteDraft)} transparent animationType="fade" onRequestClose={() => setDeleteDraft(null)}>
+        <View style={[styles.modalBackdrop, { backgroundColor: theme.modalBackdrop }]}>
+          <View style={[styles.modalCard, { backgroundColor: theme.modalSurfaceBackground, borderColor: theme.modalSurfaceBorder }]}>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Delete Garden</Text>
+            <Text style={[styles.modalText, { color: theme.textMuted }]}>
+              {deleteDraft ? `Delete "${deleteDraft.name}" and all beds/features?` : ""}
+            </Text>
+            <View style={styles.modalActions}>
+              <AppButton
+                label="Cancel"
+                variant="secondary"
+                onPress={() => setDeleteDraft(null)}
+                disabled={deleteMutation.isPending}
+              />
+              <AppButton
+                label={deleteMutation.isPending ? "Deleting..." : "Delete"}
+                variant="danger"
+                onPress={submitDelete}
+                disabled={deleteMutation.isPending}
+              />
             </View>
           </View>
         </View>
@@ -316,11 +348,9 @@ export default function GardensTabScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
-  topActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  addLink: { marginBottom: 12, fontWeight: "700" },
+  topActions: { gap: 8, marginBottom: 12 },
+  topActionButton: { width: "100%" },
   noteText: { fontSize: 12, marginTop: -8, marginBottom: 8 },
-  importButton: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
-  importButtonText: { fontWeight: "700", fontSize: 12 },
   card: {
     position: "relative",
     borderRadius: 12,
@@ -329,40 +359,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   cardActive: { borderWidth: 2 },
-  cardMain: { padding: 14, paddingRight: 164, gap: 7 },
+  cardMain: { padding: 14, paddingRight: 50, gap: 7 },
   name: { fontSize: 18, fontWeight: "700", marginBottom: 4 },
   locationText: { fontWeight: "600" },
   coordsText: { fontSize: 12, marginTop: -1 },
   metaRow: { flexDirection: "row", flexWrap: "wrap", columnGap: 8, rowGap: 8, marginTop: 3 },
-  metaChip: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    overflow: "hidden",
-    fontSize: 12,
-    fontWeight: "700",
-    alignSelf: "flex-start",
-  },
   statusText: { fontWeight: "700", marginTop: 2 },
+  cardActionRow: { flexDirection: "row", gap: 8, justifyContent: "flex-start", marginTop: 2 },
   cloneButton: {
-    position: "absolute",
-    right: 124,
-    top: 10,
     width: 66,
-    height: 30,
-    borderRadius: 999,
+    height: 32,
+    borderRadius: 10,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   cloneButtonText: { fontWeight: "800", fontSize: 11, lineHeight: 14 },
   backupButton: {
-    position: "absolute",
-    right: 48,
-    top: 10,
-    width: 74,
-    height: 30,
-    borderRadius: 999,
+    width: 66,
+    height: 32,
+    borderRadius: 10,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -379,6 +395,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   deleteButtonText: { fontWeight: "800", fontSize: 16, lineHeight: 18 },
+  topActionButtonText: { fontSize: 14, fontWeight: "800" },
   state: { padding: 20 },
   modalBackdrop: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
   modalCard: { width: "100%", maxWidth: 420, borderWidth: 1, borderRadius: 12, padding: 12, gap: 10 },
@@ -386,8 +403,5 @@ const styles = StyleSheet.create({
   modalText: { fontSize: 13 },
   modalInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9, fontWeight: "600" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
-  modalButtonPrimary: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  modalButtonSecondary: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  modalButtonText: { fontWeight: "700", fontSize: 12 },
 });
 

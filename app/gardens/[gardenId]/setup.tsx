@@ -1,4 +1,4 @@
-﻿import * as Location from "expo-location";
+import * as Location from "expo-location";
 import area from "@turf/area";
 import { polygon as turfPolygon } from "@turf/helpers";
 import { Link, useLocalSearchParams } from "expo-router";
@@ -349,20 +349,26 @@ export default function GardenSetupScreen() {
                 <Pressable
                   style={[
                     styles.modeChip,
-                    { backgroundColor: setupMode === "map" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                      {
+                        backgroundColor: setupMode === "map" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
+                        borderColor: setupMode === "map" ? theme.filterControlActiveBorder : theme.filterControlBorder,
+                      },
                   ]}
                   onPress={() => setSetupMode("map")}
                 >
-                  <Text style={[styles.modeChipText, { color: setupMode === "map" ? theme.primaryActionText : theme.secondaryActionText }]}>Map</Text>
+                  <Text style={[styles.modeChipText, { color: setupMode === "map" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Map</Text>
                 </Pressable>
                 <Pressable
                   style={[
                     styles.modeChip,
-                    { backgroundColor: setupMode === "measure" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                      {
+                        backgroundColor: setupMode === "measure" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
+                        borderColor: setupMode === "measure" ? theme.filterControlActiveBorder : theme.filterControlBorder,
+                      },
                   ]}
                   onPress={() => setSetupMode("measure")}
                 >
-                  <Text style={[styles.modeChipText, { color: setupMode === "measure" ? theme.primaryActionText : theme.secondaryActionText }]}>Measurement</Text>
+                  <Text style={[styles.modeChipText, { color: setupMode === "measure" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Measurement</Text>
                 </Pressable>
               </View>
             </View>
@@ -376,29 +382,38 @@ export default function GardenSetupScreen() {
                   <Pressable
                     style={[
                       styles.modeChip,
-                      { backgroundColor: mapType === "standard" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                        {
+                          backgroundColor: mapType === "standard" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
+                          borderColor: mapType === "standard" ? theme.filterControlActiveBorder : theme.filterControlBorder,
+                        },
                     ]}
                     onPress={() => setMapType("standard")}
                   >
-                    <Text style={[styles.modeChipText, { color: mapType === "standard" ? theme.primaryActionText : theme.secondaryActionText }]}>Standard</Text>
+                    <Text style={[styles.modeChipText, { color: mapType === "standard" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Standard</Text>
                   </Pressable>
                   <Pressable
                     style={[
                       styles.modeChip,
-                      { backgroundColor: mapType === "satellite" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                        {
+                          backgroundColor: mapType === "satellite" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
+                          borderColor: mapType === "satellite" ? theme.filterControlActiveBorder : theme.filterControlBorder,
+                        },
                     ]}
                     onPress={() => setMapType("satellite")}
                   >
-                    <Text style={[styles.modeChipText, { color: mapType === "satellite" ? theme.primaryActionText : theme.secondaryActionText }]}>Satellite</Text>
+                    <Text style={[styles.modeChipText, { color: mapType === "satellite" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Satellite</Text>
                   </Pressable>
                   <Pressable
                     style={[
                       styles.modeChip,
-                      { backgroundColor: mapType === "hybrid" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                        {
+                          backgroundColor: mapType === "hybrid" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
+                          borderColor: mapType === "hybrid" ? theme.filterControlActiveBorder : theme.filterControlBorder,
+                        },
                     ]}
                     onPress={() => setMapType("hybrid")}
                   >
-                    <Text style={[styles.modeChipText, { color: mapType === "hybrid" ? theme.primaryActionText : theme.secondaryActionText }]}>Satellite + Labels</Text>
+                    <Text style={[styles.modeChipText, { color: mapType === "hybrid" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Satellite + Labels</Text>
                   </Pressable>
                 </View>
 
@@ -414,25 +429,25 @@ export default function GardenSetupScreen() {
                       void searchMapLocation();
                     }}
                   />
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => void searchMapLocation()} disabled={searchingMap}>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => void searchMapLocation()} disabled={searchingMap}>
                     {searchingMap ? <ActivityIndicator color={theme.secondaryActionText} size="small" /> : <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Search</Text>}
                   </Pressable>
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => void moveToCurrentLocation()} disabled={locatingUser}>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => void moveToCurrentLocation()} disabled={locatingUser}>
                     {locatingUser ? <ActivityIndicator color={theme.secondaryActionText} size="small" /> : <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>My Location</Text>}
                   </Pressable>
                 </View>
 
                 <View style={styles.zoomRow}>
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={undoMapBoundaryPoint}>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={undoMapBoundaryPoint}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Undo</Text>
                   </Pressable>
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={deleteSelectedMapPoint}>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={deleteSelectedMapPoint}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Delete Point</Text>
                   </Pressable>
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={finishMapBoundary}>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={finishMapBoundary}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Finish Shape</Text>
                   </Pressable>
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={resetMapBoundary}>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={resetMapBoundary}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Reset</Text>
                   </Pressable>
                 </View>
@@ -453,7 +468,7 @@ export default function GardenSetupScreen() {
                 <Text style={[styles.infoText, { color: theme.infoText }]}>Boundary points: {mapBoundary.length}{isMapClosed ? " (closed)" : ""}</Text>
                 <Text style={[styles.infoText, { color: theme.infoText }]}>Garden area: {mapAreaSqM > 0 ? `${mapAreaSqM.toFixed(1)} sqm` : "-"}</Text>
 
-                <Pressable style={[styles.button, { backgroundColor: theme.primaryActionBackground }]} onPress={saveMapSetup}>
+                <Pressable style={[styles.button, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]} onPress={saveMapSetup}>
                   <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Save Map Boundary</Text>
                 </Pressable>
               </View>
@@ -483,7 +498,7 @@ export default function GardenSetupScreen() {
 
                 <Text style={[styles.infoText, { color: theme.infoText }]}>Garden area: {manualAreaSqM ? `${manualAreaSqM.toFixed(1)} sqm` : "-"}</Text>
 
-                <Pressable style={[styles.button, { backgroundColor: theme.primaryActionBackground }]} onPress={saveManualSetup}>
+                <Pressable style={[styles.button, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]} onPress={saveManualSetup}>
                   <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Save Measurements</Text>
                 </Pressable>
               </View>
@@ -492,7 +507,7 @@ export default function GardenSetupScreen() {
             {gardenId && (
               <Link
                 href={`/gardens/${gardenId}/map`}
-                style={[styles.mapperLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+                style={[styles.mapperLink, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor, color: theme.primaryActionText }]}
               >
                 Continue to Garden Design
               </Link>
@@ -557,15 +572,15 @@ const styles = StyleSheet.create({
   cardTitle: { fontWeight: "800", color: "#2A4738" },
   cardText: { color: "#587063" },
   row: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  button: { backgroundColor: "#2F6F4F", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  button: { backgroundColor: "#2F6F4F", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
   buttonText: { color: "#FFFFFF", fontWeight: "700" },
-  modeChip: { backgroundColor: "#DFEADF", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  modeChip: { backgroundColor: "#DFEADF", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   modeChipActive: { backgroundColor: "#2F6F4F" },
   modeChipText: { color: "#2F4A3A", fontWeight: "700" },
   modeChipTextActive: { color: "#FFFFFF" },
   zoomRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center" },
   searchRow: { flexDirection: "row", gap: 8, alignItems: "center" },
-  toolButton: { backgroundColor: "#E9F1E6", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  toolButton: { backgroundColor: "#E9F1E6", borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   toolButtonText: { color: "#2D4B3C", fontWeight: "700", fontSize: 12 },
   inputRow: { flexDirection: "row", gap: 8 },
   input: {
@@ -582,10 +597,12 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "800",
     backgroundColor: "#245A3E",
+    borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 12,
+    borderRadius: 10,
     overflow: "hidden",
     textAlign: "center",
   },
 });
+

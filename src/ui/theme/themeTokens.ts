@@ -1,4 +1,11 @@
 export type ThemeTokens = {
+  controlBorderWidth: string;
+  controlButtonRadius: string;
+  controlFilterRadius: string;
+  controlChipLeftRadius: string;
+  controlChipRightRadius: string;
+  controlSegmentRadius: string;
+  controlSegmentOptionRadius: string;
   appBackground: string;
   surfaceBackground: string;
   borderColor: string;
@@ -13,6 +20,12 @@ export type ThemeTokens = {
   disabledActionText: string;
   dangerActionBackground: string;
   dangerActionText: string;
+  choiceControlBackground: string;
+  choiceControlText: string;
+  choiceControlActiveBackground: string;
+  choiceControlActiveText: string;
+  statusChipBackground: string;
+  statusChipText: string;
   filterControlBackground: string;
   filterControlBorder: string;
   filterControlText: string;
@@ -54,20 +67,33 @@ export type ThemeTokens = {
 };
 
 export const DEFAULT_THEME_TOKENS: ThemeTokens = {
+  controlBorderWidth: "1",
+  controlButtonRadius: "10",
+  controlFilterRadius: "10",
+  controlChipLeftRadius: "8",
+  controlChipRightRadius: "999",
+  controlSegmentRadius: "12",
+  controlSegmentOptionRadius: "8",
   appBackground: "#F0F6EE",
   surfaceBackground: "#FFFFFF",
   borderColor: "#D8E5D5",
   textPrimary: "#1E402C",
   textMuted: "#4E6857",
   infoText: "#587063",
-  primaryActionBackground: "#1E6A42",
-  primaryActionText: "#FFFFFF",
+  primaryActionBackground: "#DFEADF",
+  primaryActionText: "#1F3F2B",
   secondaryActionBackground: "#DFEADF",
   secondaryActionText: "#1F3F2B",
   disabledActionBackground: "#A0B2A4",
   disabledActionText: "#FFFFFF",
   dangerActionBackground: "#C74C3A",
   dangerActionText: "#FFFFFF",
+  choiceControlBackground: "#E8F2E7",
+  choiceControlText: "#2A4B38",
+  choiceControlActiveBackground: "#1E6A42",
+  choiceControlActiveText: "#FFFFFF",
+  statusChipBackground: "#EDF5EC",
+  statusChipText: "#2A4B38",
   filterControlBackground: "#F7FBF5",
   filterControlBorder: "#A9C3AC",
   filterControlText: "#2A4B38",

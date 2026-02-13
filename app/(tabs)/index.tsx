@@ -15,7 +15,9 @@ import { searchGrowstuffPlants } from "@/features/plants/services/growstuff";
 import { queryClient } from "@/state/queryClient";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
-import { ChoiceChip } from "@/ui/components/ChoiceChip";
+import { StatusChip } from "@/ui/components/StatusChip";
+import { AppButton } from "@/ui/components/AppButton";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
 import { buildGardenCalendarItems, getCurrentMonthItems } from "@/features/calendar/services/calendarPlanner";
 import { getCalendarTypeMeta, getCalendarVisualKind } from "@/features/calendar/services/calendarPresentation";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
@@ -242,6 +244,16 @@ export default function DashboardScreen() {
     },
   });
 
+  const confirmAddSeasonalSuggestion = (name: string) => {
+    Alert.alert("Add to Grow List?", `Add "${name}" to your grow list?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Add",
+        onPress: () => addSeasonalSuggestionMutation.mutate(name),
+      },
+    ]);
+  };
+
   const exportLayoutImage = async () => {
     if (Platform.OS === "web") {
       Alert.alert("Not available on web", "Image export currently works on iOS and Android.");
@@ -283,8 +295,6 @@ export default function DashboardScreen() {
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
       <Text style={[styles.title, { color: theme.textPrimary }]}>Home</Text>
-      <Text style={[styles.subtitle, { color: theme.textMuted }]}>Focus on your current garden, then jump straight into the next step.</Text>
-
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Current Garden</Text>
         {!selectedGarden ? (
@@ -292,7 +302,7 @@ export default function DashboardScreen() {
             <Text style={[styles.helper, { color: theme.textMuted }]}>No gardens yet. Create your first garden to start planning.</Text>
             <Link
               href="/gardens/new"
-              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
             >
               + New Garden
             </Link>
@@ -307,26 +317,18 @@ export default function DashboardScreen() {
               Area {selectedGarden.scaleCalibration?.boundaryAreaSqM ? `${selectedGarden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
             </Text>
             <View style={styles.metricsRow}>
-              <MetricChip label={`Beds ${bedCount}`} />
-              <MetricChip label={`Features ${featureCount}`} />
-              <MetricChip label={`Grow list ${growCount}`} />
+              <StatusChip label={`Beds ${bedCount}`} />
+              <StatusChip label={`Features ${featureCount}`} />
+              <StatusChip label={`Grow list ${growCount}`} />
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {gardens.map((garden) => {
-                const selected = garden.id === selectedGarden.id;
-                return (
-                  <ChoiceChip
-                    key={garden.id}
-                    label={garden.name}
-                    selected={selected}
-                    onPress={() => setSelectedGardenId(garden.id)}
-                  />
-                );
-              })}
-            </ScrollView>
+            <SegmentedChoice
+              options={gardens.map((garden) => ({ id: garden.id, label: garden.name }))}
+              selectedId={selectedGarden.id}
+              onSelect={setSelectedGardenId}
+            />
             <Link
               href="/(tabs)/gardens"
-              style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+              style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}
             >
               Manage Gardens
             </Link>
@@ -338,16 +340,16 @@ export default function DashboardScreen() {
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Quick Actions</Text>
           <View style={styles.actionGrid}>
-            <Link href={`/gardens/${selectedGarden.id}/setup`} style={[styles.actionLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+            <Link href={`/gardens/${selectedGarden.id}/setup`} style={[styles.actionLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}>
               {hasSetup ? "Garden Setup - Edit" : "Garden Setup - Start"}
             </Link>
-            <Link href={`/gardens/${selectedGarden.id}/map`} style={[styles.actionLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+            <Link href={`/gardens/${selectedGarden.id}/map`} style={[styles.actionLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}>
               {hasDesign ? "Garden Design - Continue" : "Garden Design - Start"}
             </Link>
-            <Link href={`/gardens/${selectedGarden.id}/grow`} style={[styles.actionLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+            <Link href={`/gardens/${selectedGarden.id}/grow`} style={[styles.actionLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}>
               {growCount > 0 ? "Grow List - Continue" : "Grow List - Start"}
             </Link>
-            <Link href={`/gardens/${selectedGarden.id}/beds`} style={[styles.actionLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+            <Link href={`/gardens/${selectedGarden.id}/beds`} style={[styles.actionLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}>
               {isBedPlannerDone ? "Bed Planner - Review" : isBedPlannerReady ? "Bed Planner - Continue" : "Bed Planner - Start"}
             </Link>
           </View>
@@ -361,12 +363,12 @@ export default function DashboardScreen() {
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Tasks Snapshot</Text>
           <View style={styles.metricsRow}>
-            <MetricChip label={`Open ${tasksQuery.data?.open ?? 0}`} />
-            <MetricChip label={`Unseen ${tasksQuery.data?.unseen ?? 0}`} />
+            <StatusChip label={`Open ${tasksQuery.data?.open ?? 0}`} />
+            <StatusChip label={`Unseen ${tasksQuery.data?.unseen ?? 0}`} />
           </View>
           <Link
             href="/(tabs)/tasks"
-            style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+            style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}
           >
             Open Tasks
           </Link>
@@ -382,14 +384,15 @@ export default function DashboardScreen() {
           ) : (
             <View style={styles.metricsRow}>
               {seasonalDiscoveryNames.map((name) => (
-                <Pressable
+                <AppButton
                   key={`seasonal-${name}`}
-                  style={[styles.seasonChip, { backgroundColor: theme.secondaryActionBackground }]}
-                  onPress={() => addSeasonalSuggestionMutation.mutate(name)}
+                  label={`+ ${name}`}
+                  size="sm"
+                  variant="secondary"
+                  style={styles.seasonButton}
+                  onPress={() => confirmAddSeasonalSuggestion(name)}
                   disabled={addSeasonalSuggestionMutation.isPending}
-                >
-                  <Text style={[styles.seasonChipText, { color: theme.secondaryActionText }]}>{name}</Text>
-                </Pressable>
+                />
               ))}
             </View>
           )}
@@ -406,7 +409,7 @@ export default function DashboardScreen() {
               {monthTypeCounts.map((group) => (
                 <View
                   key={group.kind}
-                  style={[styles.monthIndicator, { backgroundColor: group.meta.background, borderColor: group.meta.border }]}
+                  style={[styles.monthIndicator, { backgroundColor: group.meta.background }]}
                 >
                   <Text style={[styles.monthIndicatorText, { color: group.meta.text }]}>
                     {group.meta.label}: {group.count}
@@ -417,7 +420,7 @@ export default function DashboardScreen() {
           )}
           <Link
             href="/(tabs)/calendar"
-            style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+            style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}
           >
             Open Calendar
           </Link>
@@ -445,6 +448,7 @@ export default function DashboardScreen() {
               styles.layoutExportButton,
               {
                 backgroundColor: isExportingMap ? theme.disabledActionBackground : theme.secondaryActionBackground,
+                borderColor: theme.borderColor,
               },
             ]}
             onPress={() => void exportLayoutImage()}
@@ -516,15 +520,6 @@ export default function DashboardScreen() {
   );
 }
 
-function MetricChip(props: { label: string }) {
-  const { theme } = useTheme();
-  return (
-    <View style={[styles.metricChip, { backgroundColor: theme.secondaryActionBackground }]}>
-      <Text style={[styles.metricChipText, { color: theme.secondaryActionText }]}>{props.label}</Text>
-    </View>
-  );
-}
-
 function formatShortDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -575,14 +570,8 @@ const styles = StyleSheet.create({
   helper: {},
   gardenName: { fontSize: 20, fontWeight: "800" },
   metricsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  monthIndicator: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  monthIndicator: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
   monthIndicatorText: { fontSize: 12, fontWeight: "800" },
-  metricChip: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  metricChipText: { fontSize: 12, fontWeight: "700" },
   chipRow: { gap: 8 },
   actionGrid: {
     flexDirection: "row",
@@ -595,6 +584,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "800",
     borderRadius: 10,
+    borderWidth: 1,
     overflow: "hidden",
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -602,6 +592,7 @@ const styles = StyleSheet.create({
   primaryLink: {
     fontWeight: "800",
     borderRadius: 10,
+    borderWidth: 1,
     overflow: "hidden",
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -610,21 +601,22 @@ const styles = StyleSheet.create({
   secondaryLink: {
     fontWeight: "700",
     borderRadius: 10,
+    borderWidth: 1,
     overflow: "hidden",
     paddingHorizontal: 12,
     paddingVertical: 9,
     textAlign: "center",
   },
   layoutExportButton: {
-    borderRadius: 999,
+    borderWidth: 1,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
     alignSelf: "flex-start",
     marginTop: 8,
   },
   layoutExportButtonText: { fontWeight: "700", fontSize: 12 },
-  seasonChip: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
-  seasonChipText: { fontSize: 12, fontWeight: "700" },
+  seasonButton: { borderRadius: 10 },
   weatherRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   weatherIcon: { fontSize: 17, width: 20, textAlign: "center" },
   exportHiddenContainer: {

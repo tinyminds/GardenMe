@@ -1,4 +1,4 @@
-ï»¿import { Link, useLocalSearchParams } from "expo-router";
+import { Link, useLocalSearchParams } from "expo-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -878,10 +878,10 @@ export default function GardenMapEditorScreen() {
                   }}
                   style={[
                     styles.typeChip,
-                    { backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                    { backgroundColor: selected ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
                   ]}
                 >
-                  <Text style={[styles.typeChipText, { color: selected ? theme.primaryActionText : theme.secondaryActionText }]}>{type}</Text>
+                  <Text style={[styles.typeChipText, { color: selected ? theme.choiceControlActiveText : theme.choiceControlText }]}>{type}</Text>
                 </Pressable>
               );
             })}
@@ -892,11 +892,11 @@ export default function GardenMapEditorScreen() {
                 key={option.mode}
                 style={[
                   styles.secondaryButton,
-                  { backgroundColor: shapeDraftMode === option.mode ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                  { backgroundColor: shapeDraftMode === option.mode ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
                 ]}
                 onPress={() => setShapeDraftMode(option.mode)}
               >
-                <Text style={[styles.secondaryButtonText, { color: shapeDraftMode === option.mode ? theme.primaryActionText : theme.secondaryActionText }]}>
+                <Text style={[styles.secondaryButtonText, { color: shapeDraftMode === option.mode ? theme.choiceControlActiveText : theme.choiceControlText }]}>
                   {option.label}
                 </Text>
               </Pressable>
@@ -949,23 +949,23 @@ export default function GardenMapEditorScreen() {
             <Pressable
               style={[
                 styles.secondaryButton,
-                { backgroundColor: canvasMode === "draw" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                { backgroundColor: canvasMode === "draw" ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
               ]}
               onPress={() => setCanvasMode("draw")}
             >
-              <Text style={[styles.secondaryButtonText, { color: canvasMode === "draw" ? theme.primaryActionText : theme.secondaryActionText }]}>Draw</Text>
+              <Text style={[styles.secondaryButtonText, { color: canvasMode === "draw" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Draw</Text>
             </Pressable>
             <Pressable
               style={[
                 styles.secondaryButton,
-                { backgroundColor: canvasMode === "pan" ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                { backgroundColor: canvasMode === "pan" ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
               ]}
               onPress={() => {
                 setCanvasMode("pan");
                 setSelectedPointIndex(null);
               }}
             >
-              <Text style={[styles.secondaryButtonText, { color: canvasMode === "pan" ? theme.primaryActionText : theme.secondaryActionText }]}>Pan</Text>
+              <Text style={[styles.secondaryButtonText, { color: canvasMode === "pan" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Pan</Text>
             </Pressable>
             <Pressable
               style={[
@@ -1266,7 +1266,7 @@ export default function GardenMapEditorScreen() {
             <Pressable
               style={[
                 styles.secondaryButton,
-                { backgroundColor: canApplyShape || canCloseShape ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                { backgroundColor: canApplyShape || canCloseShape ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
               ]}
               onPress={() => {
                 if (presetShape) {
@@ -1278,29 +1278,29 @@ export default function GardenMapEditorScreen() {
               }}
               disabled={!canApplyShape && !canCloseShape}
             >
-              <Text style={[styles.secondaryButtonText, { color: canApplyShape || canCloseShape ? theme.primaryActionText : theme.secondaryActionText }]}>
+              <Text style={[styles.secondaryButtonText, { color: canApplyShape || canCloseShape ? theme.choiceControlActiveText : theme.choiceControlText }]}>
                 {shapeActionLabel}
               </Text>
             </Pressable>
             <Pressable
               style={[
                 styles.secondaryButton,
-                { backgroundColor: canUndo ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                { backgroundColor: canUndo ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
               ]}
               onPress={handleUndo}
               disabled={!canUndo}
             >
-              <Text style={[styles.secondaryButtonText, { color: canUndo ? theme.primaryActionText : theme.secondaryActionText }]}>Undo</Text>
+              <Text style={[styles.secondaryButtonText, { color: canUndo ? theme.choiceControlActiveText : theme.choiceControlText }]}>Undo</Text>
             </Pressable>
             <Pressable
               style={[
                 styles.secondaryButton,
-                { backgroundColor: canDeletePoint ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                { backgroundColor: canDeletePoint ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
               ]}
               onPress={deleteSelectedPoint}
               disabled={!canDeletePoint}
             >
-              <Text style={[styles.secondaryButtonText, { color: canDeletePoint ? theme.primaryActionText : theme.secondaryActionText }]}>Delete Point</Text>
+              <Text style={[styles.secondaryButtonText, { color: canDeletePoint ? theme.choiceControlActiveText : theme.choiceControlText }]}>Delete Point</Text>
             </Pressable>
             {canCancelEdit && (
               <Pressable style={[styles.secondaryButton, { backgroundColor: theme.primaryActionBackground }]} onPress={resetDraft}>
@@ -1441,10 +1441,10 @@ export default function GardenMapEditorScreen() {
               <View style={styles.zoneMeta}>
                 <Text style={[styles.zoneName, { color: theme.textPrimary }]}>{zone.name}</Text>
                 <Text style={[styles.zoneSub, { color: theme.textMuted }]}>
-                  {zone.type} Â· {zone.polygon.length} pts
-                  {zone.source === "bed" && zone.containsPerennials ? " Â· perennial" : ""}
+                  {zone.type} · {zone.polygon.length} pts
+                  {zone.source === "bed" && zone.containsPerennials ? " · perennial" : ""}
                   {calibration
-                    ? ` Â· ~${normalizedAreaToSqM(
+                    ? ` · ~${normalizedAreaToSqM(
                         polygonArea(zone.polygon),
                         calibration.metersPerPixel,
                         calibration.baseWidth,
@@ -1468,9 +1468,9 @@ export default function GardenMapEditorScreen() {
         <View style={[styles.footerCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.footerText, { color: theme.textMuted }]}>
             Draft points: {draftPoints.length}
-            {" Â· "}Area ratio: {area.toFixed(3)}
-            {areaSqM !== null ? ` Â· ~${areaSqM.toFixed(1)} sqm` : ""}
-            {" Â· "}Saved zones: {existingZones.length}
+            {" · "}Area ratio: {area.toFixed(3)}
+            {areaSqM !== null ? ` · ~${areaSqM.toFixed(1)} sqm` : ""}
+            {" · "}Saved zones: {existingZones.length}
           </Text>
         </View>
         </ScrollView>
@@ -1570,10 +1570,10 @@ function PickerRow(props: {
             onPress={() => props.onSelect(option)}
             style={[
               styles.pickerChip,
-              { backgroundColor: props.selected === option ? theme.primaryActionBackground : theme.secondaryActionBackground },
+              { backgroundColor: props.selected === option ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
             ]}
           >
-            <Text style={[styles.pickerChipText, { color: props.selected === option ? theme.primaryActionText : theme.secondaryActionText }]}>
+            <Text style={[styles.pickerChipText, { color: props.selected === option ? theme.choiceControlActiveText : theme.choiceControlText }]}>
               {option.replace("_", " ")}
             </Text>
           </Pressable>
@@ -1896,7 +1896,7 @@ function getPolygonLabelPlacement(
 function truncateLabel(value: string, maxChars: number): string {
   const trimmed = value.trim();
   if (trimmed.length <= maxChars) return trimmed;
-  return `${trimmed.slice(0, Math.max(1, maxChars - 1))}â€¦`;
+  return `${trimmed.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
 function pointsFromPresetShape(shape: PresetShapeDraft): Point2D[] {
@@ -2293,12 +2293,12 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 14, fontWeight: "700", color: "#2C4737" },
   sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   typeRow: { gap: 8, paddingVertical: 2, paddingRight: 4 },
-  typeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: "#DFE9DB" },
+  typeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: "#9DB8A6", backgroundColor: "#D8E4D8" },
   typeChipActive: { backgroundColor: "#2F6F4F" },
   typeChipText: { color: "#2C4737", fontWeight: "600", textTransform: "capitalize" },
   typeChipTextActive: { color: "#FFFFFF" },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  zoomButton: { backgroundColor: "#DFEADF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  zoomButton: { backgroundColor: "#DFEADF", borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", paddingHorizontal: 10, paddingVertical: 4 },
   zoomButtonText: { fontSize: 18, fontWeight: "700", color: "#23412E" },
   zoomText: { minWidth: 52, textAlign: "center", fontWeight: "700", color: "#375947" },
   switchRow: {
@@ -2306,7 +2306,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     backgroundColor: "#EAF2E7",
-    borderRadius: 999,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#A9C3B0",
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -2353,7 +2355,7 @@ const styles = StyleSheet.create({
   placeholder: { justifyContent: "center", alignItems: "center", backgroundColor: "#E5EDE4" },
   placeholderText: { color: "#5E7262" },
   toolbarRow: { marginTop: 2, flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  secondaryButton: { backgroundColor: "#DFEADF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  secondaryButton: { backgroundColor: "#DFEADF", borderWidth: 1, borderColor: "#A9C3B0", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   secondaryButtonText: { color: "#1F3F2B", fontWeight: "600" },
   secondaryButtonReady: { backgroundColor: "#CDE2D2", borderWidth: 1, borderColor: "#94B9A0" },
   secondaryButtonTextReady: { color: "#1D4A33", fontWeight: "700" },
@@ -2384,7 +2386,7 @@ const styles = StyleSheet.create({
   pickerRow: { gap: 6 },
   pickerTitle: { fontWeight: "700", color: "#1D3D2A" },
   pickerOptionsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  pickerChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99, backgroundColor: "#DCE8DA" },
+  pickerChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", backgroundColor: "#DCE8DA" },
   pickerChipActive: { backgroundColor: "#A9CFB2" },
   pickerChipText: { textTransform: "capitalize", color: "#274431" },
   zoneRow: {
@@ -2399,9 +2401,9 @@ const styles = StyleSheet.create({
   zoneName: { fontWeight: "700", color: "#264534", textTransform: "capitalize" },
   zoneSub: { color: "#557061", marginTop: 2, textTransform: "capitalize" },
   zoneActions: { flexDirection: "row", gap: 8 },
-  editButton: { backgroundColor: "#E6F0E4", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  editButton: { backgroundColor: "#E6F0E4", borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", paddingHorizontal: 10, paddingVertical: 6 },
   editButtonText: { color: "#275239", fontWeight: "700" },
-  deleteButton: { backgroundColor: "#FBE3DE", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  deleteButton: { backgroundColor: "#FBE3DE", borderRadius: 10, borderWidth: 1, borderColor: "#D7A59C", paddingHorizontal: 10, paddingVertical: 6 },
   deleteButtonText: { color: "#9A3B2B", fontWeight: "700" },
   emptyText: { color: "#60766A" },
   saveCard: {
@@ -2414,7 +2416,9 @@ const styles = StyleSheet.create({
   },
   primarySaveButton: {
     backgroundColor: "#1E6A42",
-    borderRadius: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#175238",
     paddingHorizontal: 14,
     paddingVertical: 14,
     alignItems: "center",
@@ -2450,5 +2454,6 @@ const styles = StyleSheet.create({
     borderColor: "#E85D2A",
   },
 });
+
 
 

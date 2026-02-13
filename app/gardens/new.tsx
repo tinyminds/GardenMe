@@ -49,13 +49,19 @@ export default function NewGardenScreen() {
         placeholderTextColor={theme.textMuted}
       />
       <Pressable
+        disabled={!name.trim()}
         onPress={() => void onSave()}
         style={[
           styles.button,
-          { backgroundColor: name.trim() ? theme.primaryActionBackground : theme.disabledActionBackground },
+          {
+            backgroundColor: name.trim() ? theme.secondaryActionBackground : theme.disabledActionBackground,
+            borderColor: name.trim() ? theme.borderColor : theme.disabledActionBackground,
+          },
         ]}
       >
-        <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Save garden</Text>
+        <Text style={[styles.buttonText, { color: name.trim() ? theme.secondaryActionText : theme.disabledActionText }]}>
+          Save garden
+        </Text>
       </Pressable>
     </View>
   );
@@ -64,7 +70,7 @@ export default function NewGardenScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 12, justifyContent: "center" },
   input: { borderWidth: 1, borderRadius: 10, padding: 12 },
-  button: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, alignItems: "center" },
+  button: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, alignItems: "center" },
   buttonText: { fontWeight: "700" },
 });
 

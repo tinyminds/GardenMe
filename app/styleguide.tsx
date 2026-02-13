@@ -5,8 +5,14 @@ import ColorPicker from "react-native-wheel-color-picker";
 import Svg, { Circle, ClipPath, Defs, G, Line, Polygon, Rect } from "react-native-svg";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 import { DEFAULT_THEME_TOKENS, type ThemeTokens } from "@/ui/theme/themeTokens";
+import { AppButton } from "@/ui/components/AppButton";
+import { ChoiceChip } from "@/ui/components/ChoiceChip";
+import { FilterPill } from "@/ui/components/FilterPill";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
+import { StatusChip } from "@/ui/components/StatusChip";
 
 type TokenSpec = { key: keyof ThemeTokens; label: string };
+type NumberTokenSpec = { key: keyof ThemeTokens; label: string; min: number; max: number; step: number };
 type MapFeatureSpec = {
   key: string;
   label: string;
@@ -36,6 +42,12 @@ const actionTokens: TokenSpec[] = [
   { key: "disabledActionText", label: "Disabled Text" },
   { key: "dangerActionBackground", label: "Delete Button" },
   { key: "dangerActionText", label: "Delete Text" },
+  { key: "choiceControlBackground", label: "Choice Background" },
+  { key: "choiceControlText", label: "Choice Text" },
+  { key: "choiceControlActiveBackground", label: "Choice Active Bg" },
+  { key: "choiceControlActiveText", label: "Choice Active Text" },
+  { key: "statusChipBackground", label: "Status Chip Bg" },
+  { key: "statusChipText", label: "Status Chip Text" },
   { key: "filterControlBackground", label: "Filter Background" },
   { key: "filterControlBorder", label: "Filter Border" },
   { key: "filterControlText", label: "Filter Text" },
@@ -65,6 +77,16 @@ const mapFeatures: MapFeatureSpec[] = [
   { key: "deck", label: "Deck", fillKey: "mapDeckFill", strokeKey: "mapDeckStroke", preview: "deck" },
 ];
 
+const controlShapeTokens: NumberTokenSpec[] = [
+  { key: "controlBorderWidth", label: "Control Border Width", min: 0, max: 3, step: 0.5 },
+  { key: "controlButtonRadius", label: "Button Radius", min: 0, max: 24, step: 1 },
+  { key: "controlFilterRadius", label: "Filter Radius", min: 0, max: 24, step: 1 },
+  { key: "controlChipLeftRadius", label: "Chip Left Radius", min: 0, max: 24, step: 1 },
+  { key: "controlChipRightRadius", label: "Chip Right Radius", min: 0, max: 999, step: 1 },
+  { key: "controlSegmentRadius", label: "Segment Group Radius", min: 0, max: 24, step: 1 },
+  { key: "controlSegmentOptionRadius", label: "Segment Option Radius", min: 0, max: 24, step: 1 },
+];
+
 const themePresets: Array<{ id: string; label: string; tokens: Partial<ThemeTokens> }> = [
   { id: "default", label: "Default", tokens: DEFAULT_THEME_TOKENS },
   {
@@ -76,7 +98,20 @@ const themePresets: Array<{ id: string; label: string; tokens: Partial<ThemeToke
       borderColor: "#C8D7E2",
       textPrimary: "#143042",
       textMuted: "#4B6474",
-      primaryActionBackground: "#1E6A8A",
+      primaryActionBackground: "#DCEAF3",
+      primaryActionText: "#1B4159",
+      choiceControlBackground: "#EAF3F9",
+      choiceControlText: "#1B4159",
+      choiceControlActiveBackground: "#1E6A8A",
+      choiceControlActiveText: "#FFFFFF",
+      statusChipBackground: "#EEF6FB",
+      statusChipText: "#1B4159",
+      filterControlBackground: "#F4F9FC",
+      filterControlBorder: "#9EB7C9",
+      filterControlText: "#1B4159",
+      filterControlActiveBackground: "#1E6A8A",
+      filterControlActiveBorder: "#1E6A8A",
+      filterControlActiveText: "#FFFFFF",
       secondaryActionBackground: "#DCEAF3",
       secondaryActionText: "#1B4159",
       dangerActionBackground: "#C2513E",
@@ -105,7 +140,20 @@ const themePresets: Array<{ id: string; label: string; tokens: Partial<ThemeToke
       borderColor: "#E3CDB7",
       textPrimary: "#4B2F22",
       textMuted: "#7A5B4A",
-      primaryActionBackground: "#B95E2D",
+      primaryActionBackground: "#F2DFCF",
+      primaryActionText: "#5E3B29",
+      choiceControlBackground: "#F8EDE2",
+      choiceControlText: "#5E3B29",
+      choiceControlActiveBackground: "#B95E2D",
+      choiceControlActiveText: "#FFFFFF",
+      statusChipBackground: "#FBF2EA",
+      statusChipText: "#5E3B29",
+      filterControlBackground: "#FCF5EE",
+      filterControlBorder: "#D3B59C",
+      filterControlText: "#5E3B29",
+      filterControlActiveBackground: "#B95E2D",
+      filterControlActiveBorder: "#B95E2D",
+      filterControlActiveText: "#FFFFFF",
       secondaryActionBackground: "#F2DFCF",
       secondaryActionText: "#5E3B29",
       dangerActionBackground: "#B43C2C",
@@ -133,6 +181,10 @@ export default function StyleguideScreen() {
   const { theme, setToken, resetTheme, applyThemePreset } = useTheme();
   const [activeToken, setActiveToken] = useState<keyof ThemeTokens | null>(null);
   const [hexDraftByToken, setHexDraftByToken] = useState<Record<string, string>>({});
+  const activePresetId = useMemo(
+    () => themePresets.find((preset) => isPresetActive(theme, preset.tokens))?.id ?? null,
+    [theme]
+  );
 
   const activeLabel = useMemo(() => {
     if (!activeToken) return "Tap any color swatch below";
@@ -179,66 +231,50 @@ export default function StyleguideScreen() {
 
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.groupTitle, { color: theme.textPrimary }]}>Quick Preview</Text>
-          <View style={styles.presetRow}>
-            {themePresets.map((preset) => (
-              <Pressable
-                key={preset.id}
-                onPress={() => applyThemePreset(preset.tokens)}
-                style={[styles.presetButton, { backgroundColor: theme.secondaryActionBackground }]}
-              >
-                <Text style={[styles.presetButtonText, { color: theme.secondaryActionText }]}>{preset.label}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <SegmentedChoice
+            options={themePresets.map((preset) => ({ id: preset.id, label: preset.label }))}
+            selectedId={activePresetId}
+            onSelect={(id) => {
+              const preset = themePresets.find((item) => item.id === id);
+              if (preset) applyThemePreset(preset.tokens);
+            }}
+          />
           <View style={styles.previewRow}>
-            <View style={[styles.previewButton, { backgroundColor: theme.primaryActionBackground }]}>
-              <Text style={[styles.previewButtonText, { color: theme.primaryActionText }]}>Primary</Text>
-            </View>
-            <View style={[styles.previewButton, { backgroundColor: theme.secondaryActionBackground }]}>
-              <Text style={[styles.previewButtonText, { color: theme.secondaryActionText }]}>Secondary</Text>
-            </View>
-            <View style={[styles.previewButton, { backgroundColor: theme.dangerActionBackground }]}>
-              <Text style={[styles.previewButtonText, { color: theme.dangerActionText }]}>Delete</Text>
-            </View>
-            <View style={[styles.previewButton, { backgroundColor: theme.disabledActionBackground }]}>
-              <Text style={[styles.previewButtonText, { color: theme.disabledActionText }]}>Disabled</Text>
-            </View>
+            <AppButton label="Primary" onPress={() => {}} variant="primary" size="sm" />
+            <AppButton label="Secondary" onPress={() => {}} variant="secondary" size="sm" />
+            <AppButton label="Delete" onPress={() => {}} variant="danger" size="sm" />
+            <AppButton label="Disabled" onPress={() => {}} variant="secondary" size="sm" disabled />
           </View>
           <View style={styles.previewRow}>
             <TogglePreview label="On" on={true} theme={theme} />
             <TogglePreview label="Off" on={false} theme={theme} />
           </View>
           <View style={styles.previewRow}>
-            <View style={[styles.previewFilter, { backgroundColor: theme.filterControlBackground, borderColor: theme.filterControlBorder }]}>
-              <Text style={[styles.previewFilterText, { color: theme.filterControlText }]}>Filter</Text>
-            </View>
-            <View style={[styles.previewFilter, { backgroundColor: theme.filterControlActiveBackground, borderColor: theme.filterControlActiveBorder }]}>
-              <Text style={[styles.previewFilterText, { color: theme.filterControlActiveText }]}>Filter On</Text>
-            </View>
-            <View style={[styles.previewButton, { backgroundColor: theme.secondaryActionBackground }]}>
-              <Text style={[styles.previewButtonText, { color: theme.secondaryActionText }]}>Chip</Text>
-            </View>
+            <FilterPill label="Filter" selected={false} onPress={() => {}} />
+            <FilterPill label="Filter On" selected={true} onPress={() => {}} />
+            <ChoiceChip label="Chip" selected={false} />
+            <StatusChip label="Status chip" />
           </View>
+          <SegmentedChoice
+            options={[
+              { id: "one", label: "Choice One" },
+              { id: "two", label: "Choice Two" },
+              { id: "three", label: "Choice Three" },
+            ]}
+            selectedId="two"
+            onSelect={() => {}}
+          />
           <View style={[styles.modalPreviewWrap, { backgroundColor: theme.modalBackdrop }]}>
             <View style={[styles.modalPreviewCard, { backgroundColor: theme.modalSurfaceBackground, borderColor: theme.modalSurfaceBorder }]}>
               <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Delete area?</Text>
               <View style={styles.previewRow}>
-                <View style={[styles.previewButton, { backgroundColor: theme.secondaryActionBackground }]}>
-                  <Text style={[styles.previewButtonText, { color: theme.secondaryActionText }]}>Cancel</Text>
-                </View>
-                <View style={[styles.previewButton, { backgroundColor: theme.dangerActionBackground }]}>
-                  <Text style={[styles.previewButtonText, { color: theme.dangerActionText }]}>Delete</Text>
-                </View>
+                <AppButton label="Cancel" onPress={() => {}} variant="secondary" size="sm" />
+                <AppButton label="Delete" onPress={() => {}} variant="danger" size="sm" />
               </View>
             </View>
           </View>
           <Text style={[styles.activeHint, { color: theme.textMuted }]}>Editing: {activeLabel}</Text>
-          <Pressable
-            onPress={resetTheme}
-            style={[styles.resetAllButton, { borderColor: theme.primaryActionBackground, backgroundColor: theme.appBackground }]}
-          >
-            <Text style={[styles.resetText, { color: theme.primaryActionBackground }]}>Reset all to default</Text>
-          </Pressable>
+          <AppButton label="Reset all to default" onPress={resetTheme} variant="secondary" size="sm" />
         </View>
 
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
@@ -261,6 +297,23 @@ export default function StyleguideScreen() {
                 setToken(item.key, next);
                 setHexDraftByToken((prev) => ({ ...prev, [item.key]: next }));
               }}
+            />
+            ))}
+        </View>
+
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.groupTitle, { color: theme.textPrimary }]}>Control Shape</Text>
+          {controlShapeTokens.map((item) => (
+            <NumberTokenRow
+              key={item.key}
+              label={item.label}
+              token={item.key}
+              min={item.min}
+              max={item.max}
+              step={item.step}
+              theme={theme}
+              onChange={(value) => setToken(item.key, String(value))}
+              onReset={() => setToken(item.key, DEFAULT_THEME_TOKENS[item.key])}
             />
           ))}
         </View>
@@ -362,6 +415,39 @@ function TokenEditorRow(props: {
           onOpacityChange={props.onOpacityChange}
         />
       )}
+    </View>
+  );
+}
+
+function NumberTokenRow(props: {
+  label: string;
+  token: keyof ThemeTokens;
+  min: number;
+  max: number;
+  step: number;
+  theme: ThemeTokens;
+  onChange: (value: number) => void;
+  onReset: () => void;
+}) {
+  const current = Number(props.theme[props.token]);
+  const value = Number.isFinite(current) ? current : 0;
+  return (
+    <View style={[styles.numberRow, { borderColor: props.theme.borderColor, backgroundColor: props.theme.appBackground }]}>
+      <Text style={[styles.tokenLabel, { color: props.theme.textPrimary, flex: 1 }]}>{props.label}</Text>
+      <AppButton
+        label="-"
+        size="sm"
+        variant="secondary"
+        onPress={() => props.onChange(Math.max(props.min, Number((value - props.step).toFixed(2))))}
+      />
+      <Text style={[styles.numberValue, { color: props.theme.textPrimary }]}>{value}</Text>
+      <AppButton
+        label="+"
+        size="sm"
+        variant="secondary"
+        onPress={() => props.onChange(Math.min(props.max, Number((value + props.step).toFixed(2))))}
+      />
+      <AppButton label="Default" size="sm" variant="neutral" onPress={props.onReset} />
     </View>
   );
 }
@@ -514,6 +600,12 @@ function buildGridLines(x: number, y: number, width: number, height: number, ste
   return lines;
 }
 
+function isPresetActive(theme: ThemeTokens, tokens: Partial<ThemeTokens>): boolean {
+  const keys = Object.keys(tokens) as Array<keyof ThemeTokens>;
+  if (keys.length === 0) return false;
+  return keys.every((key) => theme[key] === tokens[key]);
+}
+
 function normalizeHex(input: string): string {
   const text = input.trim();
   const hex = text.replace(/^#/, "");
@@ -569,11 +661,13 @@ const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 10 },
   groupTitle: { fontSize: 15, fontWeight: "800" },
   presetRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  presetButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  presetButton: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
   presetButtonText: { fontSize: 12, fontWeight: "700" },
   previewRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", alignItems: "center" },
-  previewButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  previewButton: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
   previewButtonText: { fontWeight: "700", fontSize: 12 },
+  previewChip: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  previewChipText: { fontWeight: "700", fontSize: 12 },
   previewFilter: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
   previewFilterText: { fontWeight: "700", fontSize: 12 },
   togglePreviewWrap: { alignItems: "center", gap: 4 },
@@ -588,6 +682,17 @@ const styles = StyleSheet.create({
   resetText: { fontWeight: "700" },
   tokenBlock: { gap: 6 },
   tokenBlockCompact: { marginBottom: 4 },
+  numberRow: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+  numberValue: { minWidth: 34, textAlign: "center", fontWeight: "700" },
   tokenRow: {
     borderWidth: 1,
     borderRadius: 10,

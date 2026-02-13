@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text } from "react-native";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { getControlShape } from "@/ui/theme/controlTokens";
 
 type FilterPillProps = {
   label: string;
@@ -10,6 +11,7 @@ type FilterPillProps = {
 
 export function FilterPill(props: FilterPillProps) {
   const { theme } = useTheme();
+  const shape = getControlShape(theme);
   return (
     <Pressable
       onPress={props.onPress}
@@ -17,6 +19,8 @@ export function FilterPill(props: FilterPillProps) {
       style={[
         styles.pill,
         {
+          borderWidth: shape.borderWidth,
+          borderRadius: shape.filterRadius,
           backgroundColor: props.selected ? theme.filterControlActiveBackground : theme.filterControlBackground,
           borderColor: props.selected ? theme.filterControlActiveBorder : theme.filterControlBorder,
           opacity: props.disabled ? 0.5 : 1,
@@ -39,11 +43,8 @@ export function FilterPill(props: FilterPillProps) {
 
 const styles = StyleSheet.create({
   pill: {
-    borderWidth: 1,
-    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   text: { fontWeight: "700" },
 });
-

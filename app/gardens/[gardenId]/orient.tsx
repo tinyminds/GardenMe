@@ -254,7 +254,7 @@ export default function GardenOrientationScreen() {
           <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
             <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Orientation</Text>
             <View style={styles.row}>
-              <Pressable style={[styles.button, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setRotationDegrees(suggestedRotation)}>
+              <Pressable style={[styles.button, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => setRotationDegrees(suggestedRotation)}>
                 <Text style={[styles.buttonText, { color: theme.secondaryActionText }]}>Auto Orient</Text>
               </Pressable>
             </View>
@@ -272,25 +272,31 @@ export default function GardenOrientationScreen() {
               <Pressable
                 style={[
                   styles.chip,
-                  { backgroundColor: keepImage ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                  {
+                    backgroundColor: keepImage ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
+                    borderColor: keepImage ? theme.filterControlActiveBorder : theme.filterControlBorder,
+                  },
                 ]}
                 onPress={() => setKeepImage(true)}
               >
-                <Text style={[styles.chipText, { color: keepImage ? theme.primaryActionText : theme.secondaryActionText }]}>Keep Image</Text>
+                <Text style={[styles.chipText, { color: keepImage ? theme.choiceControlActiveText : theme.choiceControlText }]}>Keep Image</Text>
               </Pressable>
               <Pressable
                 style={[
                   styles.chip,
-                  { backgroundColor: !keepImage ? theme.primaryActionBackground : theme.secondaryActionBackground },
+                  {
+                    backgroundColor: !keepImage ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
+                    borderColor: !keepImage ? theme.filterControlActiveBorder : theme.filterControlBorder,
+                  },
                 ]}
                 onPress={() => setKeepImage(false)}
               >
-                <Text style={[styles.chipText, { color: !keepImage ? theme.primaryActionText : theme.secondaryActionText }]}>Remove Image</Text>
+                <Text style={[styles.chipText, { color: !keepImage ? theme.choiceControlActiveText : theme.choiceControlText }]}>Remove Image</Text>
               </Pressable>
             </View>
           </View>
 
-          <Pressable style={[styles.saveButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => void saveAndContinue()}>
+          <Pressable style={[styles.saveButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]} onPress={() => void saveAndContinue()}>
             <Text style={[styles.saveButtonText, { color: theme.primaryActionText }]}>Save Orientation + Continue</Text>
           </Pressable>
         </ScrollView>
@@ -518,13 +524,14 @@ const styles = StyleSheet.create({
   preview: { height: 340, borderRadius: 12, overflow: "hidden", backgroundColor: "#E7EFE5" },
   placeholder: { backgroundColor: "#E7EFE5" },
   row: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  button: { backgroundColor: "#E9F1E6", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  button: { backgroundColor: "#E9F1E6", borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   buttonText: { color: "#2D4B3C", fontWeight: "700", fontSize: 12 },
-  chip: { backgroundColor: "#DFEADF", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  chip: { backgroundColor: "#D8E4D8", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   chipActive: { backgroundColor: "#2F6F4F" },
   chipText: { color: "#2F4A3A", fontWeight: "700" },
   chipTextActive: { color: "#FFFFFF" },
   infoText: { color: "#587063", fontWeight: "600" },
-  saveButton: { backgroundColor: "#245A3E", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  saveButton: { backgroundColor: "#245A3E", borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
   saveButtonText: { color: "#FFFFFF", fontWeight: "800", textAlign: "center" },
 });
+

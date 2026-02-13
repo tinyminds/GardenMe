@@ -1,4 +1,4 @@
-﻿import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -1118,7 +1118,7 @@ export default function GardenGrowListScreen() {
                     {item.familyName && <Text style={[styles.suggestionMeta, { color: theme.textMuted }]}>Family: {item.familyName}</Text>}
                     {item.detailLine && <Text style={[styles.suggestionMeta, { color: theme.textMuted }]}>{item.detailLine}</Text>}
                   </View>
-                  <Text style={[styles.suggestionTag, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}>{item.sourceLabel}</Text>
+                  <Text style={[styles.suggestionTag, { backgroundColor: theme.statusChipBackground, color: theme.statusChipText }]}>{item.sourceLabel}</Text>
                 </Pressable>
               ))}
               {suggestions.length > 12 && (
@@ -1307,7 +1307,7 @@ export default function GardenGrowListScreen() {
                   <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("support_off")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Support off</Text></Pressable>
                   <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("perennial_on")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Perennial</Text></Pressable>
                   <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("perennial_off")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Annual</Text></Pressable>
-                  <Pressable style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.dangerActionBackground }]} onPress={() => bulkApplyMutation.mutate("remove")} disabled={bulkApplyMutation.isPending}><Text style={[styles.removeButtonText, { color: theme.dangerActionText }]}>Remove</Text></Pressable>
+                  <Pressable style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("remove")} disabled={bulkApplyMutation.isPending}><Text style={[styles.removeButtonText, { color: theme.dangerActionText }]}>Remove</Text></Pressable>
                 </View>
               </>
             )}
@@ -1340,7 +1340,7 @@ export default function GardenGrowListScreen() {
                   }
                 >
                   <Text style={[styles.rowSelectorText, { color: selectedWishlistIds[item.id] ? theme.primaryActionText : theme.textMuted }]}>
-                    {selectedWishlistIds[item.id] ? "☑" : "☐"}
+                    {selectedWishlistIds[item.id] ? "?" : "?"}
                   </Text>
                 </Pressable>
                 <View style={styles.compactHeaderMain}>
@@ -1590,8 +1590,8 @@ export default function GardenGrowListScreen() {
                 </Text>
                 <View style={styles.timelineChips}>
                   {buildGrowTimelineChips(item, entryDrafts[item.id]).map((chip) => (
-                    <View key={`${item.id}-timeline-${chip}`} style={[styles.timelineChip, { backgroundColor: theme.secondaryActionBackground }]}>
-                      <Text style={[styles.timelineChipText, { color: theme.secondaryActionText }]}>{chip}</Text>
+                    <View key={`${item.id}-timeline-${chip}`} style={[styles.timelineChip, { backgroundColor: theme.statusChipBackground }]}>
+                      <Text style={[styles.timelineChipText, { color: theme.statusChipText }]}>{chip}</Text>
                     </View>
                   ))}
                 </View>
@@ -1797,7 +1797,7 @@ export default function GardenGrowListScreen() {
                   </Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.saveInlineButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground }]}
+                  style={[styles.saveInlineButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]}
                   disabled={
                     saveRowMutation.isPending ||
                     (!hasEntryDraftChanges(item, entryDrafts[item.id]) &&
@@ -1810,7 +1810,7 @@ export default function GardenGrowListScreen() {
                   </Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.dangerActionBackground }]}
+                  style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]}
                   disabled={removeMutation.isPending}
                   onPress={() => removeMutation.mutate(item.id)}
                 >
@@ -3214,7 +3214,9 @@ const styles = StyleSheet.create({
   addRow: { flexDirection: "row", justifyContent: "flex-end" },
   primaryButton: {
     backgroundColor: "#2E6C49",
-    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#1E5238",
+    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
@@ -3223,7 +3225,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#E7EFE5",
     borderColor: "#BDD6C3",
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
@@ -3260,9 +3262,9 @@ const styles = StyleSheet.create({
   suggestionName: { color: "#1E3E2E", fontWeight: "700" },
   suggestionMeta: { color: "#597363", fontSize: 12 },
   suggestionTag: {
-    backgroundColor: "#E7EFE5",
+    backgroundColor: "#D8E4D8",
     color: "#2A5E40",
-    borderRadius: 999,
+    borderRadius: 9,
     paddingHorizontal: 8,
     paddingVertical: 4,
     fontWeight: "700",
@@ -3302,7 +3304,7 @@ const styles = StyleSheet.create({
   rowSelector: {
     width: 24,
     height: 24,
-    borderRadius: 999,
+    borderRadius: 8,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -3343,7 +3345,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#E7EFE5",
     borderColor: "#BDD6C3",
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 8,
     width: 26,
     height: 26,
     alignItems: "center",
@@ -3365,7 +3367,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#EAF2E7",
     borderColor: "#C9DAC7",
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -3374,7 +3376,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#E5F0E7",
     borderColor: "#BDD6C3",
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -3385,7 +3387,9 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     gap: 8,
     backgroundColor: "#EAF2E7",
-    borderRadius: 999,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#A9C3B0",
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
@@ -3411,7 +3415,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F4E6E4",
     borderColor: "#E3C3BE",
     borderWidth: 1,
-    borderRadius: 999,
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 6,
     alignItems: "center",
@@ -3432,3 +3436,5 @@ const styles = StyleSheet.create({
   blockingOverlayText: { fontSize: 14, fontWeight: "700", textAlign: "center" },
   blockingOverlaySubtext: { fontSize: 12, textAlign: "center" },
 });
+
+

@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text } from "react-native";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { getControlShape } from "@/ui/theme/controlTokens";
 
 type ChoiceChipProps = {
   label: string;
@@ -11,6 +12,7 @@ type ChoiceChipProps = {
 
 export function ChoiceChip(props: ChoiceChipProps) {
   const { theme } = useTheme();
+  const shape = getControlShape(theme);
   const selected = Boolean(props.selected);
   return (
     <Pressable
@@ -19,8 +21,11 @@ export function ChoiceChip(props: ChoiceChipProps) {
       style={[
         styles.chip,
         {
-          backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground,
-          borderColor: theme.borderColor,
+          borderTopLeftRadius: shape.chipLeftRadius,
+          borderBottomLeftRadius: shape.chipLeftRadius,
+          borderTopRightRadius: shape.chipRightRadius,
+          borderBottomRightRadius: shape.chipRightRadius,
+          backgroundColor: selected ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
           opacity: props.disabled ? 0.55 : 1,
         },
       ]}
@@ -29,7 +34,7 @@ export function ChoiceChip(props: ChoiceChipProps) {
         style={[
           styles.text,
           {
-            color: selected ? theme.primaryActionText : theme.secondaryActionText,
+            color: selected ? theme.choiceControlActiveText : theme.choiceControlText,
             textTransform: props.capitalize ? "capitalize" : "none",
           },
         ]}
@@ -42,8 +47,6 @@ export function ChoiceChip(props: ChoiceChipProps) {
 
 const styles = StyleSheet.create({
   chip: {
-    borderWidth: 1,
-    borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
@@ -52,4 +55,3 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
-
