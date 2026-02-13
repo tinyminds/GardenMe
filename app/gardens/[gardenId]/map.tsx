@@ -1642,7 +1642,7 @@ function withAlpha(color: string, alpha: number): string {
     return `#${expanded.toUpperCase()}${a}`;
   }
   
-  console.warn(`withAlpha: Unable to process color "${color}", returning original`);
+
   return color;
 }
 

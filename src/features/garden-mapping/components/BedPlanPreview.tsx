@@ -361,7 +361,7 @@ function withAlpha(color: string, alpha: number): string {
     return `#${expanded.toUpperCase()}${a}`;
   }
   
-  console.warn(`withAlpha: Unable to process color "${color}", returning original`);
+
   return color;
 }
 
@@ -379,20 +379,6 @@ function buildPlantDotsForBed(params: {
   const plantedTarget = Math.max(0, Math.floor(params.plantedCount));
   const plannedTarget = Math.max(0, Math.floor(params.plannedCount));
   const target = plantedTarget + plannedTarget;
-  
-  // Debug logging to understand what's happening
-  console.log("buildPlantDotsForBed called with:", {
-    plantedCount: params.plantedCount,
-    perennialCount: params.perennialCount,
-    plannedCount: params.plannedCount,
-    plantedTarget,
-    plannedTarget,
-    target,
-    annualColor: params.annualColor,
-    perennialColor: params.perennialColor,
-    plannedColor: params.plannedColor
-  });
-  
   if (target <= 0 || params.polygon.length < 3) return [];
   const pxPolygon = params.polygon.map((point) => ({ x: point.x * params.width, y: point.y * params.height }));
   const bounds = getBounds(pxPolygon);
@@ -402,8 +388,6 @@ function buildPlantDotsForBed(params: {
   let spacing = clamp(Math.sqrt(area / target) * 0.85, 6, 28);
   const perennialCount = Math.min(plantedTarget, Math.max(0, Math.floor(params.perennialCount)));
   const annualPlantedCount = Math.max(0, plantedTarget - perennialCount);
-  
-  console.log("Calculated counts:", { perennialCount, annualPlantedCount });
   
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const dots: Array<{ x: number; y: number; r: number; color: string }> = [];
@@ -419,23 +403,17 @@ function buildPlantDotsForBed(params: {
               ? params.annualColor
               : params.plannedColor;
         
-        console.log(`Dot ${index}: type=${index < perennialCount ? 'perennial' : index < perennialCount + annualPlantedCount ? 'annual' : 'planned'}, color=${color}`);
-        
         dots.push({
           x,
           y,
           r: radius,
           color,
         });
-        if (dots.length >= target) {
-          console.log(`Final dots array length: ${dots.length}`);
-          return dots;
-        }
+        if (dots.length >= target) return dots;
       }
     }
     spacing = Math.max(5, spacing * 0.82);
   }
-  console.log("Failed to place enough dots, returning empty array");
   return [];
 }
 
