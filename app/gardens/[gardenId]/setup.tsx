@@ -21,6 +21,7 @@ import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGarden
 import { queryClient } from "@/state/queryClient";
 import { polygonArea } from "@/features/garden-mapping/utils/geometry";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
 import MapBoundaryEditor, {
   type LatLngPoint,
   type MapSnapshotResult,
@@ -142,7 +143,11 @@ export default function GardenSetupScreen() {
     if (!gardenId) return;
     const query = mapSearch.trim();
     if (!query) {
-      Alert.alert("Search needed", "Enter an address, postcode, or place name.");
+      Alert.alert(
+        "Search needed", 
+        "Enter an address, postcode, or place name.",
+        [{ text: "OK", style: "default" }]
+      );
       return;
     }
 
@@ -345,77 +350,34 @@ export default function GardenSetupScreen() {
 
             <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
               <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Mode</Text>
-              <View style={styles.row}>
-                <Pressable
-                  style={[
-                    styles.modeChip,
-                      {
-                        backgroundColor: setupMode === "map" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
-                        borderColor: setupMode === "map" ? theme.filterControlActiveBorder : theme.filterControlBorder,
-                      },
-                  ]}
-                  onPress={() => setSetupMode("map")}
-                >
-                  <Text style={[styles.modeChipText, { color: setupMode === "map" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Map</Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.modeChip,
-                      {
-                        backgroundColor: setupMode === "measure" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
-                        borderColor: setupMode === "measure" ? theme.filterControlActiveBorder : theme.filterControlBorder,
-                      },
-                  ]}
-                  onPress={() => setSetupMode("measure")}
-                >
-                  <Text style={[styles.modeChipText, { color: setupMode === "measure" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Measurement</Text>
-                </Pressable>
-              </View>
+              <SegmentedChoice
+                options={[
+                  { id: "map", label: "Map" },
+                  { id: "measure", label: "Measurement" },
+                ]}
+                selectedId={setupMode}
+                onSelect={(id) => setSetupMode(id as SetupMode)}
+              />
             </View>
+
+            <View style={[styles.separator, { backgroundColor: theme.borderColor }]} />
 
             {setupMode === "map" ? (
               <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
                 <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Map Boundary</Text>
                 <Text style={[styles.cardText, { color: theme.textMuted }]}>Tap points around the outer garden edge, then save.</Text>
 
-                <View style={styles.row}>
-                  <Pressable
-                    style={[
-                      styles.modeChip,
-                        {
-                          backgroundColor: mapType === "standard" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
-                          borderColor: mapType === "standard" ? theme.filterControlActiveBorder : theme.filterControlBorder,
-                        },
-                    ]}
-                    onPress={() => setMapType("standard")}
-                  >
-                    <Text style={[styles.modeChipText, { color: mapType === "standard" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Standard</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[
-                      styles.modeChip,
-                        {
-                          backgroundColor: mapType === "satellite" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
-                          borderColor: mapType === "satellite" ? theme.filterControlActiveBorder : theme.filterControlBorder,
-                        },
-                    ]}
-                    onPress={() => setMapType("satellite")}
-                  >
-                    <Text style={[styles.modeChipText, { color: mapType === "satellite" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Satellite</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[
-                      styles.modeChip,
-                        {
-                          backgroundColor: mapType === "hybrid" ? theme.choiceControlActiveBackground : theme.choiceControlBackground,
-                          borderColor: mapType === "hybrid" ? theme.filterControlActiveBorder : theme.filterControlBorder,
-                        },
-                    ]}
-                    onPress={() => setMapType("hybrid")}
-                  >
-                    <Text style={[styles.modeChipText, { color: mapType === "hybrid" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Satellite + Labels</Text>
-                  </Pressable>
-                </View>
+                <SegmentedChoice
+                  options={[
+                    { id: "standard", label: "Standard" },
+                    { id: "satellite", label: "Satellite" },
+                    { id: "hybrid", label: "Satellite + Labels" },
+                  ]}
+                  selectedId={mapType}
+                  onSelect={(id) => setMapType(id as NativeMapType)}
+                />
+
+                <View style={[styles.separator, { backgroundColor: theme.borderColor }]} />
 
                 <View style={styles.searchRow}>
                   <TextInput
@@ -437,6 +399,8 @@ export default function GardenSetupScreen() {
                   </Pressable>
                 </View>
 
+                <View style={[styles.separator, { backgroundColor: theme.borderColor }]} />
+
                 <View style={styles.zoomRow}>
                   <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={undoMapBoundaryPoint}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Undo</Text>
@@ -444,11 +408,11 @@ export default function GardenSetupScreen() {
                   <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={deleteSelectedMapPoint}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Delete Point</Text>
                   </Pressable>
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={finishMapBoundary}>
-                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Finish Shape</Text>
-                  </Pressable>
                   <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={resetMapBoundary}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Reset</Text>
+                  </Pressable>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]} onPress={finishMapBoundary}>
+                    <Text style={[styles.toolButtonText, { color: theme.primaryActionText }]}>Finish Shape</Text>
                   </Pressable>
                 </View>
 
@@ -555,48 +519,43 @@ function hasValidCoordinates(latitude: number, longitude: number): boolean {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#EFF6EC" },
-  safeArea: { flex: 1, backgroundColor: "#EFF6EC" },
+  page: { flex: 1 },
+  safeArea: { flex: 1 },
   keyboardWrap: { flex: 1 },
   content: { padding: 14, gap: 10, paddingBottom: 120 },
-  title: { fontSize: 28, fontWeight: "800", color: "#1B3D2A" },
-  subtitle: { color: "#4E6759", marginBottom: 2 },
+  title: { fontSize: 28, fontWeight: "800" },
+  subtitle: { marginBottom: 2 },
   card: {
-    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#D8E5D5",
     borderRadius: 14,
     padding: 12,
     gap: 8,
   },
-  cardTitle: { fontWeight: "800", color: "#2A4738" },
-  cardText: { color: "#587063" },
+  cardTitle: { fontWeight: "800" },
+  cardText: {},
   row: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  button: { backgroundColor: "#2F6F4F", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
-  buttonText: { color: "#FFFFFF", fontWeight: "700" },
-  modeChip: { backgroundColor: "#DFEADF", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  modeChipActive: { backgroundColor: "#2F6F4F" },
-  modeChipText: { color: "#2F4A3A", fontWeight: "700" },
-  modeChipTextActive: { color: "#FFFFFF" },
+  button: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  buttonText: { fontWeight: "700" },
+  separator: { height: 1, marginVertical: 8 },
+  modeChip: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  modeChipActive: {},
+  modeChipText: { fontWeight: "700" },
+  modeChipTextActive: {},
   zoomRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center" },
   searchRow: { flexDirection: "row", gap: 8, alignItems: "center" },
-  toolButton: { backgroundColor: "#E9F1E6", borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
-  toolButtonText: { color: "#2D4B3C", fontWeight: "700", fontSize: 12 },
+  toolButton: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  toolButtonText: { fontWeight: "700", fontSize: 12 },
   inputRow: { flexDirection: "row", gap: 8 },
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#C1D2BE",
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: "#FFFFFF",
   },
-  infoText: { color: "#587063", fontWeight: "600" },
+  infoText: { fontWeight: "600" },
   mapperLink: {
-    color: "#FFFFFF",
     fontWeight: "800",
-    backgroundColor: "#245A3E",
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,

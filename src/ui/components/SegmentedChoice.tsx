@@ -38,7 +38,7 @@ export function SegmentedChoice(props: {
                   borderWidth: shape.borderWidth,
                   borderRadius: shape.segmentOptionRadius,
                   backgroundColor: selected ? theme.filterControlActiveBackground : "transparent",
-                  borderColor: selected ? theme.filterControlActiveBorder : "transparent",
+                  borderColor: selected ? theme.filterControlActiveBorder : theme.filterControlInactiveBorder,
                 },
               ]}
               onPress={() => props.onSelect(option.id)}

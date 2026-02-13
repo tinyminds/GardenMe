@@ -20,18 +20,27 @@ export type ThemeTokens = {
   disabledActionText: string;
   dangerActionBackground: string;
   dangerActionText: string;
+  // Chip-specific tokens (distinct from buttons)
+  chipBackground: string;
+  chipText: string;
+  chipActiveBackground: string;
+  chipActiveText: string;
+  chipBorder: string;
+  statusChipBackground: string;
+  statusChipText: string;
+  statusChipBorder: string;
+  // Legacy choice control tokens (deprecated - use chip tokens)
   choiceControlBackground: string;
   choiceControlText: string;
   choiceControlActiveBackground: string;
   choiceControlActiveText: string;
-  statusChipBackground: string;
-  statusChipText: string;
   filterControlBackground: string;
   filterControlBorder: string;
   filterControlText: string;
   filterControlActiveBackground: string;
   filterControlActiveBorder: string;
   filterControlActiveText: string;
+  filterControlInactiveBorder: string;
   toggleOnBackground: string;
   toggleOffBackground: string;
   toggleThumbColor: string;
@@ -88,18 +97,27 @@ export const DEFAULT_THEME_TOKENS: ThemeTokens = {
   disabledActionText: "#FFFFFF",
   dangerActionBackground: "#C74C3A",
   dangerActionText: "#FFFFFF",
+  // Chip-specific colors (more subtle than buttons)
+  chipBackground: "#F8FBFB",
+  chipText: "#4E6857",
+  chipActiveBackground: "#E3EEE5", 
+  chipActiveText: "#1E402C",
+  chipBorder: "#D1DDD4",
+  statusChipBackground: "#F8FBFB",
+  statusChipText: "#4E6857",
+  statusChipBorder: "#E8F0E9",
+  // Legacy choice control tokens (deprecated)
   choiceControlBackground: "#E8F2E7",
   choiceControlText: "#2A4B38",
   choiceControlActiveBackground: "#1E6A42",
   choiceControlActiveText: "#FFFFFF",
-  statusChipBackground: "#EDF5EC",
-  statusChipText: "#2A4B38",
   filterControlBackground: "#F7FBF5",
   filterControlBorder: "#A9C3AC",
   filterControlText: "#2A4B38",
   filterControlActiveBackground: "#1E6A42",
   filterControlActiveBorder: "#1E6A42",
   filterControlActiveText: "#FFFFFF",
+  filterControlInactiveBorder: "#D8E5D5",
   toggleOnBackground: "#2D6A49",
   toggleOffBackground: "#BFD1BC",
   toggleThumbColor: "#FFFFFF",

@@ -15,6 +15,8 @@ export function StatusChip(props: { label: string }) {
           borderTopRightRadius: shape.chipRightRadius,
           borderBottomRightRadius: shape.chipRightRadius,
           backgroundColor: theme.statusChipBackground,
+          borderWidth: 1,
+          borderColor: theme.statusChipBorder,
         },
       ]}
     >
