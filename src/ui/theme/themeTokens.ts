@@ -44,6 +44,11 @@ export type ThemeTokens = {
   toggleOnBackground: string;
   toggleOffBackground: string;
   toggleThumbColor: string;
+  checkboxBackground: string;
+  checkboxActiveBackground: string;
+  checkboxBorder: string;
+  checkboxActiveBorder: string;
+  checkboxCheckColor: string;
   modalBackdrop: string;
   modalSurfaceBackground: string;
   modalSurfaceBorder: string;
@@ -121,6 +126,11 @@ export const DEFAULT_THEME_TOKENS: ThemeTokens = {
   toggleOnBackground: "#2D6A49",
   toggleOffBackground: "#BFD1BC",
   toggleThumbColor: "#FFFFFF",
+  checkboxBackground: "#FFFFFF",
+  checkboxActiveBackground: "#FFFFFF", 
+  checkboxBorder: "#D8E5D5",
+  checkboxActiveBorder: "#1E6A42",
+  checkboxCheckColor: "#1E6A42",
   modalBackdrop: "#00000066",
   modalSurfaceBackground: "#FFFFFF",
   modalSurfaceBorder: "#D8E5D5",

@@ -18,6 +18,9 @@ import { queryClient } from "@/state/queryClient";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 import { ChoiceChip } from "@/ui/components/ChoiceChip";
 import { FilterPill } from "@/ui/components/FilterPill";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
+import { StatusChip } from "@/ui/components/StatusChip";
+import { AppButton } from "@/ui/components/AppButton";
 import type { GardenCropWishlistItemView, PlantCatalogEntry } from "@/domain/entities/Plant";
 import type { CompanionPlantingRelation } from "@/domain/entities/CompanionPlanting";
 
@@ -1122,46 +1125,37 @@ export default function GardenGrowListScreen() {
                 </Pressable>
               ))}
               {suggestions.length > 12 && (
-                <Pressable style={[styles.suggestionMoreButton, { borderTopColor: theme.borderColor }]} onPress={() => setShowAllSuggestions((value) => !value)}>
-                  <Text style={[styles.suggestionMoreText, { color: theme.secondaryActionText }]}>{showAllSuggestions ? "Show less" : "Show more"}</Text>
-                </Pressable>
+                <AppButton
+                  label={showAllSuggestions ? "Show less" : "Show more"}
+                  variant="secondary"
+                  onPress={() => setShowAllSuggestions((value) => !value)}
+                />
               )}
             </View>
           )}
           <View style={styles.addRow}>
-            <Pressable
-              style={[
-                styles.primaryButton,
-                { backgroundColor: search.trim() ? theme.primaryActionBackground : theme.disabledActionBackground },
-                !search.trim() && styles.buttonDisabled,
-              ]}
+            <AppButton
+              label="Add Typed Plant"
+              variant="primary"
               disabled={!search.trim() || addToWishlistMutation.isPending}
               onPress={() => addToWishlistMutation.mutate({ manualName: search })}
-            >
-              <Text style={[styles.primaryButtonText, { color: search.trim() ? theme.primaryActionText : theme.disabledActionText }]}>Add Typed Plant</Text>
-            </Pressable>
+            />
           </View>
           <View style={styles.addRow}>
-            <Pressable
-              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+            <AppButton
+              label={bulkImportOpen ? "Hide Bulk Import" : "Bulk Import"}
+              variant="secondary"
               disabled={bulkImportMutation.isPending}
               onPress={() => setBulkImportOpen((value) => !value)}
-            >
-              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>
-                {bulkImportOpen ? "Hide Bulk Import" : "Bulk Import"}
-              </Text>
-            </Pressable>
+            />
           </View>
           <View style={styles.addRow}>
-            <Pressable
-              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+            <AppButton
+              label={refreshTimingMutation.isPending ? "Refreshing timing..." : "Refresh timing for current list"}
+              variant="secondary"
               disabled={refreshTimingMutation.isPending || (wishlistQuery.data ?? []).length === 0}
               onPress={() => refreshTimingMutation.mutate()}
-            >
-              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>
-                {refreshTimingMutation.isPending ? "Refreshing timing..." : "Refresh timing for current list"}
-              </Text>
-            </Pressable>
+            />
           </View>
           {timingRefreshMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{timingRefreshMessage}</Text>}
           {bulkImportOpen && (
@@ -1177,19 +1171,12 @@ export default function GardenGrowListScreen() {
                 editable={!bulkImportMutation.isPending}
               />
               <View style={styles.addRow}>
-                <Pressable
-                  style={[
-                    styles.primaryButton,
-                    { backgroundColor: bulkImportText.trim() ? theme.primaryActionBackground : theme.disabledActionBackground },
-                    !bulkImportText.trim() && styles.buttonDisabled,
-                  ]}
+                <AppButton
+                  label={bulkImportMutation.isPending ? "Importing..." : "Run Bulk Import"}
+                  variant="primary"
                   disabled={!bulkImportText.trim() || bulkImportMutation.isPending}
                   onPress={() => bulkImportMutation.mutate()}
-                >
-                  <Text style={[styles.primaryButtonText, { color: bulkImportText.trim() ? theme.primaryActionText : theme.disabledActionText }]}>
-                    {bulkImportMutation.isPending ? "Importing..." : "Run Bulk Import"}
-                  </Text>
-                </Pressable>
+                />
               </View>
               {bulkImportProgress && (
                 <Text style={[styles.helper, { color: theme.textMuted }]}>
@@ -1222,36 +1209,24 @@ export default function GardenGrowListScreen() {
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Import From Garden</Text>
           <View style={styles.importSection}>
-            <View style={styles.configChips}>
-              {(gardensQuery.data ?? [])
+            <SegmentedChoice
+              options={(gardensQuery.data ?? [])
                 .filter((garden) => garden.id !== gardenId)
-                .map((garden) => (
-                  <ChoiceChip
-                    key={garden.id}
-                    label={garden.name}
-                    selected={importSourceGardenId === garden.id}
-                    onPress={() => setImportSourceGardenId((current) => (current === garden.id ? null : garden.id))}
-                  />
-                ))}
-            </View>
+                .map((garden) => ({ id: garden.id, label: garden.name }))}
+              selectedId={importSourceGardenId}
+              onSelect={(id) => setImportSourceGardenId(id)}
+            />
             {!gardensQuery.isLoading &&
               (gardensQuery.data ?? []).filter((garden) => garden.id !== gardenId).length === 0 && (
                 <Text style={[styles.helper, { color: theme.textMuted }]}>No other gardens yet.</Text>
               )}
             <View style={styles.addRow}>
-              <Pressable
-                style={[
-                  styles.secondaryButton,
-                  { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor },
-                  (!importSourceGardenId || importFromGardenMutation.isPending) && styles.buttonDisabled,
-                ]}
+              <AppButton
+                label={importFromGardenMutation.isPending ? "Importing..." : "Import"}
+                variant="secondary"
                 disabled={!importSourceGardenId || importFromGardenMutation.isPending}
                 onPress={() => importFromGardenMutation.mutate()}
-              >
-                <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>
-                  {importFromGardenMutation.isPending ? "Importing..." : "Import"}
-                </Text>
-              </Pressable>
+              />
             </View>
             {importMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{importMessage}</Text>}
           </View>
@@ -1279,35 +1254,33 @@ export default function GardenGrowListScreen() {
             </View>
             <View style={[styles.bulkDivider, { backgroundColor: theme.borderColor }]} />
             <View style={styles.configChips}>
-              <Pressable
-                style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+              <AppButton
+                label="Select visible"
+                variant="secondary"
                 onPress={() =>
                   setSelectedWishlistIds(
                     Object.fromEntries(visibleWishlistItems.map((item) => [item.id, true]))
                   )
                 }
-              >
-                <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Select visible</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+              />
+              <AppButton
+                label="Clear selected"
+                variant="secondary"
                 onPress={() => setSelectedWishlistIds({})}
-              >
-                <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Clear selected</Text>
-              </Pressable>
+              />
             </View>
             {selectedCount > 0 && (
               <>
                 <View style={[styles.bulkDivider, { backgroundColor: theme.borderColor }]} />
                 <View style={styles.configChips}>
                   <Text style={[styles.helper, { color: theme.textMuted }]}>{selectedCount} selected</Text>
-                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("set_planned")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Set planned</Text></Pressable>
-                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("set_growing")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Set growing</Text></Pressable>
-                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("support_on")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Support on</Text></Pressable>
-                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("support_off")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Support off</Text></Pressable>
-                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("perennial_on")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Perennial</Text></Pressable>
-                  <Pressable style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("perennial_off")} disabled={bulkApplyMutation.isPending}><Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Annual</Text></Pressable>
-                  <Pressable style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]} onPress={() => bulkApplyMutation.mutate("remove")} disabled={bulkApplyMutation.isPending}><Text style={[styles.removeButtonText, { color: theme.dangerActionText }]}>Remove</Text></Pressable>
+                  <AppButton label="Set planned" variant="secondary" onPress={() => bulkApplyMutation.mutate("set_planned")} disabled={bulkApplyMutation.isPending} />
+                  <AppButton label="Set growing" variant="secondary" onPress={() => bulkApplyMutation.mutate("set_growing")} disabled={bulkApplyMutation.isPending} />
+                  <AppButton label="Support on" variant="secondary" onPress={() => bulkApplyMutation.mutate("support_on")} disabled={bulkApplyMutation.isPending} />
+                  <AppButton label="Support off" variant="secondary" onPress={() => bulkApplyMutation.mutate("support_off")} disabled={bulkApplyMutation.isPending} />
+                  <AppButton label="Perennial" variant="secondary" onPress={() => bulkApplyMutation.mutate("perennial_on")} disabled={bulkApplyMutation.isPending} />
+                  <AppButton label="Annual" variant="secondary" onPress={() => bulkApplyMutation.mutate("perennial_off")} disabled={bulkApplyMutation.isPending} />
+                  <AppButton label="Remove" variant="danger" onPress={() => bulkApplyMutation.mutate("remove")} disabled={bulkApplyMutation.isPending} />
                 </View>
               </>
             )}
@@ -1330,19 +1303,15 @@ export default function GardenGrowListScreen() {
                   }))
                 }
               >
-                <Pressable
-                  style={[styles.rowSelector, { borderColor: theme.borderColor, backgroundColor: selectedWishlistIds[item.id] ? theme.primaryActionBackground : theme.surfaceBackground }]}
-                  onPress={() =>
+                <Checkbox
+                  checked={Boolean(selectedWishlistIds[item.id])}
+                  onToggle={(checked) =>
                     setSelectedWishlistIds((prev) => ({
                       ...prev,
-                      [item.id]: !prev[item.id],
+                      [item.id]: checked,
                     }))
                   }
-                >
-                  <Text style={[styles.rowSelectorText, { color: selectedWishlistIds[item.id] ? theme.primaryActionText : theme.textMuted }]}>
-                    {selectedWishlistIds[item.id] ? "?" : "?"}
-                  </Text>
-                </Pressable>
+                />
                 <View style={styles.compactHeaderMain}>
                   <Text style={[styles.wishName, { color: theme.textPrimary }]}>{item.plant.commonName}</Text>
                   <Text style={[styles.compactHeaderMeta, { color: theme.textMuted }]}>
@@ -1425,16 +1394,18 @@ export default function GardenGrowListScreen() {
                       )}
                       {isPlantDataExpanded && (
                         <View style={[styles.dataPanel, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
-                          {(() => {
-                            const timingStatus = extractTimingStatus(item.plant.metaJson);
-                            if (!timingStatus) return null;
-                            return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{timingStatus}</Text>;
-                          })()}
-                          {(() => {
-                            const trefleStatus = extractTrefleStatus(item.plant.metaJson);
-                            if (!trefleStatus) return null;
-                            return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{trefleStatus}</Text>;
-                          })()}
+                          <View style={styles.statusChipRow}>
+                            {(() => {
+                              const timingStatus = extractTimingStatus(item.plant.metaJson);
+                              if (!timingStatus) return null;
+                              return <StatusChip label={timingStatus} />;
+                            })()}
+                            {(() => {
+                              const trefleStatus = extractTrefleStatus(item.plant.metaJson);
+                              if (!trefleStatus) return null;
+                              return <StatusChip label={trefleStatus} />;
+                            })()}
+                          </View>
                           <View style={styles.dataField}>
                             <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Sun requirements</Text>
                             <TextInput
@@ -1590,9 +1561,7 @@ export default function GardenGrowListScreen() {
                 </Text>
                 <View style={styles.timelineChips}>
                   {buildGrowTimelineChips(item, entryDrafts[item.id]).map((chip) => (
-                    <View key={`${item.id}-timeline-${chip}`} style={[styles.timelineChip, { backgroundColor: theme.statusChipBackground }]}>
-                      <Text style={[styles.timelineChipText, { color: theme.statusChipText }]}>{chip}</Text>
-                    </View>
+                    <StatusChip key={`${item.id}-timeline-${chip}`} label={chip} />
                   ))}
                 </View>
                 <View style={styles.inlineControls}>
@@ -1658,18 +1627,20 @@ export default function GardenGrowListScreen() {
                     style={[styles.inlineInput, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
                     autoCapitalize="words"
                   />
-                  <ToggleSwitch
-                    label={(entryDrafts[item.id]?.isPerennial ?? item.isPerennial) ? "Perennial" : "Annual"}
-                    value={entryDrafts[item.id]?.isPerennial ?? item.isPerennial}
-                    theme={theme}
-                    onToggle={(nextValue) =>
+                  <SegmentedChoice
+                    options={[
+                      { id: "annual", label: "Annual" },
+                      { id: "perennial", label: "Perennial" }
+                    ]}
+                    selectedId={(entryDrafts[item.id]?.isPerennial ?? item.isPerennial) ? "perennial" : "annual"}
+                    onSelect={(type) =>
                       setEntryDrafts((prev) => ({
                         ...prev,
                         [item.id]: {
                           status: prev[item.id]?.status ?? item.status,
                           startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
                           bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
-                          isPerennial: nextValue,
+                          isPerennial: type === "perennial",
                           varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
                           supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
                           quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
@@ -1677,11 +1648,13 @@ export default function GardenGrowListScreen() {
                       }))
                     }
                   />
-                  <ToggleSwitch
-                    label={(entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded) ? "Needs support" : "No support"}
-                    value={entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded}
-                    theme={theme}
-                    onToggle={(nextValue) =>
+                  <SegmentedChoice
+                    options={[
+                      { id: "no_support", label: "No support" },
+                      { id: "needs_support", label: "Needs support" }
+                    ]}
+                    selectedId={(entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded) ? "needs_support" : "no_support"}
+                    onSelect={(support) =>
                       setEntryDrafts((prev) => ({
                         ...prev,
                         [item.id]: {
@@ -1690,23 +1663,25 @@ export default function GardenGrowListScreen() {
                           bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
                           isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
                           varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
-                          supportNeeded: nextValue,
+                          supportNeeded: support === "needs_support",
                           quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
                         },
                       }))
                     }
                   />
-                  <ToggleSwitch
-                    label={(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"}
-                    value={(entryDrafts[item.id]?.status ?? item.status) === "already_growing"}
-                    theme={theme}
-                    onToggle={(isGrowing) =>
+                  <SegmentedChoice
+                    options={[
+                      { id: "wanted", label: "Planned" },
+                      { id: "already_growing", label: "Growing now" }
+                    ]}
+                    selectedId={entryDrafts[item.id]?.status ?? item.status}
+                    onSelect={(status) =>
                       setEntryDrafts((prev) => ({
                         ...prev,
                         [item.id]: {
-                          status: isGrowing ? "already_growing" : "wanted",
+                          status: status as "wanted" | "already_growing",
                           startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
-                          bedId: isGrowing ? (prev[item.id]?.bedId ?? item.bedId ?? null) : null,
+                          bedId: status === "already_growing" ? (prev[item.id]?.bedId ?? item.bedId ?? null) : null,
                           isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
                           varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
                           supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
@@ -1716,16 +1691,18 @@ export default function GardenGrowListScreen() {
                     }
                   />
                   {(entryDrafts[item.id]?.status ?? item.status) === "wanted" && (
-                    <ToggleSwitch
-                      label={(entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt) ? "Started indoors" : "Not started indoors"}
-                      value={Boolean(entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt)}
-                      theme={theme}
-                      onToggle={(isStarted) =>
+                    <SegmentedChoice
+                      options={[
+                        { id: "not_started", label: "Not started indoors" },
+                        { id: "started", label: "Started indoors" }
+                      ]}
+                      selectedId={Boolean(entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt) ? "started" : "not_started"}
+                      onSelect={(startedOption) =>
                         setEntryDrafts((prev) => ({
                           ...prev,
                           [item.id]: {
                             status: prev[item.id]?.status ?? item.status,
-                            startedIndoorsAt: isStarted
+                            startedIndoorsAt: startedOption === "started"
                               ? (prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? new Date().toISOString())
                               : null,
                             bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
@@ -1740,32 +1717,28 @@ export default function GardenGrowListScreen() {
                   )}
                   {(entryDrafts[item.id]?.status ?? item.status) === "already_growing" && (
                     <>
-                      <View style={styles.configChips}>
-                        {(bedsQuery.data ?? []).map((bed) => {
-                          const selected = (entryDrafts[item.id]?.bedId ?? item.bedId ?? null) === bed.id;
-                          return (
-                            <ChoiceChip
-                              key={`${item.id}-${bed.id}`}
-                              label={bed.name}
-                              selected={selected}
-                              onPress={() =>
-                                setEntryDrafts((prev) => ({
-                                  ...prev,
-                                  [item.id]: {
-                                    status: "already_growing",
-                                    startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
-                                    bedId: selected ? null : bed.id,
-                                    isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
-                                    varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
-                                    supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
-                                    quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
-                                  },
-                                }))
-                              }
-                            />
-                          );
-                        })}
-                      </View>
+                      <Text style={[styles.descriptionToggleText, { color: theme.secondaryActionText, marginTop: 12 }]}>Bed placement</Text>
+                      <SegmentedChoice
+                        options={[
+                          { id: "no_bed", label: "No bed assigned" },
+                          ...(bedsQuery.data ?? []).map(bed => ({ id: bed.id, label: bed.name }))
+                        ]}
+                        selectedId={(entryDrafts[item.id]?.bedId ?? item.bedId) || "no_bed"}
+                        onSelect={(bedId) =>
+                          setEntryDrafts((prev) => ({
+                            ...prev,
+                            [item.id]: {
+                              status: "already_growing",
+                              startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
+                              bedId: bedId === "no_bed" ? null : bedId,
+                              isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
+                              varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
+                              supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                              quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
+                            },
+                          }))
+                        }
+                      />
                     </>
                   )}
                 </View>
@@ -1774,48 +1747,44 @@ export default function GardenGrowListScreen() {
                 })()}
               </View>
               <View style={styles.rowActions}>
-                <Pressable
-                  style={[styles.cloneInlineButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                <AppButton
+                  label="Clone"
+                  variant="secondary"
+                  size="sm"
                   disabled={cloneEntryMutation.isPending}
                   onPress={() => cloneEntryMutation.mutate(item)}
-                >
-                  <Text style={[styles.cloneInlineButtonText, { color: theme.secondaryActionText }]}>Clone</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.cloneInlineButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                />
+                <AppButton
+                  label={Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1) !== Math.max(1, item.quantity ?? 1)
+                    ? "Split 1 (Save qty)"
+                    : "Split 1"}
+                  variant="secondary"
+                  size="sm"
                   disabled={
                     splitOneMutation.isPending ||
                     Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1) <= 1 ||
                     Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1) !== Math.max(1, item.quantity ?? 1)
                   }
                   onPress={() => splitOneMutation.mutate(item)}
-                >
-                  <Text style={[styles.cloneInlineButtonText, { color: theme.secondaryActionText }]}>
-                    {Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1) !== Math.max(1, item.quantity ?? 1)
-                      ? "Split 1 (Save qty)"
-                      : "Split 1"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.saveInlineButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]}
+                />
+                <AppButton
+                  label={saveRowMutation.isPending ? "Saving" : "Save"}
+                  variant="primary"
+                  size="sm"
                   disabled={
                     saveRowMutation.isPending ||
                     (!hasEntryDraftChanges(item, entryDrafts[item.id]) &&
                       !hasPlantDataDraftChanges(item, plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson)))
                   }
                   onPress={() => saveRowMutation.mutate(item)}
-                >
-                  <Text style={[styles.saveInlineButtonText, { color: theme.primaryActionText }]}>
-                    {saveRowMutation.isPending ? "Saving..." : "Save changes"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]}
+                />
+                <AppButton
+                  label="Remove"
+                  variant="danger"
+                  size="sm"
                   disabled={removeMutation.isPending}
                   onPress={() => removeMutation.mutate(item.id)}
-                >
-                  <Text style={[styles.removeButtonText, { color: theme.dangerActionText }]}>Remove</Text>
-                </Pressable>
+                />
               </View>
               </>
               )}
@@ -1829,32 +1798,24 @@ export default function GardenGrowListScreen() {
             Download CSV or backup JSON, then upload either file later. Imports are portable: plants come in as Planned with no bed/start state.
           </Text>
           <View style={styles.configChips}>
-            <Pressable
-              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+            <AppButton
+              label="Download CSV"
+              variant="primary"
               onPress={() => void handleExportGrowListFile("csv")}
               disabled={(wishlistQuery.data ?? []).length === 0}
-            >
-              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Download CSV</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+            />
+            <AppButton
+              label="Download Backup"
+              variant="primary"
               onPress={() => void handleExportGrowListFile("json")}
               disabled={(wishlistQuery.data ?? []).length === 0}
-            >
-              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Download Backup</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.primaryButton,
-                { backgroundColor: importCsvMutation.isPending ? theme.disabledActionBackground : theme.primaryActionBackground },
-              ]}
+            />
+            <AppButton
+              label={importCsvMutation.isPending ? "Importing..." : "Upload File"}
+              variant="primary"
               disabled={importCsvMutation.isPending}
               onPress={() => void handleUploadGrowListFile()}
-            >
-              <Text style={[styles.primaryButtonText, { color: importCsvMutation.isPending ? theme.disabledActionText : theme.primaryActionText }]}>
-                {importCsvMutation.isPending ? "Importing..." : "Upload File"}
-              </Text>
-            </Pressable>
+            />
           </View>
           {listTransferMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{listTransferMessage}</Text>}
         </View>
@@ -1862,30 +1823,36 @@ export default function GardenGrowListScreen() {
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <View style={styles.rowBetween}>
             <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Suggested Plants</Text>
-            <Pressable
-              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+            <AppButton
+              label="Refresh"
+              variant="secondary"
               onPress={() => {
                 setSuggestionRefreshKey((value) => value + 1);
                 setSuggestionMessage(null);
               }}
               disabled={addSuggestedPlantMutation.isPending}
-            >
-              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Refresh</Text>
-            </Pressable>
+            />
           </View>
           <View style={styles.configChips}>
-            <FilterPill label="Companions" selected={suggestionTab === "companions"} onPress={() => setSuggestionTab("companions")} />
-            <FilterPill label="Common" selected={suggestionTab === "common"} onPress={() => setSuggestionTab("common")} />
-            <FilterPill label="Unusual" selected={suggestionTab === "unusual"} onPress={() => setSuggestionTab("unusual")} />
+            <SegmentedChoice
+              options={[
+                { id: "companions", label: "Companions" },
+                { id: "common", label: "Common" },
+                { id: "unusual", label: "Unusual" }
+              ]}
+              selectedId={suggestionTab}
+              onSelect={(tab) => setSuggestionTab(tab as SuggestionTab)}
+            />
           </View>
           {visibleSuggestionChips.length === 0 ? (
             <Text style={[styles.helper, { color: theme.textMuted }]}>No suggestions right now. Refresh or add more plants first.</Text>
           ) : (
             <View style={styles.configChips}>
               {visibleSuggestionChips.map((name) => (
-                <ChoiceChip
+                <AppButton
                   key={`${suggestionTab}-${name}`}
                   label={name}
+                  variant="secondary"
                   onPress={() => addSuggestedPlantMutation.mutate(name)}
                   disabled={addSuggestedPlantMutation.isPending}
                 />
@@ -3139,6 +3106,33 @@ function isLikelySpecificVarietyName(commonName: string, query: string): boolean
   return hasVarietyKeyword || hasDelimiter || tokenCount >= 3;
 }
 
+function Checkbox(props: {
+  checked: boolean;
+  onToggle: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      style={[
+        styles.checkbox,
+        {
+          backgroundColor: theme.surfaceBackground,
+          borderColor: props.checked ? theme.primaryActionBackground : theme.borderColor,
+          borderWidth: props.checked ? 2 : 1,
+          opacity: props.disabled ? 0.5 : 1,
+        },
+      ]}
+      onPress={() => !props.disabled && props.onToggle(!props.checked)}
+      disabled={props.disabled}
+    >
+      {props.checked && (
+        <View style={[styles.checkboxInner, { backgroundColor: theme.primaryActionText }]} />
+      )}
+    </Pressable>
+  );
+}
+
 function ToggleSwitch(props: {
   label: string;
   value: boolean;
@@ -3294,6 +3288,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   rowSelectorText: { fontSize: 14, fontWeight: "700" },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  checkboxInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 2,
+  },
+  checkboxCheck: { fontSize: 14, fontWeight: "800" },
   wishMain: { flex: 1, gap: 2 },
   wishName: { fontWeight: "700" },
   descriptionToggle: { marginTop: 2 },
@@ -3312,6 +3321,7 @@ const styles = StyleSheet.create({
     padding: 8,
     gap: 8,
   },
+  statusChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 4 },
   dataGrid: { gap: 8 },
   dataField: { gap: 4 },
   dataLabel: { fontSize: 12, fontWeight: "700" },
@@ -3339,7 +3349,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
-  rowActions: { gap: 8, alignItems: "flex-end" },
+  rowActions: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "flex-start" },
   cloneInlineButton: {
     borderWidth: 1,
     borderRadius: 10,

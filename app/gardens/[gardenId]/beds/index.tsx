@@ -15,6 +15,9 @@ import { polygonArea } from "@/features/garden-mapping/utils/geometry";
 import { getCompanionMatchSummary, normalizePlantKey } from "@/features/plants/services/companionMatching";
 import { queryClient } from "@/state/queryClient";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
+import { StatusChip } from "@/ui/components/StatusChip";
+import { AppButton } from "@/ui/components/AppButton";
 import type {
   GardenCropPlantingHistoryItem,
   GardenCropWishlistItemView,
@@ -872,35 +875,19 @@ export default function BedsListScreen() {
         <Text style={[styles.title, { color: theme.textPrimary }]}>Bed Planner</Text>
         <Text style={[styles.subtitle, { color: theme.textMuted }]}>Review beds and place crops from your grow list.</Text>
         <View style={styles.statsRow}>
-          <View style={[styles.statChip, { backgroundColor: theme.statusChipBackground }]}>
-            <Text style={[styles.statChipText, { color: theme.statusChipText }]}>Grow list {growListCount}</Text>
-          </View>
-          <View style={[styles.statChip, { backgroundColor: theme.statusChipBackground }]}>
-            <Text style={[styles.statChipText, { color: theme.statusChipText }]}>Planned {plannedCount}</Text>
-          </View>
-          <View style={[styles.statChip, { backgroundColor: theme.statusChipBackground }]}>
-            <Text style={[styles.statChipText, { color: theme.statusChipText }]}>Planted {plantedCount}</Text>
-          </View>
+          <StatusChip label={`Grow list ${growListCount}`} />
+          <StatusChip label={`Planned ${plannedCount}`} />
+          <StatusChip label={`Planted ${plantedCount}`} />
+          <StatusChip label={`Unplanned ${unplannedCount}`} />
         </View>
-        <View style={styles.row}>
-          <Pressable
-            style={[styles.toggleChip, { backgroundColor: plannerMode === "list" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]}
-            onPress={() => setPlannerMode("list")}
-          >
-            <Text style={[styles.toggleChipText, { color: plannerMode === "list" ? theme.choiceControlActiveText : theme.choiceControlText }]}>List</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.toggleChip, { backgroundColor: plannerMode === "visual" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]}
-            onPress={() => setPlannerMode("visual")}
-          >
-            <Text style={[styles.toggleChipText, { color: plannerMode === "visual" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Visual</Text>
-          </Pressable>
-          {plannerMode === "visual" && (
-            <View style={[styles.statChip, { backgroundColor: theme.statusChipBackground }]}>
-              <Text style={[styles.statChipText, { color: theme.statusChipText }]}>Unplanned {unplannedCount}</Text>
-            </View>
-          )}
-        </View>
+        <SegmentedChoice
+          options={[
+            { id: "list", label: "List" },
+            { id: "visual", label: "Visual" }
+          ]}
+          selectedId={plannerMode}
+          onSelect={(mode) => setPlannerMode(mode as PlannerMode)}
+        />
         {showSpaceWarning && (
           <View style={[styles.warningCard, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]}>
             <Text style={[styles.warningText, { color: theme.dangerActionText }]}>
@@ -955,22 +942,13 @@ export default function BedsListScreen() {
               {bedExpanded && (
                 <>
               <Text style={[styles.meta, { color: theme.textMuted }]}>Sun: {formatLabel(card.bed.sunExposure)} - Drainage: {formatLabel(card.bed.drainage)}</Text>
-              <View style={styles.row}>
-                <Text style={[styles.meta, { color: theme.textMuted }]}>Perennial bed:</Text>
-                <Pressable
-                  style={[styles.toggleChip, { backgroundColor: card.bed.containsPerennials ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]}
-                  onPress={() => updateBedPerennialMutation.mutate({ bedId: card.bed.id, containsPerennials: true })}
+              <View style={styles.toggleRow}>
+                <Text style={[styles.toggleLabel, { color: theme.textMuted }]}>Perennial bed</Text>
+                <SimpleToggle
+                  value={card.bed.containsPerennials}
+                  onToggle={(value) => updateBedPerennialMutation.mutate({ bedId: card.bed.id, containsPerennials: value })}
                   disabled={updateBedPerennialMutation.isPending}
-                >
-                  <Text style={[styles.toggleChipText, { color: card.bed.containsPerennials ? theme.choiceControlActiveText : theme.choiceControlText }]}>Yes</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.toggleChip, { backgroundColor: !card.bed.containsPerennials ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]}
-                  onPress={() => updateBedPerennialMutation.mutate({ bedId: card.bed.id, containsPerennials: false })}
-                  disabled={updateBedPerennialMutation.isPending}
-                >
-                  <Text style={[styles.toggleChipText, { color: !card.bed.containsPerennials ? theme.choiceControlActiveText : theme.choiceControlText }]}>No</Text>
-                </Pressable>
+                />
               </View>
               <Text style={[styles.meta, { color: theme.textMuted }]}>
                 {typeof card.areaSqM === "number" ? `Area ~${card.areaSqM.toFixed(1)} sqm` : "Area unavailable (set garden scale)"}
@@ -1001,10 +979,12 @@ export default function BedsListScreen() {
 
               {card.growingNames.length > 0 && (
                 <View style={styles.block}>
-                  <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Spare space</Text>
-                  <View style={styles.row}>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setSpareSpace(card.bed.id, true)}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.choiceControlActiveText : theme.choiceControlText }]}>Yes</Text></Pressable>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setSpareSpace(card.bed.id, false)}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.choiceControlActiveText : theme.choiceControlText }]}>No</Text></Pressable>
+                  <View style={styles.toggleRow}>
+                    <Text style={[styles.toggleLabel, { color: theme.textMuted }]}>Spare space</Text>
+                    <SimpleToggle
+                      value={hasSpareSpace}
+                      onToggle={(value) => setSpareSpace(card.bed.id, value)}
+                    />
                   </View>
                 </View>
               )}
@@ -1107,9 +1087,12 @@ export default function BedsListScreen() {
                                 <View style={styles.row}>
                                   {(suggestion.companionGoodCount > 0 || suggestion.companionAvoidCount > 0) && (
                                     <View style={[styles.companionSummaryChip, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
-                                      <Text style={[styles.companionSummaryChipText, { color: theme.textMuted }]}>
-                                        +{suggestion.companionGoodCount} / -{suggestion.companionAvoidCount}
-                                      </Text>
+                                      <Text style={[styles.companionSummaryChipText, { color: theme.textMuted }]}>+{suggestion.companionGoodCount} / -{suggestion.companionAvoidCount}</Text>
+                                    </View>
+                                  )}
+                                  {suggestion.fitCount && (
+                                    <View style={[styles.fitChip, { backgroundColor: theme.chipBackground, borderColor: theme.chipBorder }]}>
+                                      <Text style={[styles.fitChipText, { color: theme.chipText }]}>Fit {suggestion.fitCount}</Text>
                                     </View>
                                   )}
                                   <Text style={[styles.suggestionScore, { color: theme.textMuted }]}>{suggestion.scoreLabel}</Text>
@@ -1155,20 +1138,20 @@ export default function BedsListScreen() {
                       </View>
                       <View style={styles.suggestionActions}>
                         <Pressable
-                          style={[styles.suggestionButton, { backgroundColor: theme.dangerActionBackground }]}
+                          style={[styles.suggestionButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]}
                           onPress={() => rejectSuggestion(card.bed.id, suggestion.entry.id)}
                         >
                           <Text style={[styles.suggestionButtonText, { color: theme.dangerActionText }]}>Reject</Text>
                         </Pressable>
                         <Pressable
-                          style={[styles.suggestionButton, { backgroundColor: theme.secondaryActionBackground }]}
+                          style={[styles.suggestionButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
                           onPress={() => planInBedMutation.mutate({ entry: suggestion.entry, bedId: card.bed.id })}
                           disabled={planInBedMutation.isPending}
                         >
                           <Text style={[styles.suggestionButtonText, { color: theme.secondaryActionText }]}>Plan</Text>
                         </Pressable>
                         <Pressable
-                          style={[styles.suggestionButton, { backgroundColor: theme.primaryActionBackground }]}
+                          style={[styles.suggestionButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]}
                           onPress={() => handleMarkPlanted(suggestion.entry, card.bed.id)}
                           disabled={markPlantedMutation.isPending}
                         >
@@ -1200,11 +1183,17 @@ export default function BedsListScreen() {
                   ) : (
                     <View style={styles.chips}>
                       {card.contraryOptions.map((entry) => (
-                        <Pressable key={entry.id} style={[styles.optionChip, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => planInBedMutation.mutate({ entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={[styles.optionChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text></Pressable>
+                        <Pressable key={entry.id} style={[styles.optionChip, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => planInBedMutation.mutate({ entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={[styles.optionChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text></Pressable>
                       ))}
                     </View>
                   )}
-                  <Link href={`/gardens/${gardenId}/grow`} style={[styles.linkText, { color: theme.primaryActionBackground }]}>Add more crops in Grow List</Link>
+                  <Link href={`/gardens/${gardenId}/grow`}>
+                    <AppButton
+                      label="Add more crops in Grow List"
+                      variant="primary"
+                      style={{ width: '100%' }}
+                    />
+                  </Link>
                 </View>
               )}
                 </>
@@ -1242,10 +1231,12 @@ export default function BedsListScreen() {
                   <Text style={[styles.meta, { color: theme.textMuted }]}>
                     {card.activeGrowingRows.length} growing - {card.plannedInBed.length} planned - {showSuggestions ? `${card.suggestions.length} suggestions` : "suggestions hidden"}
                   </Text>
-                  <View style={styles.row}>
-                    <Text style={[styles.blockText, { color: theme.textMuted }]}>Spare space</Text>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: hasSpareSpace ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setSpareSpace(card.bed.id, true)}><Text style={[styles.toggleChipText, { color: hasSpareSpace ? theme.choiceControlActiveText : theme.choiceControlText }]}>Yes</Text></Pressable>
-                    <Pressable style={[styles.toggleChip, { backgroundColor: !hasSpareSpace ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setSpareSpace(card.bed.id, false)}><Text style={[styles.toggleChipText, { color: !hasSpareSpace ? theme.choiceControlActiveText : theme.choiceControlText }]}>No</Text></Pressable>
+                  <View style={styles.toggleRow}>
+                    <Text style={[styles.toggleLabel, { color: theme.textMuted }]}>Spare space</Text>
+                    <SimpleToggle
+                      value={hasSpareSpace}
+                      onToggle={(value) => setSpareSpace(card.bed.id, value)}
+                    />
                   </View>
                   <View style={styles.block}>
                     <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Growing now</Text>
@@ -1388,13 +1379,13 @@ export default function BedsListScreen() {
                                 )}
                               </View>
                               <View style={styles.suggestionActions}>
-                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => rejectSuggestion(card.bed.id, suggestion.entry.id)}>
+                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]} onPress={() => rejectSuggestion(card.bed.id, suggestion.entry.id)}>
                                   <Text style={[styles.suggestionButtonText, { color: theme.dangerActionText }]}>Reject</Text>
                                 </Pressable>
-                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => planInBedMutation.mutate({ entry: suggestion.entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}>
+                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => planInBedMutation.mutate({ entry: suggestion.entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}>
                                   <Text style={[styles.suggestionButtonText, { color: theme.secondaryActionText }]}>Plan</Text>
                                 </Pressable>
-                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => handleMarkPlanted(suggestion.entry, card.bed.id)} disabled={markPlantedMutation.isPending}>
+                                <Pressable style={[styles.suggestionButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]} onPress={() => handleMarkPlanted(suggestion.entry, card.bed.id)} disabled={markPlantedMutation.isPending}>
                                   <Text style={[styles.suggestionButtonText, { color: theme.primaryActionText }]}>Plant</Text>
                                 </Pressable>
                               </View>
@@ -1412,7 +1403,7 @@ export default function BedsListScreen() {
                       <ScrollView style={styles.optionsScroll} nestedScrollEnabled>
                         <View style={styles.chips}>
                           {card.allOtherOptions.map((entry) => (
-                            <Pressable key={`visual-option-${entry.id}`} style={[styles.optionChip, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => planInBedMutation.mutate({ entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={[styles.optionChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text></Pressable>
+                            <Pressable key={`visual-option-${entry.id}`} style={[styles.optionChip, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={() => planInBedMutation.mutate({ entry, bedId: card.bed.id })} disabled={planInBedMutation.isPending}><Text style={[styles.optionChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text></Pressable>
                           ))}
                         </View>
                       </ScrollView>
@@ -1445,15 +1436,12 @@ export default function BedsListScreen() {
             <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>
               Finish: {formatEntryName(finishDialog.entry)}
             </Text>
-            <View style={styles.row}>
-              <Text style={[styles.blockText, { color: theme.textMuted }]}>Outcome:</Text>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "harvested" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "harvested" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "harvested" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Harvested</Text></Pressable>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "done" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "done" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "done" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Done</Text></Pressable>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.endState === "dead" ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, endState: "dead" } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.endState === "dead" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Lost</Text></Pressable>
-            </View>
-            <View style={styles.row}>
-              <Text style={[styles.blockText, { color: theme.textMuted }]}>Keep in bed:</Text>
-              <Pressable style={[styles.toggleChip, { backgroundColor: finishDialog.keepInBed ? theme.choiceControlActiveBackground : theme.choiceControlBackground }]} onPress={() => setFinishDialog((prev) => (prev ? { ...prev, keepInBed: !prev.keepInBed } : prev))}><Text style={[styles.toggleChipText, { color: finishDialog.keepInBed ? theme.choiceControlActiveText : theme.choiceControlText }]}>{finishDialog.keepInBed ? "Yes" : "No"}</Text></Pressable>
+            <View style={styles.toggleRow}>
+              <Text style={[styles.toggleLabel, { color: theme.textMuted }]}>Keep in bed</Text>
+              <SimpleToggle
+                value={finishDialog.keepInBed}
+                onToggle={(value) => setFinishDialog((prev) => (prev ? { ...prev, keepInBed: value } : prev))}
+              />
             </View>
             <View style={styles.row}>
               {finishDialog.endState === "harvested" && (
@@ -1487,8 +1475,16 @@ export default function BedsListScreen() {
               multiline
             />
             <View style={styles.row}>
-              <Pressable style={[styles.suggestionButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setFinishDialog(null)}><Text style={[styles.suggestionButtonText, { color: theme.secondaryActionText }]}>Cancel</Text></Pressable>
-              <Pressable style={[styles.suggestionButton, { backgroundColor: theme.primaryActionBackground }]} onPress={submitFinishDialog}><Text style={[styles.suggestionButtonText, { color: theme.primaryActionText }]}>Save</Text></Pressable>
+              <AppButton
+                label="Cancel"
+                variant="danger"
+                onPress={() => setFinishDialog(null)}
+              />
+              <AppButton
+                label="Save"
+                variant="primary"
+                onPress={submitFinishDialog}
+              />
             </View>
           </View>
         </View>
@@ -1502,6 +1498,27 @@ export default function BedsListScreen() {
         </View>
       )}
     </View>
+  );
+}
+
+function SimpleToggle(props: {
+  value: boolean;
+  onToggle: (value: boolean) => void;
+  disabled?: boolean;
+}) {
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      style={[
+        styles.simpleToggleContainer,
+        { backgroundColor: props.value ? theme.toggleOnBackground : theme.toggleOffBackground },
+        props.disabled && styles.disabledToggle,
+      ]}
+      onPress={() => !props.disabled && props.onToggle(!props.value)}
+      disabled={props.disabled}
+    >
+      <View style={[styles.simpleToggleThumb, { backgroundColor: theme.toggleThumbColor }, props.value && styles.simpleToggleThumbActive]} />
+    </Pressable>
   );
 }
 
@@ -1894,16 +1911,18 @@ const styles = StyleSheet.create({
   scoreChipText: { fontSize: 10, fontWeight: "700" },
   companionSummaryChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3 },
   companionSummaryChipText: { fontSize: 10, fontWeight: "700" },
+  fitChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3 },
+  fitChipText: { fontSize: 10, fontWeight: "700" },
   suggestionReason: { color: "#597363", fontSize: 12 },
   whyButton: { marginTop: 4, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, alignSelf: "flex-start" },
   whyButtonText: { fontSize: 11, fontWeight: "700" },
   whyPanel: { marginTop: 4, borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, gap: 2 },
   whyLine: { fontSize: 11 },
   suggestionActions: { alignItems: "flex-end", gap: 8 },
-  suggestionButton: { backgroundColor: "#E7EFE5", borderWidth: 1, borderColor: "#A9C3B0", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
-  suggestionButtonText: { color: "#2A5E40", fontWeight: "700", fontSize: 12 },
-  optionChip: { backgroundColor: "#D9E7D8", borderWidth: 1, borderColor: "#9DB8A6", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
-  optionChipText: { color: "#264433", textTransform: "capitalize", fontSize: 12 },
+  suggestionButton: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  suggestionButtonText: { fontWeight: "700", fontSize: 12 },
+  optionChip: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  optionChipText: { textTransform: "capitalize", fontSize: 12 },
   optionsScroll: { maxHeight: 170 },
   photoStrip: { gap: 8, paddingRight: 6 },
   photoCard: { borderWidth: 1, borderRadius: 10, padding: 6, gap: 2, width: 120 },
@@ -1956,6 +1975,35 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     minHeight: 72,
     textAlignVertical: "top",
+  },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  simpleToggleContainer: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    paddingHorizontal: 2,
+    justifyContent: "center",
+  },
+  simpleToggleThumb: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignSelf: "flex-start",
+  },
+  simpleToggleThumbActive: {
+    alignSelf: "flex-end",
+  },
+  disabledToggle: {
+    opacity: 0.5,
   },
 });
 

@@ -62,6 +62,11 @@ const actionTokens: TokenSpec[] = [
   { key: "toggleOnBackground", label: "Toggle On" },
   { key: "toggleOffBackground", label: "Toggle Off" },
   { key: "toggleThumbColor", label: "Toggle Thumb" },
+  { key: "checkboxBackground", label: "Checkbox Bg" },
+  { key: "checkboxActiveBackground", label: "Checkbox Active Bg" },
+  { key: "checkboxBorder", label: "Checkbox Border" },
+  { key: "checkboxActiveBorder", label: "Checkbox Active Border" },
+  { key: "checkboxCheckColor", label: "Checkbox Check" },
   { key: "gridLineColor", label: "Grid Line" },
   { key: "mapBoundaryFill", label: "Boundary Fill" },
   { key: "mapBoundaryStroke", label: "Boundary Stroke" },
@@ -263,6 +268,8 @@ export default function StyleguideScreen() {
           <View style={styles.previewRow}>
             <TogglePreview label="On" on={true} theme={theme} />
             <TogglePreview label="Off" on={false} theme={theme} />
+            <CheckboxPreview label="Unchecked" checked={false} theme={theme} />
+            <CheckboxPreview label="Checked" checked={true} theme={theme} />
           </View>
           <View style={styles.previewRow}>
             <FilterPill label="Filter" selected={false} onPress={() => {}} />
@@ -519,6 +526,26 @@ function InlinePickerEditor(props: {
   );
 }
 
+function CheckboxPreview(props: { label: string; checked: boolean; theme: ThemeTokens }) {
+  return (
+    <View style={styles.togglePreviewWrap}>
+      <View style={[
+        styles.checkboxBox, 
+        { 
+          backgroundColor: props.theme.surfaceBackground,
+          borderColor: props.checked ? props.theme.primaryActionBackground : props.theme.borderColor,
+          borderWidth: props.checked ? 2 : 1,
+        }
+      ]}>
+        {props.checked && (
+          <View style={[styles.checkboxInner, { backgroundColor: props.theme.primaryActionText }]} />
+        )}
+      </View>
+      <Text style={[styles.toggleLabel, { color: props.theme.textMuted }]}>{props.label}</Text>
+    </View>
+  );
+}
+
 function TogglePreview(props: { label: string; on: boolean; theme: ThemeTokens }) {
   return (
     <View style={styles.togglePreviewWrap}>
@@ -689,6 +716,9 @@ const styles = StyleSheet.create({
   toggleTrack: { width: 42, height: 24, borderRadius: 999, paddingVertical: 2, paddingHorizontal: 2, justifyContent: "center" },
   toggleThumb: { width: 18, height: 18, borderRadius: 999 },
   toggleLabel: { fontSize: 11, fontWeight: "600" },
+  checkboxBox: { width: 22, height: 22, borderRadius: 4, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  checkboxInner: { width: 12, height: 12, borderRadius: 2 },
+  checkboxCheck: { fontSize: 14, fontWeight: "800" },
   modalPreviewWrap: { borderRadius: 12, padding: 10 },
   modalPreviewCard: { borderRadius: 10, borderWidth: 1, padding: 10, gap: 8 },
   modalTitle: { fontWeight: "800", fontSize: 13 },

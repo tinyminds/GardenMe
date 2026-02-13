@@ -4,6 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { loadAppPreferences } from "@/core/settings/appPreferences";
 import type { GardenTask } from "@/domain/entities/GardenTask";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
+import { getCalendarTypeMeta } from "@/features/calendar/services/calendarPresentation";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
@@ -312,8 +313,11 @@ export default function TasksTabScreen() {
           openTasks.map((task) => (
             <View key={task.id} style={[styles.taskRow, { borderColor: theme.borderColor }]}>
               <View style={styles.taskMain}>
-                <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>{task.title}</Text>
-                <Text style={[styles.taskMeta, { color: theme.textMuted }]}>Due {formatDate(task.dueDate)} | {formatTaskType(task.taskType)}</Text>
+                <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>{cleanTaskTitle(task.title)}</Text>
+                <View style={styles.taskMetaRow}>
+                  <Text style={[styles.taskMeta, { color: theme.textMuted }]}>Due {formatDate(task.dueDate)}</Text>
+                  <TaskTypePill taskType={task.taskType} />
+                </View>
                 {task.detail ? <Text style={[styles.taskMeta, { color: theme.textMuted }]}>{task.detail}</Text> : null}
               </View>
               <View style={styles.actions}>
@@ -393,6 +397,26 @@ export default function TasksTabScreen() {
   );
 }
 
+function cleanTaskTitle(title: string): string {
+  return title
+    .replace(/^(Start indoors|Direct sow|Plant out|Harvest):\s*/i, '')
+    .trim();
+}
+
+function TaskTypePill(props: { taskType: string }) {
+  const meta = getCalendarTypeMeta({
+    type: props.taskType as any,
+    title: "",
+    detail: ""
+  });
+  
+  return (
+    <View style={[styles.taskTypePill, { backgroundColor: meta.background, borderColor: meta.border }]}>
+      <Text style={[styles.taskTypePillText, { color: meta.text }]}>{meta.label}</Text>
+    </View>
+  );
+}
+
 function formatDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -416,6 +440,9 @@ const styles = StyleSheet.create({
   taskMain: { gap: 2 },
   taskTitle: { fontWeight: "700", fontSize: 14 },
   taskMeta: { fontSize: 12 },
+  taskMetaRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  taskTypePill: { borderWidth: 1, borderRadius: 999, alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 4 },
+  taskTypePillText: { fontWeight: "700", fontSize: 10 },
   actions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   bedPickerBox: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 8 },
   bedPickerChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
