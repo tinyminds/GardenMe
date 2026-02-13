@@ -497,7 +497,10 @@ export default function DashboardScreen() {
                 Now {Math.round(weatherQuery.data.current.temperatureC)}C, {describeWeatherCode(weatherQuery.data.current.weatherCode)}
               </Text>
             </View>
-            <Text style={[styles.helper, { color: theme.textMuted }]}>Wind {Math.round(weatherQuery.data.current.windSpeedKmh)} km/h</Text>
+            <View style={styles.weatherRow}>
+              <Text style={styles.weatherIcon}>{"\u{1F4A8}"}</Text>
+              <Text style={[styles.helper, { color: theme.textMuted }]}>Wind {Math.round(weatherQuery.data.current.windSpeedKmh)} km/h</Text>
+            </View>
             {weatherQuery.data.forecast.slice(0, 3).map((day) => (
               <View key={day.date} style={styles.weatherRow}>
                 <Text style={styles.weatherIcon}>{weatherIconForForecast(day.tempMinC, day.precipMm, day.precipProbPct)}</Text>

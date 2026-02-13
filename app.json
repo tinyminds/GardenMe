@@ -6,6 +6,11 @@
     "scheme": "gardenme",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "plugins": [
@@ -31,11 +36,6 @@
         "POST_NOTIFICATIONS",
         "CAMERA",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "POST_NOTIFICATIONS",
-        "CAMERA",
-        "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ],
       "adaptiveIcon": {
@@ -44,11 +44,17 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.GardenMe"
+      "package": "com.tinyminds.gardenme"
     },
     "web": {
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a4340c68-df73-4f8a-94fd-721c6ea78dbd"
+      }
     }
   }
 }
