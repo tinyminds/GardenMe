@@ -5,6 +5,7 @@ import { DEFAULT_THEME_TOKENS, mergeThemeTokens, type ThemeTokens } from "@/ui/t
 type ThemeContextValue = {
   theme: ThemeTokens;
   setToken: (key: keyof ThemeTokens, value: string) => void;
+  applyThemePreset: (tokens: Partial<ThemeTokens>) => void;
   resetTheme: () => void;
   isReady: boolean;
 };
@@ -57,14 +58,24 @@ export function ThemeProvider(props: { children: ReactNode }) {
     void persist(DEFAULT_THEME_TOKENS);
   }, [persist]);
 
+  const applyThemePreset = useCallback(
+    (tokens: Partial<ThemeTokens>) => {
+      const next = mergeThemeTokens(tokens);
+      setTheme(next);
+      void persist(next);
+    },
+    [persist]
+  );
+
   const contextValue = useMemo<ThemeContextValue>(
     () => ({
       theme,
       setToken,
+      applyThemePreset,
       resetTheme,
       isReady,
     }),
-    [theme, setToken, resetTheme, isReady]
+    [theme, setToken, applyThemePreset, resetTheme, isReady]
   );
 
   return <ThemeContext.Provider value={contextValue}>{props.children}</ThemeContext.Provider>;

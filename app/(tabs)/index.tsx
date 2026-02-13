@@ -407,14 +407,20 @@ export default function DashboardScreen() {
         ) : null}
         {canLoadWeather && !weatherQuery.isLoading && weatherQuery.data?.current ? (
           <>
-            <Text style={[styles.weatherNow, { color: theme.textPrimary }]}>
-              Now {Math.round(weatherQuery.data.current.temperatureC)}C, {describeWeatherCode(weatherQuery.data.current.weatherCode)}
-            </Text>
+            <View style={styles.weatherRow}>
+              <Text style={styles.weatherIcon}>{weatherIconForCode(weatherQuery.data.current.weatherCode)}</Text>
+              <Text style={[styles.weatherNow, { color: theme.textPrimary }]}>
+                Now {Math.round(weatherQuery.data.current.temperatureC)}C, {describeWeatherCode(weatherQuery.data.current.weatherCode)}
+              </Text>
+            </View>
             <Text style={[styles.helper, { color: theme.textMuted }]}>Wind {Math.round(weatherQuery.data.current.windSpeedKmh)} km/h</Text>
             {weatherQuery.data.forecast.slice(0, 3).map((day) => (
-              <Text key={day.date} style={[styles.helper, { color: theme.textMuted }]}>
-                {formatShortDate(day.date)}: {Math.round(day.tempMinC)}-{Math.round(day.tempMaxC)}C, {Math.round(day.precipMm)}mm rain ({Math.round(day.precipProbPct)}%)
-              </Text>
+              <View key={day.date} style={styles.weatherRow}>
+                <Text style={styles.weatherIcon}>{weatherIconForForecast(day.tempMinC, day.precipMm, day.precipProbPct)}</Text>
+                <Text style={[styles.helper, { color: theme.textMuted }]}>
+                  {formatShortDate(day.date)}: {Math.round(day.tempMinC)}-{Math.round(day.tempMaxC)}C, {Math.round(day.precipMm)}mm rain ({Math.round(day.precipProbPct)}%)
+                </Text>
+              </View>
             ))}
           </>
         ) : null}
@@ -446,6 +452,25 @@ function describeWeatherCode(code: number): string {
   if (code >= 71 && code <= 77) return "snow";
   if (code >= 95) return "storm";
   return "mixed conditions";
+}
+
+function weatherIconForCode(code: number): string {
+  if (code === 0) return "☀";
+  if (code >= 1 && code <= 3) return "⛅";
+  if (code === 45 || code === 48) return "🌫";
+  if (code >= 51 && code <= 67) return "🌦";
+  if (code >= 71 && code <= 77) return "❄";
+  if (code >= 80 && code <= 82) return "🌧";
+  if (code >= 95) return "⚡";
+  return "☁";
+}
+
+function weatherIconForForecast(tempMinC: number, precipMm: number, precipProbPct: number): string {
+  if (tempMinC <= 1) return "❄";
+  if (precipMm >= 8 || precipProbPct >= 80) return "🌧";
+  if (precipMm >= 2 || precipProbPct >= 50) return "🌦";
+  if (precipProbPct <= 20) return "☀";
+  return "☁";
 }
 
 const styles = StyleSheet.create({
@@ -511,6 +536,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   layoutExportButtonText: { fontWeight: "700", fontSize: 12 },
+  weatherRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  weatherIcon: { fontSize: 17, width: 20, textAlign: "center" },
   exportHiddenContainer: {
     position: "absolute",
     left: -10000,

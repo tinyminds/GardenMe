@@ -65,8 +65,72 @@ const mapFeatures: MapFeatureSpec[] = [
   { key: "deck", label: "Deck", fillKey: "mapDeckFill", strokeKey: "mapDeckStroke", preview: "deck" },
 ];
 
+const themePresets: Array<{ id: string; label: string; tokens: Partial<ThemeTokens> }> = [
+  { id: "default", label: "Default", tokens: DEFAULT_THEME_TOKENS },
+  {
+    id: "coastal",
+    label: "Coastal",
+    tokens: {
+      appBackground: "#EEF5FA",
+      surfaceBackground: "#FFFFFF",
+      borderColor: "#C8D7E2",
+      textPrimary: "#143042",
+      textMuted: "#4B6474",
+      primaryActionBackground: "#1E6A8A",
+      secondaryActionBackground: "#DCEAF3",
+      secondaryActionText: "#1B4159",
+      dangerActionBackground: "#C2513E",
+      toggleOnBackground: "#2A6C89",
+      toggleOffBackground: "#BFD3DF",
+      gridLineColor: "#325D7545",
+      mapBoundaryFill: "#2A5D7B1F",
+      mapBoundaryStroke: "#2B6A8D",
+      mapBedFill: "#4B9D8B4A",
+      mapPerennialBedFill: "#3C7CB24A",
+      mapLawnFill: "#7AB88B3A",
+      mapTreeFill: "#2D7F5A4A",
+      mapShrubFill: "#70B07A4A",
+      mapDeckFill: "#9F7C594C",
+      mapDeckStroke: "#7E5E41",
+      mapPathFill: "#9AAAB74A",
+      mapPathStroke: "#778A98",
+    },
+  },
+  {
+    id: "sunset",
+    label: "Sunset Earth",
+    tokens: {
+      appBackground: "#F8EFE6",
+      surfaceBackground: "#FFF9F3",
+      borderColor: "#E3CDB7",
+      textPrimary: "#4B2F22",
+      textMuted: "#7A5B4A",
+      primaryActionBackground: "#B95E2D",
+      secondaryActionBackground: "#F2DFCF",
+      secondaryActionText: "#5E3B29",
+      dangerActionBackground: "#B43C2C",
+      toggleOnBackground: "#A6542A",
+      toggleOffBackground: "#DFC6B3",
+      gridLineColor: "#6F4B3240",
+      mapBoundaryFill: "#AA6D3A1E",
+      mapBoundaryStroke: "#9E5F33",
+      mapBedFill: "#C882514A",
+      mapPerennialBedFill: "#8D5B9E4A",
+      mapLawnFill: "#B9B36A3C",
+      mapTreeFill: "#7E6A3F4D",
+      mapShrubFill: "#A7905A4A",
+      mapDeckFill: "#A66F424D",
+      mapDeckStroke: "#845432",
+      mapPathFill: "#B6A3944D",
+      mapPathStroke: "#8D7A6C",
+      mapFenceFill: "#A877534D",
+      mapFenceStroke: "#855539",
+    },
+  },
+];
+
 export default function StyleguideScreen() {
-  const { theme, setToken, resetTheme } = useTheme();
+  const { theme, setToken, resetTheme, applyThemePreset } = useTheme();
   const [activeToken, setActiveToken] = useState<keyof ThemeTokens | null>(null);
   const [hexDraftByToken, setHexDraftByToken] = useState<Record<string, string>>({});
 
@@ -115,6 +179,17 @@ export default function StyleguideScreen() {
 
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.groupTitle, { color: theme.textPrimary }]}>Quick Preview</Text>
+          <View style={styles.presetRow}>
+            {themePresets.map((preset) => (
+              <Pressable
+                key={preset.id}
+                onPress={() => applyThemePreset(preset.tokens)}
+                style={[styles.presetButton, { backgroundColor: theme.secondaryActionBackground }]}
+              >
+                <Text style={[styles.presetButtonText, { color: theme.secondaryActionText }]}>{preset.label}</Text>
+              </Pressable>
+            ))}
+          </View>
           <View style={styles.previewRow}>
             <View style={[styles.previewButton, { backgroundColor: theme.primaryActionBackground }]}>
               <Text style={[styles.previewButtonText, { color: theme.primaryActionText }]}>Primary</Text>
@@ -493,6 +568,9 @@ const styles = StyleSheet.create({
   subtitle: { marginTop: -2, fontSize: 13 },
   card: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 10 },
   groupTitle: { fontSize: 15, fontWeight: "800" },
+  presetRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  presetButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  presetButtonText: { fontSize: 12, fontWeight: "700" },
   previewRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", alignItems: "center" },
   previewButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
   previewButtonText: { fontWeight: "700", fontSize: 12 },
