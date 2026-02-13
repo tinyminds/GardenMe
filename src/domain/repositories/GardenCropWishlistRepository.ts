@@ -8,6 +8,7 @@ export interface AddGardenCropItemInput {
   gardenId: string;
   plantCatalogId: string;
   status: "wanted" | "already_growing";
+  startedIndoorsAt?: string | null;
   bedId?: string;
   isPerennial?: boolean;
   varietyName?: string;
@@ -18,6 +19,7 @@ export interface AddGardenCropItemInput {
 export interface UpdateGardenCropItemInput {
   id: string;
   status: "wanted" | "already_growing";
+  startedIndoorsAt?: string | null;
   bedId?: string;
   isPerennial?: boolean;
   varietyName?: string;

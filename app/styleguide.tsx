@@ -52,6 +52,7 @@ const actionTokens: TokenSpec[] = [
 
 const mapFeatures: MapFeatureSpec[] = [
   { key: "bed", label: "Bed", fillKey: "mapBedFill", strokeKey: "mapBedStroke", preview: "rect" },
+  { key: "perennial-bed", label: "Perennial Bed", fillKey: "mapPerennialBedFill", strokeKey: "mapBedStroke", preview: "rect" },
   { key: "lawn", label: "Lawn", fillKey: "mapLawnFill", strokeKey: "mapLawnStroke", preview: "lawn" },
   { key: "tree", label: "Tree", fillKey: "mapTreeFill", strokeKey: "mapTreeStroke", preview: "tree" },
   { key: "shrub", label: "Shrub", fillKey: "mapShrubFill", strokeKey: "mapShrubStroke", preview: "shrub" },

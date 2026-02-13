@@ -1,7 +1,10 @@
 ﻿import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { loadAppPreferences } from "@/core/settings/appPreferences";
+import type { GardenTask } from "@/domain/entities/GardenTask";
+import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
+import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGardenTaskRepository";
@@ -13,6 +16,7 @@ import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 
 const gardenRepository = new SqliteGardenRepository();
+const bedRepository = new SqliteBedRepository();
 const wishlistRepository = new SqliteGardenCropWishlistRepository();
 const taskRepository = new SqliteGardenTaskRepository();
 
@@ -20,6 +24,7 @@ export default function TasksTabScreen() {
   const { theme } = useTheme();
   const selectedGardenId = useSelectedGardenStore((state) => state.selectedGardenId);
   const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
+  const [bedPicker, setBedPicker] = useState<{ task: GardenTask; bedId: string | null } | null>(null);
 
   const gardensQuery = useQuery({
     queryKey: ["gardens"],
@@ -46,6 +51,22 @@ export default function TasksTabScreen() {
     queryFn: async () => {
       if (!activeGardenId) return [];
       return taskRepository.listByGarden(activeGardenId);
+    },
+  });
+  const growQuery = useQuery({
+    queryKey: ["garden-grow-list", activeGardenId],
+    enabled: Boolean(activeGardenId),
+    queryFn: async () => {
+      if (!activeGardenId) return [];
+      return wishlistRepository.listByGarden(activeGardenId);
+    },
+  });
+  const bedsQuery = useQuery({
+    queryKey: ["beds", activeGardenId],
+    enabled: Boolean(activeGardenId),
+    queryFn: async () => {
+      if (!activeGardenId) return [];
+      return bedRepository.listByGarden(activeGardenId);
     },
   });
 
@@ -87,12 +108,38 @@ export default function TasksTabScreen() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: async (payload: { id: string; status: "done" | "dismissed" }) => {
-      await taskRepository.setStatus(payload.id, payload.status);
+    mutationFn: async (payload: { task: GardenTask; status: "done" | "dismissed"; selectedBedId?: string }) => {
+      const { task, status, selectedBedId } = payload;
+      if (status === "done" && activeGardenId && task.entryId) {
+        const wishlist = await wishlistRepository.listByGarden(activeGardenId);
+        const entry = wishlist.find((item) => item.id === task.entryId);
+        if (entry) {
+          if (task.taskType === "start_indoors") {
+            await wishlistRepository.update({
+              id: entry.id,
+              status: entry.status,
+              startedIndoorsAt: entry.startedIndoorsAt ?? new Date().toISOString(),
+              ...(entry.status === "already_growing" && entry.bedId ? { bedId: entry.bedId } : {}),
+              ...(entry.varietyName ? { varietyName: entry.varietyName } : { varietyName: "" }),
+              supportNeeded: entry.supportNeeded,
+              quantity: Math.max(1, entry.quantity ?? 1),
+            });
+          } else if (task.taskType === "direct_sow" || task.taskType === "plant_out") {
+            const bedIdToUse = entry.bedId ?? selectedBedId;
+            if (bedIdToUse) {
+              await wishlistRepository.markPlanted({ entryId: entry.id, bedId: bedIdToUse });
+            }
+          }
+        }
+      }
+      await taskRepository.setStatus(task.id, status);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["garden-tasks", activeGardenId] });
       await queryClient.invalidateQueries({ queryKey: ["tasks-unseen-count", activeGardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", activeGardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["garden-plantings", activeGardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["beds", activeGardenId] });
     },
   });
 
@@ -115,6 +162,7 @@ export default function TasksTabScreen() {
   }, [activeGardenId]);
 
   const tasks = tasksQuery.data ?? [];
+  const growList = growQuery.data ?? [];
   const openTasks = tasks.filter((task) => task.status === "open");
   const doneTasks = tasks.filter((task) => task.status !== "open");
   const currentGarden = (gardensQuery.data ?? []).find((garden) => garden.id === activeGardenId) ?? null;
@@ -129,6 +177,53 @@ export default function TasksTabScreen() {
       openTasks,
     });
   }, [currentGarden, openTasks, preferencesQuery.data?.notificationsEnabled]);
+
+  const handleDonePress = async (task: GardenTask) => {
+    if (!activeGardenId) {
+      statusMutation.mutate({ task, status: "done" });
+      return;
+    }
+    if (task.taskType !== "plant_out" && task.taskType !== "direct_sow") {
+      statusMutation.mutate({ task, status: "done" });
+      return;
+    }
+    if (!task.entryId) {
+      statusMutation.mutate({ task, status: "done" });
+      return;
+    }
+    const wishlist = await wishlistRepository.listByGarden(activeGardenId);
+    const entry = wishlist.find((item) => item.id === task.entryId);
+    if (!entry) {
+      statusMutation.mutate({ task, status: "done" });
+      return;
+    }
+    if (entry.bedId) {
+      statusMutation.mutate({ task, status: "done" });
+      return;
+    }
+    const beds = bedsQuery.data ?? [];
+    if (beds.length === 0) {
+      Alert.alert("Pick a bed first", "This crop needs a bed before it can be marked planted.");
+      return;
+    }
+    setBedPicker({ task, bedId: beds[0]?.id ?? null });
+  };
+  const bedPreviewInfoById = useMemo(() => {
+    const map: Record<string, { bedName: string; lines: string[] }> = {};
+    for (const bed of bedsQuery.data ?? []) {
+      const bedEntries = growList.filter((entry) => entry.bedId === bed.id);
+      const growing = bedEntries.filter((entry) => entry.status === "already_growing").map((entry) => entry.plant.commonName);
+      const planned = bedEntries.filter((entry) => entry.status === "wanted").map((entry) => entry.plant.commonName);
+      map[bed.id] = {
+        bedName: bed.name,
+        lines: [
+          growing.length > 0 ? `Growing: ${growing.join(", ")}` : "Growing: none",
+          planned.length > 0 ? `Planned: ${planned.join(", ")}` : "Planned: none",
+        ],
+      };
+    }
+    return map;
+  }, [bedsQuery.data, growList]);
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
@@ -152,6 +247,50 @@ export default function TasksTabScreen() {
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Due now</Text>
+        {bedPicker ? (
+          <View style={[styles.bedPickerBox, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
+            <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>Choose bed: {bedPicker.task.title}</Text>
+            <View style={styles.actions}>
+              {(bedsQuery.data ?? []).map((bed) => {
+                const selected = bedPicker.bedId === bed.id;
+                return (
+                  <Pressable
+                    key={bed.id}
+                    style={[
+                      styles.bedPickerChip,
+                      {
+                        borderColor: selected ? theme.primaryActionBackground : theme.borderColor,
+                        backgroundColor: selected ? theme.primaryActionBackground : theme.surfaceBackground,
+                      },
+                    ]}
+                    onPress={() => setBedPicker((prev) => (prev ? { ...prev, bedId: bed.id } : prev))}
+                  >
+                    <Text style={{ color: selected ? theme.primaryActionText : theme.textPrimary, fontWeight: "700", fontSize: 12 }}>{bed.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.actions}>
+              <Pressable
+                style={[styles.actionButton, { backgroundColor: theme.secondaryActionBackground }]}
+                onPress={() => setBedPicker(null)}
+              >
+                <Text style={[styles.actionText, { color: theme.secondaryActionText }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.actionButton, { backgroundColor: theme.primaryActionBackground }]}
+                onPress={() => {
+                  if (!bedPicker.bedId) return;
+                  statusMutation.mutate({ task: bedPicker.task, status: "done", selectedBedId: bedPicker.bedId });
+                  setBedPicker(null);
+                }}
+                disabled={!bedPicker.bedId || statusMutation.isPending}
+              >
+                <Text style={[styles.actionText, { color: theme.primaryActionText }]}>Done + Plant</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         {openTasks.length === 0 ? (
           <Text style={[styles.empty, { color: theme.textMuted }]}>No open tasks right now.</Text>
         ) : (
@@ -165,13 +304,15 @@ export default function TasksTabScreen() {
               <View style={styles.actions}>
                 <Pressable
                   style={[styles.actionButton, { backgroundColor: theme.primaryActionBackground }]}
-                  onPress={() => statusMutation.mutate({ id: task.id, status: "done" })}
+                  onPress={() => {
+                    void handleDonePress(task);
+                  }}
                 >
                   <Text style={[styles.actionText, { color: theme.primaryActionText }]}>Done</Text>
                 </Pressable>
                 <Pressable
                   style={[styles.actionButton, { backgroundColor: theme.dangerActionBackground }]}
-                  onPress={() => statusMutation.mutate({ id: task.id, status: "dismissed" })}
+                  onPress={() => statusMutation.mutate({ task, status: "dismissed" })}
                 >
                   <Text style={[styles.actionText, { color: theme.dangerActionText }]}>Dismiss</Text>
                 </Pressable>
@@ -180,6 +321,21 @@ export default function TasksTabScreen() {
           ))
         )}
       </View>
+
+      {activeGardenId && (bedsQuery.data ?? []).length > 0 && (
+        <BedPlanPreview
+          beds={bedsQuery.data ?? []}
+          {...(currentGarden?.scaleCalibration?.boundaryPolygon
+            ? { boundaryPolygon: currentGarden.scaleCalibration.boundaryPolygon }
+            : {})}
+          {...(currentGarden?.scaleCalibration?.baseWidth && currentGarden?.scaleCalibration?.baseHeight
+            ? { previewRatio: currentGarden.scaleCalibration.baseHeight / currentGarden.scaleCalibration.baseWidth }
+            : {})}
+          infoByBedId={bedPreviewInfoById}
+          title="Bed Layout"
+          subtitle="Use this to match bed names when completing planting tasks."
+        />
+      )}
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <View style={styles.historyHeader}>
@@ -245,6 +401,8 @@ const styles = StyleSheet.create({
   taskTitle: { fontWeight: "700", fontSize: 14 },
   taskMeta: { fontSize: 12 },
   actions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  bedPickerBox: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 8 },
+  bedPickerChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   historyHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   actionButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   actionText: { fontSize: 12, fontWeight: "700" },

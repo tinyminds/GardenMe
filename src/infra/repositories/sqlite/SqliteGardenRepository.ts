@@ -44,6 +44,7 @@ type EntryCloneRow = {
   id: string;
   plant_catalog_id: string;
   status: "wanted" | "already_growing";
+  started_indoors_at: string | null;
   bed_id: string | null;
   is_perennial: number;
   variety_name: string | null;
@@ -202,7 +203,7 @@ export class SqliteGardenRepository implements GardenRepository {
 
       const sourceEntries = await db.getAllAsync<EntryCloneRow>(
         `SELECT
-           id, plant_catalog_id, status, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
+           id, plant_catalog_id, status, started_indoors_at, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
          FROM garden_crop_entries
          WHERE garden_id = ?`,
         [sourceGardenId]
@@ -212,13 +213,14 @@ export class SqliteGardenRepository implements GardenRepository {
         entryIdMap.set(entry.id, nextEntryId);
         await db.runAsync(
           `INSERT INTO garden_crop_entries (
-             id, garden_id, plant_catalog_id, status, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             id, garden_id, plant_catalog_id, status, started_indoors_at, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             nextEntryId,
             clonedGardenId,
             entry.plant_catalog_id,
             entry.status,
+            entry.started_indoors_at,
             entry.bed_id ? bedIdMap.get(entry.bed_id) ?? null : null,
             entry.is_perennial,
             entry.variety_name,

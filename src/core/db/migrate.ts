@@ -367,6 +367,13 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_garden_tasks_entry ON garden_tasks(entry_id);
     `,
   },
+  {
+    version: "0016_crop_entry_started_indoors",
+    sql: `
+      ALTER TABLE garden_crop_entries ADD COLUMN started_indoors_at TEXT;
+      CREATE INDEX IF NOT EXISTS idx_crop_entries_started_indoors ON garden_crop_entries(started_indoors_at);
+    `,
+  },
 ];
 
 export async function runMigrations(db: AppDatabase): Promise<void> {
@@ -403,6 +410,9 @@ export async function runMigrations(db: AppDatabase): Promise<void> {
       } else if (migration.version === "0012_crop_entry_quantity") {
         await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;").catch(() => undefined);
         await db.execAsync("CREATE INDEX IF NOT EXISTS idx_crop_entries_quantity ON garden_crop_entries(quantity);").catch(() => undefined);
+      } else if (migration.version === "0016_crop_entry_started_indoors") {
+        await db.execAsync("ALTER TABLE garden_crop_entries ADD COLUMN started_indoors_at TEXT;").catch(() => undefined);
+        await db.execAsync("CREATE INDEX IF NOT EXISTS idx_crop_entries_started_indoors ON garden_crop_entries(started_indoors_at);").catch(() => undefined);
       } else if (
         migration.version === "0008_expand_plant_catalog_sources" ||
         migration.version === "0009_restrict_plant_catalog_sources"

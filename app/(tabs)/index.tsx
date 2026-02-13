@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "expo-router";
+import { useMemo } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useGardensQuery } from "@/features/gardens/hooks/useGardensQuery";
 import { fetchCurrentWeather, fetchDailyForecast } from "@/features/weather/services/openMeteo";
@@ -10,6 +11,9 @@ import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGa
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 import { ChoiceChip } from "@/ui/components/ChoiceChip";
+import { buildGardenCalendarItems, getCurrentMonthItems } from "@/features/calendar/services/calendarPlanner";
+import { getCalendarTypeMeta, getCalendarVisualKind } from "@/features/calendar/services/calendarPresentation";
+import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 
 const bedRepository = new SqliteBedRepository();
 const featureRepository = new SqliteGardenFeatureRepository();
@@ -50,6 +54,15 @@ export default function DashboardScreen() {
     queryFn: async () => {
       if (!activeGardenId) return [];
       return growRepository.listByGarden(activeGardenId);
+    },
+  });
+
+  const plantingsQuery = useQuery({
+    queryKey: ["garden-plantings", activeGardenId],
+    enabled: Boolean(activeGardenId),
+    queryFn: async () => {
+      if (!activeGardenId) return [];
+      return growRepository.listPlantingsByGarden(activeGardenId);
     },
   });
 
@@ -98,6 +111,57 @@ export default function DashboardScreen() {
   const hasDesign = bedCount + featureCount > 0;
   const isBedPlannerReady = bedCount > 0 && growCount > 0;
   const isBedPlannerDone = isBedPlannerReady && placedCount === growCount;
+  const monthItems = useMemo(() => {
+    if (!activeGardenId) return [];
+    const all = buildGardenCalendarItems({
+      gardenId: activeGardenId,
+      now: new Date(),
+      year: new Date().getFullYear(),
+      wishlist: growList,
+      activePlantings: plantingsQuery.data ?? [],
+      forecast: (weatherQuery.data?.forecast ?? []).map((day) => ({
+        date: day.date,
+        tempMinC: day.tempMinC,
+        tempMaxC: day.tempMaxC,
+        precipMm: day.precipMm,
+        precipProbPct: day.precipProbPct,
+      })),
+      existingTasks: [],
+    });
+    return getCurrentMonthItems(all, new Date());
+  }, [activeGardenId, growList, plantingsQuery.data, weatherQuery.data?.forecast]);
+  const monthTypeCounts = useMemo(() => {
+    const counts = new Map<string, { meta: ReturnType<typeof getCalendarTypeMeta>; count: number }>();
+    for (const item of monthItems) {
+      const kind = getCalendarVisualKind(item);
+      const current = counts.get(kind);
+      if (current) {
+        current.count += 1;
+      } else {
+        counts.set(kind, { meta: getCalendarTypeMeta(item), count: 1 });
+      }
+    }
+    const order = ["frost", "drought", "start_indoors", "direct_sow", "plant_out", "harvest", "seasonal_now", "task"];
+    return order
+      .map((kind) => (counts.has(kind) ? { kind, ...counts.get(kind)! } : null))
+      .filter((row): row is { kind: string; meta: ReturnType<typeof getCalendarTypeMeta>; count: number } => Boolean(row));
+  }, [monthItems]);
+  const bedPreviewInfoById = useMemo(() => {
+    const map: Record<string, { bedName: string; lines: string[] }> = {};
+    for (const bed of bedsQuery.data ?? []) {
+      const bedEntries = growList.filter((entry) => entry.bedId === bed.id);
+      const growing = bedEntries.filter((entry) => entry.status === "already_growing").map((entry) => entry.plant.commonName);
+      const planned = bedEntries.filter((entry) => entry.status === "wanted").map((entry) => entry.plant.commonName);
+      map[bed.id] = {
+        bedName: bed.name,
+        lines: [
+          growing.length > 0 ? `Growing: ${growing.join(", ")}` : "Growing: none",
+          planned.length > 0 ? `Planned: ${planned.join(", ")}` : "Planned: none",
+        ],
+      };
+    }
+    return map;
+  }, [bedsQuery.data, growList]);
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
@@ -192,6 +256,49 @@ export default function DashboardScreen() {
         </View>
       ) : null}
 
+      {selectedGarden ? (
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>This Month</Text>
+          {monthTypeCounts.length === 0 ? (
+            <Text style={[styles.helper, { color: theme.textMuted }]}>No scheduled items this month yet.</Text>
+          ) : (
+            <View style={styles.metricsRow}>
+              {monthTypeCounts.map((group) => (
+                <View
+                  key={group.kind}
+                  style={[styles.monthIndicator, { backgroundColor: group.meta.background, borderColor: group.meta.border }]}
+                >
+                  <Text style={[styles.monthIndicatorText, { color: group.meta.text }]}>
+                    {group.meta.label}: {group.count}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <Link
+            href="/(tabs)/calendar"
+            style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+          >
+            Open Calendar
+          </Link>
+        </View>
+      ) : null}
+
+      {selectedGarden && bedCount > 0 ? (
+        <BedPlanPreview
+          beds={bedsQuery.data ?? []}
+          {...(selectedGarden.scaleCalibration?.boundaryPolygon
+            ? { boundaryPolygon: selectedGarden.scaleCalibration.boundaryPolygon }
+            : {})}
+          {...(selectedGarden.scaleCalibration?.baseWidth && selectedGarden.scaleCalibration?.baseHeight
+            ? { previewRatio: selectedGarden.scaleCalibration.baseHeight / selectedGarden.scaleCalibration.baseWidth }
+            : {})}
+          infoByBedId={bedPreviewInfoById}
+          title="Bed Layout"
+          subtitle="Quick view of your planned and planted beds."
+        />
+      ) : null}
+
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Garden Weather</Text>
         {!selectedGarden ? <Text style={[styles.helper, { color: theme.textMuted }]}>Choose a garden to see weather.</Text> : null}
@@ -259,6 +366,8 @@ const styles = StyleSheet.create({
   helper: {},
   gardenName: { fontSize: 20, fontWeight: "800" },
   metricsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  monthIndicator: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  monthIndicatorText: { fontSize: 12, fontWeight: "800" },
   metricChip: {
     borderRadius: 999,
     paddingHorizontal: 10,

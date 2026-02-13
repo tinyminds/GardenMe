@@ -1,13 +1,17 @@
 ﻿import { useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as FileSystem from "expo-file-system";
+import * as DocumentPicker from "expo-document-picker";
+import * as Sharing from "expo-sharing";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { SqlitePlantCatalogRepository } from "@/infra/repositories/sqlite/SqlitePlantCatalogRepository";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/SqliteCompanionPlantingRepository";
 import { fetchGrowstuffCropDetails, searchGrowstuffPlants, type GrowstuffCropDetails } from "@/features/plants/services/growstuff";
+import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { getPlantingCalendarProfile } from "@/features/plants/services/plantingCalendar";
 import { fetchBestTreflePlantProfile, type TreflePlantProfile } from "@/features/plants/services/trefle";
 import { queryClient } from "@/state/queryClient";
@@ -39,14 +43,15 @@ type PlantSuggestion = {
 
 type CropEntryDraft = {
   status: "wanted" | "already_growing";
+  startedIndoorsAt: string | null;
   bedId: string | null;
+  isPerennial?: boolean;
   varietyName: string;
   supportNeeded: boolean;
   quantity: number;
 };
 
 type PlantDataDraft = {
-  category: PlantCategory;
   sunRequirements: string;
   rowSpacing: string;
   spread: string;
@@ -71,20 +76,19 @@ type BulkImportSummary = {
   unmatchedNames: string[];
 };
 
-type PlantCategory = "unspecified" | "tree" | "shrub" | "herb" | "vegetable" | "fruit" | "flower" | "climber";
+type GrowListCsvRow = {
+  name: string;
+  variety?: string;
+  status: "wanted" | "already_growing";
+  quantity?: number;
+  supportNeeded: boolean;
+  bed?: string;
+  startedIndoorsAt?: string;
+  isPerennial: boolean;
+};
+
 type ListStatusFilter = "all" | "planned" | "growing";
 type SuggestionTab = "companions" | "common" | "unusual";
-
-const PLANT_CATEGORY_OPTIONS: Array<{ value: PlantCategory; label: string }> = [
-  { value: "unspecified", label: "Not chosen" },
-  { value: "tree", label: "Tree" },
-  { value: "shrub", label: "Shrub" },
-  { value: "herb", label: "Herb" },
-  { value: "vegetable", label: "Vegetable" },
-  { value: "fruit", label: "Fruit" },
-  { value: "flower", label: "Flower" },
-  { value: "climber", label: "Climber" },
-];
 
 const COMMON_CROP_SUGGESTIONS = [
   "Tomato",
@@ -179,6 +183,7 @@ export default function GardenGrowListScreen() {
   const [bulkImportProgress, setBulkImportProgress] = useState<BulkImportProgress | null>(null);
   const [bulkImportMessage, setBulkImportMessage] = useState<string | null>(null);
   const [bulkImportUnmatchedNames, setBulkImportUnmatchedNames] = useState<string[]>([]);
+  const [listTransferMessage, setListTransferMessage] = useState<string | null>(null);
   const [timingRefreshMessage, setTimingRefreshMessage] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const listNameCollator = useMemo(
@@ -569,7 +574,9 @@ export default function GardenGrowListScreen() {
     for (const item of wishlistQuery.data ?? []) {
       next[item.id] = {
         status: item.status,
+        startedIndoorsAt: item.startedIndoorsAt ?? null,
         bedId: item.bedId ?? null,
+        isPerennial: item.isPerennial,
         varietyName: item.varietyName ?? "",
         supportNeeded: item.supportNeeded,
         quantity: Math.max(1, item.quantity ?? 1),
@@ -718,6 +725,72 @@ export default function GardenGrowListScreen() {
     },
   });
 
+  const importCsvMutation = useMutation({
+    onMutate: () => {
+      setListTransferMessage(null);
+    },
+    mutationFn: async (payload: { text: string; format: "csv" | "json" }): Promise<{ total: number; added: number; skipped: number }> => {
+      if (!gardenId) throw new Error("Missing garden id");
+      const text = payload.text.trim();
+      if (!text) return { total: 0, added: 0, skipped: 0 };
+      const parsedRows = payload.format === "json" ? parseGrowListBackupJson(text) : parseGrowListCsv(text);
+      if (parsedRows.length === 0) return { total: 0, added: 0, skipped: 0 };
+
+      const existing = await wishlistRepository.listByGarden(gardenId);
+      const existingKeys = new Set(existing.map((item) => `${item.plantCatalogId}::${(item.varietyName ?? "").trim().toLowerCase()}`));
+
+      let added = 0;
+      let skipped = 0;
+
+      for (const row of parsedRows) {
+        if (!row.name) {
+          skipped += 1;
+          continue;
+        }
+        const match = await findBestPlantMatchForBulk(row.name, plantCatalogRepository);
+        const catalogEntry =
+          match ??
+          (await plantCatalogRepository.upsert({
+            source: "manual",
+            commonName: row.name,
+          }));
+
+        const variety = row.variety?.trim() ?? "";
+        const key = `${catalogEntry.id}::${variety.toLowerCase()}`;
+        if (existingKeys.has(key)) {
+          skipped += 1;
+          continue;
+        }
+
+        // Portable import: only bring across plant intent, not placement/progress.
+        await wishlistRepository.add({
+          gardenId,
+          plantCatalogId: catalogEntry.id,
+          status: "wanted",
+          ...(row.isPerennial ? { isPerennial: true } : { isPerennial: false }),
+          ...(variety ? { varietyName: variety } : {}),
+          ...(row.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
+          quantity: Math.max(1, row.quantity ?? 1),
+        });
+        existingKeys.add(key);
+        added += 1;
+      }
+
+      return { total: parsedRows.length, added, skipped };
+    },
+    onSuccess: async ({ total, added, skipped }) => {
+      if (total === 0) {
+        setListTransferMessage("No valid rows found.");
+      } else {
+        setListTransferMessage(`Import complete: added ${added}, skipped ${skipped}.`);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+    },
+    onError: () => {
+      setListTransferMessage("Import failed. Check file format and try again.");
+    },
+  });
+
   useEffect(() => {
     const next: Record<string, PlantDataDraft> = {};
     for (const item of wishlistQuery.data ?? []) {
@@ -733,7 +806,9 @@ export default function GardenGrowListScreen() {
         await wishlistRepository.update({
           id: item.id,
           status: entryDraft.status,
+          startedIndoorsAt: entryDraft.startedIndoorsAt,
           ...(entryDraft.status === "already_growing" && entryDraft.bedId ? { bedId: entryDraft.bedId } : {}),
+          isPerennial: entryDraft.isPerennial ?? item.isPerennial,
           ...(entryDraft.varietyName.trim() ? { varietyName: entryDraft.varietyName.trim() } : { varietyName: "" }),
           ...(entryDraft.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
           quantity: Math.max(1, Math.floor(entryDraft.quantity || 1)),
@@ -795,6 +870,7 @@ export default function GardenGrowListScreen() {
         gardenId,
         plantCatalogId: entry.plantCatalogId,
         status: entry.status,
+        startedIndoorsAt: entry.startedIndoorsAt ?? null,
         ...(entry.status === "already_growing" && entry.bedId ? { bedId: entry.bedId } : {}),
         ...(entry.isPerennial ? { isPerennial: true } : { isPerennial: false }),
         ...(entry.varietyName ? { varietyName: entry.varietyName } : {}),
@@ -854,6 +930,72 @@ export default function GardenGrowListScreen() {
       : suggestionTab === "common"
         ? suggestionBuckets.common
         : suggestionBuckets.unusual;
+  const bedPreviewInfoById = useMemo(() => {
+    const map: Record<string, { bedName: string; lines: string[] }> = {};
+    const wishlist = wishlistQuery.data ?? [];
+    for (const bed of bedsQuery.data ?? []) {
+      const bedEntries = wishlist.filter((entry) => entry.bedId === bed.id);
+      const growing = bedEntries.filter((entry) => entry.status === "already_growing").map((entry) => formatEntryLabel(entry));
+      const planned = bedEntries.filter((entry) => entry.status === "wanted").map((entry) => formatEntryLabel(entry));
+      map[bed.id] = {
+        bedName: bed.name,
+        lines: [
+          growing.length > 0 ? `Growing: ${growing.join(", ")}` : "Growing: none",
+          planned.length > 0 ? `Planned: ${planned.join(", ")}` : "Planned: none",
+        ],
+      };
+    }
+    return map;
+  }, [bedsQuery.data, wishlistQuery.data]);
+
+  const handleExportGrowListFile = async (format: "csv" | "json") => {
+    const items = wishlistQuery.data ?? [];
+    if (items.length === 0) {
+      Alert.alert("Nothing to export", "Add plants to your grow list first.");
+      return;
+    }
+    const shareAvailable = await Sharing.isAvailableAsync();
+    if (!shareAvailable) {
+      Alert.alert("Sharing unavailable", "File export needs sharing support on this device.");
+      return;
+    }
+    const filenameBase = slugifyForFilename(gardenQuery.data?.name || "garden");
+    const extension = format === "csv" ? "csv" : "json";
+    const mimeType = format === "csv" ? "text/csv" : "application/json";
+    const content = format === "csv" ? buildGrowListCsv(items) : buildGrowListBackupJson(items);
+    const file = new FileSystem.File(FileSystem.Paths.cache, `grow-list-${filenameBase}-${Date.now()}.${extension}`);
+    file.create({ intermediates: true, overwrite: true });
+    file.write(content);
+    await Sharing.shareAsync(file.uri, {
+      mimeType,
+      dialogTitle: format === "csv" ? "Export Grow List CSV" : "Export Grow List Backup",
+      ...(format === "csv" ? { UTI: "public.comma-separated-values-text" } : { UTI: "public.json" }),
+    });
+    setListTransferMessage(`${format.toUpperCase()} export ready via share sheet.`);
+  };
+
+  const handleUploadGrowListFile = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["text/csv", "application/json", "text/plain"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (result.canceled) return;
+    const asset = result.assets?.[0];
+    if (!asset?.uri) {
+      setListTransferMessage("No file selected.");
+      return;
+    }
+    try {
+      const file = new FileSystem.File(asset.uri);
+      const text = await file.text();
+      const lowerName = (asset.name ?? "").toLowerCase();
+      const format: "csv" | "json" = lowerName.endsWith(".json") ? "json" : "csv";
+      importCsvMutation.mutate({ text, format });
+    } catch {
+      setListTransferMessage("Could not read that file.");
+    }
+  };
 
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
@@ -1079,6 +1221,10 @@ export default function GardenGrowListScreen() {
                   <Text style={[styles.wishName, { color: theme.textPrimary }]}>{item.plant.commonName}</Text>
                   <Text style={[styles.compactHeaderMeta, { color: theme.textMuted }]}>
                     {(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"}
+                    {((entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt) &&
+                    (entryDrafts[item.id]?.status ?? item.status) === "wanted")
+                      ? " - Started indoors"
+                      : ""}
                     {item.bedName ? ` - ${item.bedName}` : ""}
                     {` - Qty ${Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}`}
                   </Text>
@@ -1123,12 +1269,6 @@ export default function GardenGrowListScreen() {
                 {item.plant.scientificName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{item.plant.scientificName}</Text>}
                 {item.plant.familyName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Family: {item.plant.familyName}</Text>}
                 {(() => {
-                  const category = plantDataDrafts[item.id]?.category ?? getPlantDataDraft(item.plant.metaJson).category;
-                  if (category === "unspecified") return null;
-                  const label = PLANT_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ?? category;
-                  return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Category: {label}</Text>;
-                })()}
-                {(() => {
                   const trefleStatus = extractTrefleStatus(item.plant.metaJson);
                   if (!trefleStatus) return null;
                   return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{trefleStatus}</Text>;
@@ -1169,27 +1309,6 @@ export default function GardenGrowListScreen() {
                             if (!trefleStatus) return null;
                             return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{trefleStatus}</Text>;
                           })()}
-                          <View style={styles.dataField}>
-                            <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Category</Text>
-                            <View style={styles.configChips}>
-                              {PLANT_CATEGORY_OPTIONS.map((option) => {
-                                const selected = plantDataDraft.category === option.value;
-                                return (
-                                  <ChoiceChip
-                                    key={`${item.id}-category-${option.value}`}
-                                    label={option.label}
-                                    selected={selected}
-                                    onPress={() =>
-                                      setPlantDataDrafts((prev) => ({
-                                        ...prev,
-                                        [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), category: option.value },
-                                      }))
-                                    }
-                                  />
-                                );
-                              })}
-                            </View>
-                          </View>
                           <View style={styles.dataField}>
                             <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Sun requirements</Text>
                             <TextInput
@@ -1334,8 +1453,12 @@ export default function GardenGrowListScreen() {
                 })()}
                 <Text style={[styles.wishMeta, { color: theme.textMuted }]}>
                   {(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"}
+                  {((entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt) &&
+                  (entryDrafts[item.id]?.status ?? item.status) === "wanted")
+                    ? " - Started indoors"
+                    : ""}
                   {item.bedName ? ` - ${item.bedName}` : ""}
-                  {isPerennialFromBed ? " - Perennial" : ""}
+                  {(entryDrafts[item.id]?.isPerennial ?? item.isPerennial) || isPerennialFromBed ? " - Perennial" : ""}
                   {(entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded) ? " - Needs support" : ""}
                   {` - Qty ${Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}`}
                 </Text>
@@ -1347,12 +1470,14 @@ export default function GardenGrowListScreen() {
                       onPress={() =>
                         setEntryDrafts((prev) => ({
                           ...prev,
-                          [item.id]: {
-                            status: prev[item.id]?.status ?? item.status,
-                            bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
-                            varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
-                            supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
-                            quantity: Math.max(1, (prev[item.id]?.quantity ?? item.quantity ?? 1) - 1),
+                        [item.id]: {
+                          status: prev[item.id]?.status ?? item.status,
+                          startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
+                          bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
+                          isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
+                          varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
+                          supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                          quantity: Math.max(1, (prev[item.id]?.quantity ?? item.quantity ?? 1) - 1),
                           },
                         }))
                       }
@@ -1365,12 +1490,14 @@ export default function GardenGrowListScreen() {
                       onPress={() =>
                         setEntryDrafts((prev) => ({
                           ...prev,
-                          [item.id]: {
-                            status: prev[item.id]?.status ?? item.status,
-                            bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
-                            varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
-                            supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
-                            quantity: Math.max(1, (prev[item.id]?.quantity ?? item.quantity ?? 1) + 1),
+                        [item.id]: {
+                          status: prev[item.id]?.status ?? item.status,
+                          startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
+                          bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
+                          isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
+                          varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
+                          supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                          quantity: Math.max(1, (prev[item.id]?.quantity ?? item.quantity ?? 1) + 1),
                           },
                         }))
                       }
@@ -1385,7 +1512,9 @@ export default function GardenGrowListScreen() {
                         ...prev,
                         [item.id]: {
                           status: prev[item.id]?.status ?? item.status,
+                          startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
                           bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
+                          isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
                           varietyName: value,
                           supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
                           quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
@@ -1397,6 +1526,25 @@ export default function GardenGrowListScreen() {
                     autoCapitalize="words"
                   />
                   <ToggleSwitch
+                    label={(entryDrafts[item.id]?.isPerennial ?? item.isPerennial) ? "Perennial" : "Annual"}
+                    value={entryDrafts[item.id]?.isPerennial ?? item.isPerennial}
+                    theme={theme}
+                    onToggle={(nextValue) =>
+                      setEntryDrafts((prev) => ({
+                        ...prev,
+                        [item.id]: {
+                          status: prev[item.id]?.status ?? item.status,
+                          startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
+                          bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
+                          isPerennial: nextValue,
+                          varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
+                          supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                          quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
+                        },
+                      }))
+                    }
+                  />
+                  <ToggleSwitch
                     label={(entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded) ? "Needs support" : "No support"}
                     value={entryDrafts[item.id]?.supportNeeded ?? item.supportNeeded}
                     theme={theme}
@@ -1405,7 +1553,9 @@ export default function GardenGrowListScreen() {
                         ...prev,
                         [item.id]: {
                           status: prev[item.id]?.status ?? item.status,
+                          startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
                           bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
+                          isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
                           varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
                           supportNeeded: nextValue,
                           quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
@@ -1422,7 +1572,9 @@ export default function GardenGrowListScreen() {
                         ...prev,
                         [item.id]: {
                           status: isGrowing ? "already_growing" : "wanted",
+                          startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
                           bedId: isGrowing ? (prev[item.id]?.bedId ?? item.bedId ?? null) : null,
+                          isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
                           varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
                           supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
                           quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
@@ -1430,6 +1582,29 @@ export default function GardenGrowListScreen() {
                       }))
                     }
                   />
+                  {(entryDrafts[item.id]?.status ?? item.status) === "wanted" && (
+                    <ToggleSwitch
+                      label={(entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt) ? "Started indoors" : "Not started indoors"}
+                      value={Boolean(entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt)}
+                      theme={theme}
+                      onToggle={(isStarted) =>
+                        setEntryDrafts((prev) => ({
+                          ...prev,
+                          [item.id]: {
+                            status: prev[item.id]?.status ?? item.status,
+                            startedIndoorsAt: isStarted
+                              ? (prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? new Date().toISOString())
+                              : null,
+                            bedId: prev[item.id]?.bedId ?? item.bedId ?? null,
+                            isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
+                            varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
+                            supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
+                            quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
+                          },
+                        }))
+                      }
+                    />
+                  )}
                   {(entryDrafts[item.id]?.status ?? item.status) === "already_growing" && (
                     <>
                       <View style={styles.configChips}>
@@ -1445,7 +1620,9 @@ export default function GardenGrowListScreen() {
                                   ...prev,
                                   [item.id]: {
                                     status: "already_growing",
+                                    startedIndoorsAt: prev[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt ?? null,
                                     bedId: selected ? null : bed.id,
+                                    isPerennial: prev[item.id]?.isPerennial ?? item.isPerennial,
                                     varietyName: prev[item.id]?.varietyName ?? item.varietyName ?? "",
                                     supportNeeded: prev[item.id]?.supportNeeded ?? item.supportNeeded,
                                     quantity: prev[item.id]?.quantity ?? item.quantity ?? 1,
@@ -1514,6 +1691,42 @@ export default function GardenGrowListScreen() {
         </View>
 
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Export / Import List</Text>
+          <Text style={[styles.helper, { color: theme.textMuted }]}>
+            Download CSV or backup JSON, then upload either file later. Imports are portable: plants come in as Planned with no bed/start state.
+          </Text>
+          <View style={styles.configChips}>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+              onPress={() => void handleExportGrowListFile("csv")}
+              disabled={(wishlistQuery.data ?? []).length === 0}
+            >
+              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Download CSV</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.secondaryButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+              onPress={() => void handleExportGrowListFile("json")}
+              disabled={(wishlistQuery.data ?? []).length === 0}
+            >
+              <Text style={[styles.secondaryButtonText, { color: theme.secondaryActionText }]}>Download Backup</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.primaryButton,
+                { backgroundColor: importCsvMutation.isPending ? theme.disabledActionBackground : theme.primaryActionBackground },
+              ]}
+              disabled={importCsvMutation.isPending}
+              onPress={() => void handleUploadGrowListFile()}
+            >
+              <Text style={[styles.primaryButtonText, { color: importCsvMutation.isPending ? theme.disabledActionText : theme.primaryActionText }]}>
+                {importCsvMutation.isPending ? "Importing..." : "Upload File"}
+              </Text>
+            </Pressable>
+          </View>
+          {listTransferMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{listTransferMessage}</Text>}
+        </View>
+
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <View style={styles.rowBetween}>
             <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Suggested Plants</Text>
             <Pressable
@@ -1551,6 +1764,20 @@ export default function GardenGrowListScreen() {
             Companion picks use your existing companion dataset; common/unusual picks are curated starter lists.
           </Text>
         </View>
+        {(bedsQuery.data ?? []).length > 0 && (
+          <BedPlanPreview
+            beds={bedsQuery.data ?? []}
+            {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
+              ? { boundaryPolygon: gardenQuery.data.scaleCalibration.boundaryPolygon }
+              : {})}
+            {...(gardenQuery.data?.scaleCalibration?.baseWidth && gardenQuery.data?.scaleCalibration?.baseHeight
+              ? { previewRatio: gardenQuery.data.scaleCalibration.baseHeight / gardenQuery.data.scaleCalibration.baseWidth }
+              : {})}
+            infoByBedId={bedPreviewInfoById}
+            title="Bed Layout"
+            subtitle="Quick map for checking bed names and placement while you edit the grow list."
+          />
+        )}
 
       </ScrollView>
       {bulkImportMutation.isPending && (
@@ -1585,7 +1812,9 @@ function areEntryDraftsEqual(
     if (!left || !right) return false;
     if (
       left.status !== right.status ||
+      left.startedIndoorsAt !== right.startedIndoorsAt ||
       left.bedId !== right.bedId ||
+      (left.isPerennial ?? false) !== (right.isPerennial ?? false) ||
       left.varietyName !== right.varietyName ||
       left.supportNeeded !== right.supportNeeded ||
       left.quantity !== right.quantity
@@ -1608,7 +1837,6 @@ function arePlantDataDraftsEqual(
     const right = incoming[key];
     if (!left || !right) return false;
     if (
-      left.category !== right.category ||
       left.sunRequirements !== right.sunRequirements ||
       left.rowSpacing !== right.rowSpacing ||
       left.spread !== right.spread ||
@@ -1627,20 +1855,26 @@ function arePlantDataDraftsEqual(
 function hasEntryDraftChanges(item: GardenCropWishlistItemView, draft?: CropEntryDraft): boolean {
   if (!draft) return false;
   const currentStatus = item.status;
+  const currentStartedIndoorsAt = item.startedIndoorsAt ?? null;
   const currentBedId = currentStatus === "already_growing" ? item.bedId ?? null : null;
+  const currentIsPerennial = item.isPerennial;
   const currentVariety = (item.varietyName ?? "").trim();
   const currentSupport = item.supportNeeded;
   const currentQty = Math.max(1, item.quantity ?? 1);
 
   const nextStatus = draft.status;
+  const nextStartedIndoorsAt = draft.startedIndoorsAt ?? null;
   const nextBedId = nextStatus === "already_growing" ? draft.bedId ?? null : null;
+  const nextIsPerennial = draft.isPerennial ?? item.isPerennial;
   const nextVariety = draft.varietyName.trim();
   const nextSupport = draft.supportNeeded;
   const nextQty = Math.max(1, Math.floor(draft.quantity || 1));
 
   return (
     currentStatus !== nextStatus ||
+    currentStartedIndoorsAt !== nextStartedIndoorsAt ||
     currentBedId !== nextBedId ||
+    currentIsPerennial !== nextIsPerennial ||
     currentVariety !== nextVariety ||
     currentSupport !== nextSupport ||
     currentQty !== nextQty
@@ -1654,7 +1888,6 @@ function hasPlantDataDraftChanges(item: GardenCropWishlistItemView, draft: Plant
 
 function areSinglePlantDataDraftEqual(left: PlantDataDraft, right: PlantDataDraft): boolean {
   return (
-    left.category === right.category &&
     left.sunRequirements === right.sunRequirements &&
     left.rowSpacing === right.rowSpacing &&
     left.spread === right.spread &&
@@ -1670,7 +1903,6 @@ function getPlantDataDraft(metaJson?: string): PlantDataDraft {
   const parsed = extractPlantSizing(metaJson);
   const timing = extractPlantTaskTiming(metaJson);
   return {
-    category: parsed.category ?? "unspecified",
     sunRequirements: parsed.sunRequirements ?? "",
     rowSpacing: parsed.rowSpacing ?? "",
     spread: parsed.spread ?? "",
@@ -1693,8 +1925,11 @@ function getMissingPlantDataLabels(draft: PlantDataDraft): string[] {
 
 function mergePlantDataMetaJson(existingMetaJson: string | undefined, draft: PlantDataDraft): string {
   const existing = parseMetaJsonObject(existingMetaJson);
-  const gardenme = asRecord(existing.gardenme) ?? {};
-  const category = normalizePlantCategory(draft.category);
+  const rootWithoutCategory = { ...existing };
+  delete rootWithoutCategory.plant_category;
+  const gardenmeRaw = asRecord(existing.gardenme) ?? {};
+  const gardenme = { ...gardenmeRaw };
+  delete gardenme.category;
   const sunRequirements = draft.sunRequirements.trim();
   const rowSpacing = toPositiveNumber(draft.rowSpacing);
   const spread = toPositiveNumber(draft.spread);
@@ -1706,7 +1941,6 @@ function mergePlantDataMetaJson(existingMetaJson: string | undefined, draft: Pla
 
   const nextGardenme: Record<string, unknown> = {
     ...gardenme,
-    ...(category !== "unspecified" ? { category } : {}),
     ...(sunRequirements ? { sunRequirements } : {}),
     ...(typeof rowSpacing === "number" ? { rowSpacing } : {}),
     ...(typeof spread === "number" ? { spread } : {}),
@@ -1720,9 +1954,8 @@ function mergePlantDataMetaJson(existingMetaJson: string | undefined, draft: Pla
   };
 
   const nextRoot: Record<string, unknown> = {
-    ...existing,
+    ...rootWithoutCategory,
     gardenme: nextGardenme,
-    ...(category !== "unspecified" ? { plant_category: category } : {}),
     ...(sunRequirements ? { sun_requirements: sunRequirements } : {}),
     ...(typeof rowSpacing === "number" ? { row_spacing: rowSpacing } : {}),
     ...(typeof spread === "number" ? { spread } : {}),
@@ -1894,6 +2127,218 @@ function seededHash(value: string): number {
     hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
   }
   return hash >>> 0;
+}
+
+function buildGrowListCsv(items: GardenCropWishlistItemView[]): string {
+  const header = [
+    "name",
+    "variety",
+    "status",
+    "quantity",
+    "supportNeeded",
+    "bed",
+    "startedIndoorsAt",
+    "isPerennial",
+  ];
+  const rows = items
+    .slice()
+    .sort((a, b) => a.plant.commonName.localeCompare(b.plant.commonName, undefined, { sensitivity: "base" }))
+    .map((item) =>
+      [
+        item.plant.commonName.trim(),
+        item.varietyName?.trim() ?? "",
+        item.status,
+        String(Math.max(1, item.quantity ?? 1)),
+        item.supportNeeded ? "yes" : "no",
+        item.bedName?.trim() ?? "",
+        item.startedIndoorsAt ? item.startedIndoorsAt.slice(0, 10) : "",
+        item.isPerennial ? "yes" : "no",
+      ].map(toCsvCell).join(",")
+    );
+  return [header.map(toCsvCell).join(","), ...rows].join("\n");
+}
+
+function buildGrowListBackupJson(items: GardenCropWishlistItemView[]): string {
+  const payload = {
+    format: "gardenme-growlist-v1",
+    exportedAt: new Date().toISOString(),
+    items: items.map((item) => ({
+      name: item.plant.commonName.trim(),
+      variety: item.varietyName?.trim() ?? "",
+      status: item.status,
+      quantity: Math.max(1, item.quantity ?? 1),
+      supportNeeded: item.supportNeeded,
+      bed: item.bedName?.trim() ?? "",
+      startedIndoorsAt: item.startedIndoorsAt ?? "",
+      isPerennial: item.isPerennial,
+    })),
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+function parseGrowListBackupJson(input: string): GrowListCsvRow[] {
+  try {
+    const parsed = JSON.parse(input) as {
+      format?: string;
+      items?: Array<Record<string, unknown>>;
+    };
+    const rows = Array.isArray(parsed.items) ? parsed.items : [];
+    return rows
+      .map((row) => {
+        const name = typeof row.name === "string" ? row.name.trim() : "";
+        const variety = typeof row.variety === "string" ? row.variety.trim() : "";
+        const statusRaw = typeof row.status === "string" ? row.status.trim().toLowerCase() : "";
+        const status: "wanted" | "already_growing" =
+          statusRaw === "already_growing" || statusRaw === "already growing" || statusRaw === "growing"
+            ? "already_growing"
+            : "wanted";
+        const quantity =
+          typeof row.quantity === "number"
+            ? Math.max(1, Math.floor(row.quantity))
+            : typeof row.quantity === "string"
+              ? toPositiveInteger(row.quantity)
+              : undefined;
+        const supportNeeded =
+          typeof row.supportNeeded === "boolean"
+            ? row.supportNeeded
+            : typeof row.supportNeeded === "string"
+              ? isTruthy(row.supportNeeded)
+              : false;
+        const bed = typeof row.bed === "string" ? row.bed.trim() : "";
+        const startedIndoorsAt =
+          typeof row.startedIndoorsAt === "string" ? toIsoDate(row.startedIndoorsAt) : undefined;
+        const isPerennial =
+          typeof row.isPerennial === "boolean"
+            ? row.isPerennial
+            : typeof row.isPerennial === "string"
+              ? isTruthy(row.isPerennial)
+              : false;
+
+        return {
+          name,
+          ...(variety ? { variety } : {}),
+          status,
+          ...(typeof quantity === "number" ? { quantity } : {}),
+          supportNeeded,
+          ...(bed ? { bed } : {}),
+          ...(startedIndoorsAt ? { startedIndoorsAt } : {}),
+          isPerennial,
+        } satisfies GrowListCsvRow;
+      })
+      .filter((row) => Boolean(row.name));
+  } catch {
+    return [];
+  }
+}
+
+function parseGrowListCsv(input: string): GrowListCsvRow[] {
+  const lines = input
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return [];
+
+  const parsedLines = lines.map(parseCsvLine);
+  const first = parsedLines[0] ?? [];
+  const firstLooksLikeHeader = first.some((value) =>
+    ["name", "variety", "status", "quantity", "supportneeded", "bed", "startedindoorsat", "isperennial"].includes(
+      value.trim().toLowerCase()
+    )
+  );
+  const header = (firstLooksLikeHeader ? first : ["name"]).map((value) => value.trim().toLowerCase());
+  const data = firstLooksLikeHeader ? parsedLines.slice(1) : parsedLines;
+  const indexOf = (key: string) => header.indexOf(key);
+  const get = (row: string[], key: string): string => {
+    const index = indexOf(key);
+    if (index < 0) return "";
+    return (row[index] ?? "").trim();
+  };
+
+  return data
+    .map((row) => {
+      const name = get(row, "name") || (header.length === 1 ? (row[0] ?? "").trim() : "");
+      const variety = get(row, "variety");
+      const rawStatus = get(row, "status").toLowerCase();
+      const quantity = toPositiveInteger(get(row, "quantity"));
+      const supportNeeded = isTruthy(get(row, "supportneeded"));
+      const bed = get(row, "bed");
+      const startedIndoorsAt = toIsoDate(get(row, "startedindoorsat"));
+      const isPerennial = isTruthy(get(row, "isperennial"));
+      const status: "wanted" | "already_growing" =
+        rawStatus === "already_growing" || rawStatus === "growing" || rawStatus === "already growing"
+          ? "already_growing"
+          : "wanted";
+      return {
+        name,
+        ...(variety ? { variety } : {}),
+        status,
+        ...(typeof quantity === "number" ? { quantity } : {}),
+        supportNeeded,
+        ...(bed ? { bed } : {}),
+        ...(startedIndoorsAt ? { startedIndoorsAt } : {}),
+        isPerennial,
+      } satisfies GrowListCsvRow;
+    })
+    .filter((row) => Boolean(row.name.trim()));
+}
+
+function parseCsvLine(line: string): string[] {
+  const output: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!;
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      output.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  output.push(current);
+  return output.map((cell) => cell.trim());
+}
+
+function toCsvCell(value: string): string {
+  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, "\"\"")}"`;
+  return value;
+}
+
+function toPositiveInteger(value: string): number | undefined {
+  const parsed = Number(value.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.max(1, Math.floor(parsed));
+}
+
+function toIsoDate(value: string): string | undefined {
+  const raw = value.trim();
+  if (!raw) return undefined;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString();
+}
+
+function isTruthy(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "y";
+}
+
+function slugifyForFilename(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "garden";
 }
 
 function parseBulkPlantNames(input: string): string[] {
@@ -2168,7 +2613,6 @@ function extractPlantDescription(metaJson?: string): string | undefined {
 }
 
 function extractPlantSizing(metaJson?: string): {
-  category?: PlantCategory;
   sunRequirements?: string;
   rowSpacing?: string;
   spread?: string;
@@ -2177,26 +2621,22 @@ function extractPlantSizing(metaJson?: string): {
   if (!metaJson) return {};
   try {
     const parsed = JSON.parse(metaJson) as {
-      plant_category?: string;
       sun_requirements?: string;
       row_spacing?: number | string;
       spread?: number | string;
       height?: number | string;
       gardenme?: {
-        category?: string;
         sunRequirements?: string;
         rowSpacing?: number | string;
         spread?: number | string;
         height?: number | string;
       };
     };
-    const category = normalizePlantCategory(parsed.gardenme?.category ?? parsed.plant_category);
     const sun = parsed.gardenme?.sunRequirements ?? parsed.sun_requirements;
     const row = parsed.gardenme?.rowSpacing ?? parsed.row_spacing;
     const spread = parsed.gardenme?.spread ?? parsed.spread;
     const height = parsed.gardenme?.height ?? parsed.height;
     return {
-      ...(category ? { category } : {}),
       ...(typeof sun === "string" && sun.trim() ? { sunRequirements: sun.trim() } : {}),
       ...(row !== undefined ? { rowSpacing: `${row}` } : {}),
       ...(spread !== undefined ? { spread: `${spread}` } : {}),
@@ -2474,18 +2914,6 @@ function toPositiveNumber(value: string): number | undefined {
   return parsed;
 }
 
-function normalizePlantCategory(value: unknown): PlantCategory {
-  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (raw === "tree") return "tree";
-  if (raw === "shrub") return "shrub";
-  if (raw === "herb") return "herb";
-  if (raw === "vegetable") return "vegetable";
-  if (raw === "fruit") return "fruit";
-  if (raw === "flower") return "flower";
-  if (raw === "climber") return "climber";
-  return "unspecified";
-}
-
 function extractSuggestionDetails(metaJson?: string): {
   detailLine?: string;
   descriptionSnippet?: string;
@@ -2546,6 +2974,12 @@ function normalizeSearchText(value: string): string {
     .replace(/[()[\],.:;'"`]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function formatEntryLabel(entry: GardenCropWishlistItemView): string {
+  const base = entry.plant.commonName.trim();
+  if (entry.varietyName?.trim()) return `${base} (${entry.varietyName.trim()})`;
+  return base;
 }
 
 function isSingularPluralEquivalent(left: string, right: string): boolean {

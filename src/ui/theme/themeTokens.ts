@@ -29,6 +29,7 @@ export type ThemeTokens = {
   mapBoundaryFill: string;
   mapBoundaryStroke: string;
   mapBedFill: string;
+  mapPerennialBedFill: string;
   mapBedStroke: string;
   mapLawnFill: string;
   mapLawnStroke: string;
@@ -83,6 +84,7 @@ export const DEFAULT_THEME_TOKENS: ThemeTokens = {
   mapBoundaryFill: "#2762421F",
   mapBoundaryStroke: "#2D6A49",
   mapBedFill: "#3582524D",
+  mapPerennialBedFill: "#2E5C8F4D",
   mapBedStroke: "#101010",
   mapLawnFill: "#6FAB5F38",
   mapLawnStroke: "#101010",

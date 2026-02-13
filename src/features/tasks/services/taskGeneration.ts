@@ -28,7 +28,7 @@ export function buildAutoTaskInputs(params: {
     const label = entry.varietyName?.trim() ? `${name} (${entry.varietyName.trim()})` : name;
 
     if (entry.status === "wanted") {
-      if (meta.startIndoorsMonths.includes(currentMonth)) {
+      if (!entry.startedIndoorsAt && meta.startIndoorsMonths.includes(currentMonth)) {
         tasks.push({
           gardenId: params.gardenId,
           entryId: entry.id,
@@ -67,19 +67,20 @@ export function buildAutoTaskInputs(params: {
           ruleKey: `plant_out:${entry.id}:${params.now.getFullYear()}:${currentMonth}`,
         });
       }
-      if (meta.harvestMonths.includes(currentMonth)) {
-        tasks.push({
-          gardenId: params.gardenId,
-          entryId: entry.id,
-          ...(entry.bedId ? { bedId: entry.bedId } : {}),
-          taskType: "harvest_window",
-          title: `Harvest window: ${label}`,
-          detail: buildWindowDetail("Possible harvest period", meta.harvestMonths),
-          dueDate: monthStart.toISOString(),
-          priority: 5,
-          ruleKey: `harvest_window:${entry.id}:${params.now.getFullYear()}:${currentMonth}`,
-        });
-      }
+    }
+
+    if (entry.status === "already_growing" && meta.harvestMonths.includes(currentMonth)) {
+      tasks.push({
+        gardenId: params.gardenId,
+        entryId: entry.id,
+        ...(entry.bedId ? { bedId: entry.bedId } : {}),
+        taskType: "harvest_window",
+        title: `Harvest window: ${label}`,
+        detail: buildWindowDetail("Possible harvest period", meta.harvestMonths),
+        dueDate: monthStart.toISOString(),
+        priority: 5,
+        ruleKey: `harvest_window:${entry.id}:${params.now.getFullYear()}:${currentMonth}`,
+      });
     }
 
     if (entry.status === "already_growing" && typeof meta.daysToFirstHarvest === "number") {

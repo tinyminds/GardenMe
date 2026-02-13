@@ -3,7 +3,7 @@ import { Link, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import Svg, { Path, Polygon } from "react-native-svg";
+import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/SqliteCompanionPlantingRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
@@ -24,18 +24,14 @@ const wishlistRepository = new SqliteGardenCropWishlistRepository();
 const gardenRepository = new SqliteGardenRepository();
 
 type PlantMeta = {
-  category?: PlantCategory;
   sunRequirements?: string;
   rowSpacing?: number;
   spread?: number;
   height?: number;
 };
 
-type PlantCategory = "tree" | "shrub" | "herb" | "vegetable" | "fruit" | "flower" | "climber";
-
 type BedSuggestion = {
   entry: GardenCropWishlistItemView;
-  categoryReason: string;
   diseaseReason: string;
   rotationReason: string;
   sunReason: string;
@@ -92,20 +88,12 @@ type FinishDialogState = {
   notes: string;
 };
 
-const DEFAULT_BOUNDARY = [
-  { x: 0, y: 0 },
-  { x: 1, y: 0 },
-  { x: 1, y: 1 },
-  { x: 0, y: 1 },
-];
 const MAX_SUGGESTIONS_PER_BED = 2;
 
 export default function BedsListScreen() {
   const { theme } = useTheme();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
   const gardenId = Array.isArray(params.gardenId) ? params.gardenId[0] : params.gardenId;
-  const [previewZoom, setPreviewZoom] = useState(1);
-  const [previewViewportWidth, setPreviewViewportWidth] = useState(0);
   const [hasSpareSpaceByBed, setHasSpareSpaceByBed] = useState<Record<string, boolean>>({});
   const [historyExpandedByBed, setHistoryExpandedByBed] = useState<Record<string, boolean>>({});
   const [bedExpandedById, setBedExpandedById] = useState<Record<string, boolean>>({});
@@ -224,6 +212,21 @@ export default function BedsListScreen() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+    },
+  });
+
+  const updateBedPerennialMutation = useMutation({
+    mutationFn: async (payload: { bedId: string; containsPerennials: boolean }) => {
+      const bed = (bedsQuery.data ?? []).find((item) => item.id === payload.bedId);
+      if (!bed) throw new Error("Bed not found");
+      await bedRepository.update({
+        ...bed,
+        containsPerennials: payload.containsPerennials,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
     },
   });
@@ -470,14 +473,6 @@ export default function BedsListScreen() {
       const growingNames = Array.from(new Set([...activeGrowingRows.map((row) => formatEntryName(row.entry)), ...perennialNames]));
       const plannedNames = plannedInBed.map((entry) => formatEntryName(entry));
       const companionContextNames = Array.from(new Set([...growingNames, ...plannedNames]));
-      const contextCategories = Array.from(
-        new Set(
-          [...growingInBed, ...plannedInBed]
-            .map((entry) => parsePlantMeta(entry.plant.metaJson).category)
-            .filter((value): value is PlantCategory => Boolean(value))
-        )
-      );
-
       const excludedNames = new Set<string>(growingNames.map(normalizePlantName));
       const alreadyPlannedIds = new Set(plannedInBed.map((entry) => entry.id));
 
@@ -499,13 +494,11 @@ export default function BedsListScreen() {
             companionDelta: companion.scoreDelta,
             fitCount,
             meta,
-            bedCategories: contextCategories,
             diseaseProfile,
             rotationProfile,
           });
           return {
             entry,
-            categoryReason: getCategoryReason(meta.category, contextCategories),
             diseaseReason: getDiseaseReason(entry, diseaseProfile),
             rotationReason: getRotationReason(entry, rotationProfile),
             sunReason: getSunReason(bed.sunExposure, meta.sunRequirements),
@@ -696,34 +689,23 @@ export default function BedsListScreen() {
     });
   };
 
-  const boundary = useMemo(() => {
-    const points = gardenQuery.data?.scaleCalibration?.boundaryPolygon;
-    if (points && points.length >= 3) return points;
-    return DEFAULT_BOUNDARY;
-  }, [gardenQuery.data?.scaleCalibration?.boundaryPolygon]);
-
-  const previewRatio = useMemo(() => {
-    const calibration = gardenQuery.data?.scaleCalibration;
-    if (!calibration || !calibration.baseWidth || !calibration.baseHeight) return 0.66;
-    return calibration.baseHeight / calibration.baseWidth;
-  }, [gardenQuery.data?.scaleCalibration]);
-
-  const basePreviewWidth = Math.max(280, Math.round(previewViewportWidth || 320));
-  const previewWidth = Math.round(basePreviewWidth * previewZoom);
-  const previewHeight = Math.round(previewWidth * previewRatio);
-
-  const bedInfoById = useMemo(() => {
-    const map = new Map<string, { bedName: string; growing: string[]; planned: string[]; suggestions: string[] }>();
+  const bedPreviewInfoById = useMemo(() => {
+    const map: Record<string, { bedName: string; lines: string[] }> = {};
     for (const card of bedCards) {
       const hasExistingPlants = card.growingNames.length > 0;
       const hasSpareSpace = hasSpareSpaceByBed[card.bed.id] ?? false;
       const showSuggestions = !hasExistingPlants || hasSpareSpace;
-      map.set(card.bed.id, {
+      const growing = card.growingNames;
+      const planned = card.plannedInBed.map((entry) => formatEntryName(entry));
+      const suggestions = showSuggestions ? card.suggestions.map((entry) => formatEntryName(entry.entry)) : [];
+      map[card.bed.id] = {
         bedName: card.bed.name,
-        growing: card.growingNames,
-        planned: card.plannedInBed.map((entry) => formatEntryName(entry)),
-        suggestions: showSuggestions ? card.suggestions.map((entry) => formatEntryName(entry.entry)) : [],
-      });
+        lines: [
+          growing.length > 0 ? `Growing: ${growing.join(", ")}` : "Growing: none",
+          planned.length > 0 ? `Planned: ${planned.join(", ")}` : "Planned: none",
+          ...(suggestions.length > 0 ? [`Suggestions: ${suggestions.join(", ")}`] : []),
+        ],
+      };
     }
     return map;
   }, [bedCards, hasSpareSpaceByBed]);
@@ -736,6 +718,7 @@ export default function BedsListScreen() {
   const spaceWarning = useMemo(() => {
     const overBeds: string[] = [];
     for (const card of bedCards) {
+      if (card.bed.containsPerennials) continue;
       if (!Number.isFinite(card.areaSqM) || !card.areaSqM || card.areaSqM <= 0) continue;
       const entries = [...card.activeGrowingRows.map((row) => row.entry), ...card.plannedInBed];
       let requiredAreaSqM = 0;
@@ -828,6 +811,23 @@ export default function BedsListScreen() {
               {bedExpanded && (
                 <>
               <Text style={[styles.meta, { color: theme.textMuted }]}>Sun: {formatLabel(card.bed.sunExposure)} - Drainage: {formatLabel(card.bed.drainage)}</Text>
+              <View style={styles.row}>
+                <Text style={[styles.meta, { color: theme.textMuted }]}>Perennial bed:</Text>
+                <Pressable
+                  style={[styles.toggleChip, { backgroundColor: card.bed.containsPerennials ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                  onPress={() => updateBedPerennialMutation.mutate({ bedId: card.bed.id, containsPerennials: true })}
+                  disabled={updateBedPerennialMutation.isPending}
+                >
+                  <Text style={[styles.toggleChipText, { color: card.bed.containsPerennials ? theme.primaryActionText : theme.secondaryActionText }]}>Yes</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.toggleChip, { backgroundColor: !card.bed.containsPerennials ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                  onPress={() => updateBedPerennialMutation.mutate({ bedId: card.bed.id, containsPerennials: false })}
+                  disabled={updateBedPerennialMutation.isPending}
+                >
+                  <Text style={[styles.toggleChipText, { color: !card.bed.containsPerennials ? theme.primaryActionText : theme.secondaryActionText }]}>No</Text>
+                </Pressable>
+              </View>
               <Text style={[styles.meta, { color: theme.textMuted }]}>
                 {typeof card.areaSqM === "number" ? `Area ~${card.areaSqM.toFixed(1)} sqm` : "Area unavailable (set garden scale)"}
               </Text>
@@ -944,7 +944,6 @@ export default function BedsListScreen() {
                                   <Text style={[styles.suggestionScore, { color: theme.textMuted }]}>{suggestion.scoreLabel}</Text>
                                 </View>
                               </View>
-                              <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.categoryReason}</Text>
                               <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.diseaseReason}</Text>
                               <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.rotationReason}</Text>
                               <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.sunReason}</Text>
@@ -1051,51 +1050,17 @@ export default function BedsListScreen() {
           );
         })}
 
-        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Garden Layout</Text>
-          <Text style={[styles.meta, { color: theme.textMuted }]}>No image or grid here. This is a clean bed layout.</Text>
-          <View style={styles.zoomRow}>
-            <Pressable style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setPreviewZoom((value) => Math.max(0.7, Number((value - 0.1).toFixed(2))))}><Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>-</Text></Pressable>
-            <Text style={[styles.zoomText, { color: theme.textPrimary }]}>{Math.round(previewZoom * 100)}%</Text>
-            <Pressable style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setPreviewZoom((value) => Math.min(1.8, Number((value + 0.1).toFixed(2))))}><Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>+</Text></Pressable>
-          </View>
-          <View onLayout={(event) => {
-            const width = Math.floor(event.nativeEvent.layout.width);
-            if (width > 0) setPreviewViewportWidth(width);
-          }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator>
-              <ScrollView showsVerticalScrollIndicator>
-                <View style={[styles.previewCanvas, { width: previewWidth, height: previewHeight, borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
-                  <Svg width={previewWidth} height={previewHeight} style={StyleSheet.absoluteFillObject}>
-                    <Path d={`${rectPath(previewWidth, previewHeight)} ${polygonPath(boundary, previewWidth, previewHeight)}`} fill={theme.mapBoundaryFill} fillRule="evenodd" />
-                    <Polygon points={toSvgPoints(boundary, previewWidth, previewHeight)} fill="transparent" stroke={theme.mapBoundaryStroke} strokeWidth={2} />
-                    {beds.map((bed) => (
-                      <Polygon key={`shape-${bed.id}`} points={toSvgPoints(bed.polygon, previewWidth, previewHeight)} fill={theme.mapBedFill} stroke={theme.mapBedStroke} strokeWidth={1.4} />
-                    ))}
-                  </Svg>
-                  {beds.map((bed) => {
-                    const center = polygonCenter(bed.polygon);
-                    const left = center.x * previewWidth;
-                    const top = center.y * previewHeight;
-                    const info = bedInfoById.get(bed.id);
-                    return (
-                      <Pressable key={bed.id} style={[styles.previewPin, { left, top, backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionText }]} onPress={() => {
-                        if (!info) return;
-                        Alert.alert(info.bedName, [
-                          info.growing.length > 0 ? `Growing: ${info.growing.join(", ")}` : "Growing: none",
-                          info.planned.length > 0 ? `Planned: ${info.planned.join(", ")}` : "Planned: none",
-                          ...(info.suggestions.length > 0 ? [`Suggestions: ${info.suggestions.join(", ")}`] : []),
-                        ].join("\n"));
-                      }}>
-                        <Text style={[styles.previewPinText, { color: theme.primaryActionText }]}>i</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            </ScrollView>
-          </View>
-        </View>
+        <BedPlanPreview
+          beds={beds}
+          {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
+            ? { boundaryPolygon: gardenQuery.data.scaleCalibration.boundaryPolygon }
+            : {})}
+          {...(gardenQuery.data?.scaleCalibration?.baseWidth && gardenQuery.data?.scaleCalibration?.baseHeight
+            ? { previewRatio: gardenQuery.data.scaleCalibration.baseHeight / gardenQuery.data.scaleCalibration.baseWidth }
+            : {})}
+          infoByBedId={bedPreviewInfoById}
+          subtitle="No image or grid here. This is a clean bed layout."
+        />
       </ScrollView>
       {finishDialog && (
         <View style={[styles.dialogOverlay, { backgroundColor: theme.appBackground }]}>
@@ -1169,7 +1134,6 @@ function scoreSuggestion(params: {
   companionDelta: number;
   fitCount: number | null;
   meta: PlantMeta;
-  bedCategories: PlantCategory[];
   diseaseProfile: BedDiseaseProfile;
   rotationProfile: BedRotationProfile;
 }): {
@@ -1178,9 +1142,8 @@ function scoreSuggestion(params: {
   components: Array<{ label: string; value: number }>;
   breakdown: string[];
 } {
-  const { entry, bedSunExposure, companionDelta, fitCount, meta, bedCategories, diseaseProfile, rotationProfile } = params;
+  const { entry, bedSunExposure, companionDelta, fitCount, meta, diseaseProfile, rotationProfile } = params;
   const sunScore = getSunMatchScore(bedSunExposure, meta.sunRequirements);
-  const categoryScore = getCategoryCompatibilityScore(meta.category, bedCategories);
   const diseaseScore = getDiseaseScore(entry, diseaseProfile);
   const rotationScore = getRotationScore(entry, rotationProfile);
   const supportScore = entry.supportNeeded ? -2 : 1;
@@ -1188,17 +1151,15 @@ function scoreSuggestion(params: {
   const quantityScore =
     typeof fitCount === "number" ? (entry.quantity <= fitCount ? 6 : Math.max(-8, fitCount - entry.quantity)) : 0;
   const dataCoverage = getDataCoverageScore(meta, fitCount);
-  const total = sunScore + categoryScore + diseaseScore + rotationScore + companionDelta + supportScore + spacingScore + quantityScore + dataCoverage;
+  const total = sunScore + diseaseScore + rotationScore + companionDelta + supportScore + spacingScore + quantityScore + dataCoverage;
   const components = [
     { label: "Sun", value: sunScore },
-    { label: "Category", value: categoryScore },
     { label: "Companion", value: companionDelta },
     { label: "Disease", value: diseaseScore },
     { label: "Rotation", value: rotationScore },
     { label: "Capacity", value: quantityScore },
   ];
   const breakdown = [
-    `Category fit: ${formatSignedScore(categoryScore)}`,
     `Disease history: ${formatSignedScore(diseaseScore)}`,
     `Rotation memory: ${formatSignedScore(rotationScore)}`,
     `Sun fit: ${formatSignedScore(sunScore)}`,
@@ -1214,7 +1175,6 @@ function scoreSuggestion(params: {
 
 function getDataCoverageScore(meta: PlantMeta, fitCount: number | null): number {
   let score = 0;
-  if (meta.category) score += 1;
   if (meta.sunRequirements?.trim()) score += 2;
   if (typeof meta.rowSpacing === "number" || typeof meta.spread === "number") score += 2;
   if (typeof fitCount === "number") score += 2;
@@ -1242,61 +1202,10 @@ function getWhyNotReason(candidate: BedSuggestion): string {
     candidate.rotationReason,
     candidate.sunReason,
     candidate.spacingReason,
-    candidate.categoryReason,
   ];
   const caution = lines.find((line) => /caution|weak|unknown|unavailable|note/i.test(line));
   if (caution) return caution;
   return lines[0] ?? "Lower rank than current picks";
-}
-
-function getCategoryReason(candidate: PlantCategory | undefined, bedCategories: PlantCategory[]): string {
-  if (!candidate) return "Category fit: unknown";
-  if (bedCategories.length === 0) return `Category fit: bed open for ${candidate}`;
-  const score = getCategoryCompatibilityScore(candidate, bedCategories);
-  if (score >= 6) return `Category fit: good with ${bedCategories.join(", ")}`;
-  if (score >= 0) return `Category fit: mixed with ${bedCategories.join(", ")}`;
-  return `Category fit: weak with ${bedCategories.join(", ")}`;
-}
-
-function getCategoryCompatibilityScore(candidate: PlantCategory | undefined, bedCategories: PlantCategory[]): number {
-  if (!candidate) return 0;
-  if (bedCategories.length === 0) return 2;
-  const hasWoody = bedCategories.some((category) => category === "tree" || category === "shrub");
-  const hasFoodBed = bedCategories.some((category) => category === "vegetable" || category === "herb");
-  const hasFlower = bedCategories.includes("flower");
-  const hasFruit = bedCategories.includes("fruit");
-
-  if (candidate === "tree" || candidate === "shrub") {
-    if (hasWoody) return 8;
-    if (hasFoodBed) return -7;
-    return 2;
-  }
-
-  if (candidate === "vegetable" || candidate === "herb") {
-    if (hasFoodBed) return 7;
-    if (hasWoody) return -6;
-    if (hasFlower) return 3;
-    return 2;
-  }
-
-  if (candidate === "flower") {
-    if (hasFlower || hasFoodBed) return 4;
-    if (hasWoody) return 1;
-    return 2;
-  }
-
-  if (candidate === "fruit") {
-    if (hasFruit || hasWoody) return 5;
-    if (hasFoodBed) return 2;
-    return 2;
-  }
-
-  if (candidate === "climber") {
-    if (hasWoody || hasFoodBed) return 3;
-    return 1;
-  }
-
-  return 0;
 }
 
 type BedDiseaseProfile = {
@@ -1468,26 +1377,22 @@ function parsePlantMeta(metaJson?: string): PlantMeta {
   if (!metaJson) return {};
   try {
     const parsed = JSON.parse(metaJson) as {
-      plant_category?: string;
       sun_requirements?: string;
       row_spacing?: number | string;
       spread?: number | string;
       height?: number | string;
       gardenme?: {
-        category?: string;
         sunRequirements?: string;
         rowSpacing?: number | string;
         spread?: number | string;
         height?: number | string;
       };
     };
-    const category = normalizePlantCategory(parsed.gardenme?.category ?? parsed.plant_category);
     const sunRequirements = parsed.gardenme?.sunRequirements ?? parsed.sun_requirements;
     const rowSpacing = toNumber(parsed.gardenme?.rowSpacing ?? parsed.row_spacing);
     const spread = toNumber(parsed.gardenme?.spread ?? parsed.spread);
     const height = toNumber(parsed.gardenme?.height ?? parsed.height);
     return {
-      ...(category ? { category } : {}),
       ...(sunRequirements ? { sunRequirements } : {}),
       ...(typeof rowSpacing === "number" ? { rowSpacing } : {}),
       ...(typeof spread === "number" ? { spread } : {}),
@@ -1505,24 +1410,6 @@ function toNumber(value: unknown): number | undefined {
     if (Number.isFinite(parsed)) return parsed;
   }
   return undefined;
-}
-
-function normalizePlantCategory(value: unknown): PlantCategory | undefined {
-  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (raw === "tree") return "tree";
-  if (raw === "shrub") return "shrub";
-  if (raw === "herb") return "herb";
-  if (raw === "vegetable") return "vegetable";
-  if (raw === "fruit") return "fruit";
-  if (raw === "flower") return "flower";
-  if (raw === "climber") return "climber";
-  return undefined;
-}
-
-function polygonCenter(points: { x: number; y: number }[]): { x: number; y: number } {
-  if (points.length === 0) return { x: 0.5, y: 0.5 };
-  const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
-  return { x: sum.x / points.length, y: sum.y / points.length };
 }
 
 function parsePerennialPlants(csv?: string): string[] {
@@ -1565,22 +1452,6 @@ function formatEndStateLabel(value: PlantingEndState): string {
 function formatSignedScore(value: number): string {
   if (value > 0) return `+${value}`;
   return `${value}`;
-}
-
-function toSvgPoints(points: { x: number; y: number }[], width: number, height: number): string {
-  return points.map((point) => `${point.x * width},${point.y * height}`).join(" ");
-}
-
-function rectPath(width: number, height: number): string {
-  return `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z`;
-}
-
-function polygonPath(points: { x: number; y: number }[], width: number, height: number): string {
-  if (points.length < 3) return "";
-  const first = points[0]!;
-  const start = `M ${first.x * width} ${first.y * height}`;
-  const lines = points.slice(1).map((point) => `L ${point.x * width} ${point.y * height}`).join(" ");
-  return `${start} ${lines} Z`;
 }
 
 const styles = StyleSheet.create({

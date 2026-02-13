@@ -18,6 +18,7 @@ export interface GardenCropWishlistItem {
   gardenId: string;
   plantCatalogId: string;
   status: "wanted" | "already_growing";
+  startedIndoorsAt?: string;
   bedId?: string;
   isPerennial: boolean;
   varietyName?: string;

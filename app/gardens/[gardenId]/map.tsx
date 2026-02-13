@@ -84,6 +84,7 @@ export default function GardenMapEditorScreen() {
   const [name, setName] = useState("Bed 1");
   const [sunExposure, setSunExposure] = useState<SunExposure>(SunExposure.FULL_SUN);
   const [drainage, setDrainage] = useState<Drainage>(Drainage.GOOD);
+  const [containsPerennials, setContainsPerennials] = useState(false);
   const [isRaisedBed, setIsRaisedBed] = useState(false);
   const [hasIrrigation, setHasIrrigation] = useState(false);
   const [draftPoints, setDraftPoints] = useState<Point2D[]>([]);
@@ -204,6 +205,7 @@ export default function GardenMapEditorScreen() {
   useEffect(() => {
     if (editingZoneId) return;
     if (activeType !== GardenFeatureType.BED) return;
+    setContainsPerennials(false);
     setIsRaisedBed(false);
     setHasIrrigation(false);
   }, [activeType, editingZoneId]);
@@ -319,9 +321,11 @@ export default function GardenMapEditorScreen() {
     if (zone.source === "bed") {
       setSunExposure(zone.sunExposure ?? SunExposure.FULL_SUN);
       setDrainage(zone.drainage ?? Drainage.GOOD);
+      setContainsPerennials(zone.containsPerennials ?? false);
       setIsRaisedBed(zone.isRaisedBed ?? false);
       setHasIrrigation(zone.hasIrrigation ?? false);
     } else {
+      setContainsPerennials(false);
       setIsRaisedBed(false);
       setHasIrrigation(false);
     }
@@ -637,7 +641,7 @@ export default function GardenMapEditorScreen() {
           polygon: draftPoints,
           sunExposure,
           drainage,
-          containsPerennials: existingBed?.containsPerennials ?? false,
+          containsPerennials,
           isRaisedBed,
           hasIrrigation,
           createdAt: now,
@@ -1067,7 +1071,12 @@ export default function GardenMapEditorScreen() {
                     ))}
                     {zonesToRender.map((zone) => {
                       const points = toSvgPoints(zone.polygon, canvas);
-                      const color = typeColors[zone.type];
+                      const color = zone.source === "bed"
+                        ? {
+                            fill: zone.containsPerennials ? theme.mapPerennialBedFill : theme.mapBedFill,
+                            stroke: theme.mapBedStroke,
+                          }
+                        : typeColors[zone.type];
                       const isEditingThis = editingZoneId === zone.id;
                       const stripeSpec = getStripeSpecForType(zone.type, theme);
                       const hatchLines = stripeSpec
@@ -1139,7 +1148,13 @@ export default function GardenMapEditorScreen() {
                       <>
                         <Polygon
                           points={toSvgPoints(draftPoints, canvas)}
-                          fill={isClosed ? typeColors[activeType].fill : withAlpha(theme.textPrimary, 0.1)}
+                          fill={
+                            isClosed
+                              ? activeType === GardenFeatureType.BED && containsPerennials
+                                ? theme.mapPerennialBedFill
+                                : typeColors[activeType].fill
+                              : withAlpha(theme.textPrimary, 0.1)
+                          }
                           stroke={typeColors[activeType].stroke}
                           strokeWidth={3}
                           {...(!isClosed ? { strokeDasharray: [10, 5] } : {})}
@@ -1334,6 +1349,12 @@ export default function GardenMapEditorScreen() {
                 onSelect={(value) => setIsRaisedBed(value === "yes")}
               />
               <PickerRow
+                title="Perennial Bed"
+                options={["yes", "no"]}
+                selected={containsPerennials ? "yes" : "no"}
+                onSelect={(value) => setContainsPerennials(value === "yes")}
+              />
+              <PickerRow
                 title="Irrigation"
                 options={["yes", "no"]}
                 selected={hasIrrigation ? "yes" : "no"}
@@ -1421,6 +1442,7 @@ export default function GardenMapEditorScreen() {
                 <Text style={[styles.zoneName, { color: theme.textPrimary }]}>{zone.name}</Text>
                 <Text style={[styles.zoneSub, { color: theme.textMuted }]}>
                   {zone.type} · {zone.polygon.length} pts
+                  {zone.source === "bed" && zone.containsPerennials ? " · perennial" : ""}
                   {calibration
                     ? ` · ~${normalizedAreaToSqM(
                         polygonArea(zone.polygon),

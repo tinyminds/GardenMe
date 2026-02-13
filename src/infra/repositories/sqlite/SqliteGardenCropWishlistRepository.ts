@@ -17,6 +17,7 @@ type CropEntryRow = {
   garden_id: string;
   plant_catalog_id: string;
   entry_status: "wanted" | "already_growing";
+  entry_started_indoors_at: string | null;
   entry_bed_id: string | null;
   entry_bed_name: string | null;
   entry_is_perennial: number;
@@ -70,6 +71,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
          e.garden_id AS garden_id,
          e.plant_catalog_id AS plant_catalog_id,
          e.status AS entry_status,
+         e.started_indoors_at AS entry_started_indoors_at,
          e.bed_id AS entry_bed_id,
          b.name AS entry_bed_name,
          e.is_perennial AS entry_is_perennial,
@@ -101,6 +103,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
       gardenId: row.garden_id,
       plantCatalogId: row.plant_catalog_id,
       status: row.entry_status,
+      ...(row.entry_started_indoors_at ? { startedIndoorsAt: row.entry_started_indoors_at } : {}),
       isPerennial: row.entry_is_perennial === 1,
       supportNeeded: row.entry_support_needed === 1,
       quantity: row.entry_quantity,
@@ -171,13 +174,14 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
     const quantity = Math.max(1, Math.floor(input.quantity ?? 1));
     await getDatabase().runAsync(
       `INSERT INTO garden_crop_entries (
-         id, garden_id, plant_catalog_id, status, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+         id, garden_id, plant_catalog_id, status, started_indoors_at, bed_id, is_perennial, variety_name, support_needed, quantity, notes, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
       [
         makeId("crop"),
         input.gardenId,
         input.plantCatalogId,
         input.status,
+        input.startedIndoorsAt ?? null,
         input.bedId ?? null,
         input.isPerennial ? 1 : 0,
         varietyName,
@@ -194,10 +198,19 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
     const quantity = input.quantity === undefined ? null : Math.max(1, Math.floor(input.quantity));
     await getDatabase().runAsync(
       `UPDATE garden_crop_entries
-       SET status = ?, bed_id = ?, is_perennial = ?, variety_name = ?, support_needed = ?, quantity = COALESCE(?, quantity), updated_at = ?
+       SET status = ?,
+           started_indoors_at = CASE WHEN ? = 1 THEN ? ELSE started_indoors_at END,
+           bed_id = ?,
+           is_perennial = ?,
+           variety_name = ?,
+           support_needed = ?,
+           quantity = COALESCE(?, quantity),
+           updated_at = ?
        WHERE id = ?`,
       [
         input.status,
+        input.startedIndoorsAt === undefined ? 0 : 1,
+        input.startedIndoorsAt ?? null,
         input.bedId ?? null,
         input.status === "already_growing" && input.isPerennial ? 1 : 0,
         varietyName,
@@ -276,7 +289,7 @@ export class SqliteGardenCropWishlistRepository implements GardenCropWishlistRep
       }
 
       await db.runAsync(
-        "UPDATE garden_crop_entries SET status = 'wanted', bed_id = NULL, updated_at = ? WHERE id = ?",
+        "UPDATE garden_crop_entries SET status = 'wanted', started_indoors_at = NULL, bed_id = NULL, updated_at = ? WHERE id = ?",
         [now, input.entryId]
       );
     });
