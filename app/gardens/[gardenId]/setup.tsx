@@ -278,7 +278,7 @@ export default function GardenSetupScreen() {
     await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
     Alert.alert(
       "Map saved",
-      `Garden area: ${boundaryAreaSqM.toFixed(1)} sqm.${snapshotSaved ? " Planner image captured." : ""}`
+      `Garden area: ${boundaryAreaSqM.toFixed(1)} sqm.${snapshotSaved ? " Design image captured." : ""}`
     );
   };
 
@@ -494,7 +494,7 @@ export default function GardenSetupScreen() {
                 href={`/gardens/${gardenId}/map`}
                 style={[styles.mapperLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
               >
-                Continue to Garden Planner
+                Continue to Garden Design
               </Link>
             )}
           </ScrollView>

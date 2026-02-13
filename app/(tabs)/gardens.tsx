@@ -101,8 +101,8 @@ export default function GardensTabScreen() {
                 <Text style={[styles.statusText, { color: theme.textMuted }]}>
                   {item.scaleCalibration
                     ? (summaries[item.id]?.bedCount ?? 0) > 0 || (summaries[item.id]?.featureCount ?? 0) > 0
-                      ? "Mapped and in progress"
-                      : "Setup done, ready to map"
+                      ? "Designed and in progress"
+                      : "Setup done, ready to design"
                     : "Needs setup"}
                 </Text>
               </Pressable>

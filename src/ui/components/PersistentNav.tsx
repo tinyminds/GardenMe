@@ -36,8 +36,7 @@ export function PersistentNav() {
     >
       <View style={styles.row}>
         <Link href="/(tabs)" style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Home</Text></Link>
-        <Link href="/(tabs)/gardens" style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Gardens</Text></Link>
-        <Link href="/(tabs)/plan" style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Plan</Text></Link>
+        <Link href="/(tabs)/plan" style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Workspace</Text></Link>
         <Link href="/(tabs)/tasks" style={styles.link}>
           <View style={styles.taskLink}>
             <Text style={[styles.text, { color: theme.textPrimary }]}>Tasks</Text>

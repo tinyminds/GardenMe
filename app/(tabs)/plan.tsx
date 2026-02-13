@@ -1,4 +1,4 @@
-﻿import { Link } from "expo-router";
+import { Link } from "expo-router";
 import { useEffect } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -8,10 +8,13 @@ import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedReposi
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { ChoiceChip } from "@/ui/components/ChoiceChip";
 
 const bedRepository = new SqliteBedRepository();
 const featureRepository = new SqliteGardenFeatureRepository();
 const growRepository = new SqliteGardenCropWishlistRepository();
+
+type StepState = "not_ready" | "start" | "in_progress" | "done";
 
 export default function PlanTabScreen() {
   const { theme } = useTheme();
@@ -26,64 +29,69 @@ export default function PlanTabScreen() {
   }, [gardens, selectedGardenId, setSelectedGardenId]);
 
   const selectedGarden = gardens.find((g) => g.id === selectedGardenId) ?? null;
+  const activeGardenId = selectedGarden?.id ?? null;
 
   const bedsQuery = useQuery({
-    queryKey: ["beds", selectedGardenId],
-    enabled: Boolean(selectedGardenId),
+    queryKey: ["beds", activeGardenId],
+    enabled: Boolean(activeGardenId),
     queryFn: async () => {
-      if (!selectedGardenId) return [];
-      return bedRepository.listByGarden(selectedGardenId);
+      if (!activeGardenId) return [];
+      return bedRepository.listByGarden(activeGardenId);
     },
   });
 
   const featuresQuery = useQuery({
-    queryKey: ["garden-features", selectedGardenId],
-    enabled: Boolean(selectedGardenId),
+    queryKey: ["garden-features", activeGardenId],
+    enabled: Boolean(activeGardenId),
     queryFn: async () => {
-      if (!selectedGardenId) return [];
-      return featureRepository.listByGarden(selectedGardenId);
+      if (!activeGardenId) return [];
+      return featureRepository.listByGarden(activeGardenId);
     },
   });
 
   const growQuery = useQuery({
-    queryKey: ["garden-grow-list", selectedGardenId],
-    enabled: Boolean(selectedGardenId),
+    queryKey: ["garden-grow-list", activeGardenId],
+    enabled: Boolean(activeGardenId),
     queryFn: async () => {
-      if (!selectedGardenId) return [];
-      return growRepository.listByGarden(selectedGardenId);
+      if (!activeGardenId) return [];
+      return growRepository.listByGarden(activeGardenId);
     },
   });
 
   const bedCount = (bedsQuery.data ?? []).length;
   const featureCount = (featuresQuery.data ?? []).length;
-  const wantedCount = (growQuery.data ?? []).filter((entry) => entry.status === "wanted").length;
-  const growingCount = (growQuery.data ?? []).filter((entry) => entry.status === "already_growing").length;
-  const perennialBedCount = (bedsQuery.data ?? []).filter((bed) => bed.containsPerennials).length;
+  const growList = growQuery.data ?? [];
+  const growCount = growList.length;
+  const plannedCount = growList.filter((entry) => entry.status === "wanted").length;
+  const growingCount = growList.filter((entry) => entry.status === "already_growing").length;
+  const placedCount = growList.filter((entry) => Boolean(entry.bedId)).length;
+  const hasSetup = Boolean(selectedGarden?.scaleCalibration);
+  const hasDesign = bedCount + featureCount > 0;
+
+  const setupState: StepState = hasSetup ? "done" : "start";
+  const designState: StepState = !hasSetup ? "not_ready" : hasDesign ? "done" : "start";
+  const growState: StepState = !hasSetup ? "not_ready" : growCount > 0 ? "in_progress" : "start";
+  const bedsReady = bedCount > 0 && growCount > 0;
+  const bedsDone = bedsReady && placedCount === growCount;
+  const bedsState: StepState = !bedsReady ? "not_ready" : bedsDone ? "done" : "in_progress";
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
-      <Text style={[styles.title, { color: theme.textPrimary }]}>Plan</Text>
-      <Text style={[styles.subtitle, { color: theme.textMuted }]}>One place for setup, mapping, beds, and growing plan.</Text>
+      <Text style={[styles.title, { color: theme.textPrimary }]}>Workspace</Text>
+      <Text style={[styles.subtitle, { color: theme.textMuted }]}>Build and plant in order. Each step shows what is next.</Text>
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Garden</Text>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Active Garden</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
           {gardens.map((garden) => {
-            const selected = garden.id === selectedGardenId;
+            const selected = garden.id === activeGardenId;
             return (
-              <Text
+              <ChoiceChip
                 key={garden.id}
+                label={garden.name}
+                selected={selected}
                 onPress={() => setSelectedGardenId(garden.id)}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground,
-                    color: selected ? theme.primaryActionText : theme.secondaryActionText,
-                  },
-                ]}
-              >
-                {garden.name}
-              </Text>
+              />
             );
           })}
         </ScrollView>
@@ -92,10 +100,7 @@ export default function PlanTabScreen() {
       {!selectedGarden ? (
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.state, { color: theme.textMuted }]}>No gardens yet.</Text>
-          <Link
-            href="/gardens/new"
-            style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
-          >
+          <Link href="/gardens/new" style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
             Create Garden
           </Link>
         </View>
@@ -106,46 +111,73 @@ export default function PlanTabScreen() {
             <Text style={[styles.metric, { color: theme.textMuted }]}>
               Area {selectedGarden.scaleCalibration?.boundaryAreaSqM ? `${selectedGarden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
             </Text>
-            <Text style={[styles.metric, { color: theme.textMuted }]}>Beds {bedCount} · Features {featureCount}</Text>
-            <Text style={[styles.metric, { color: theme.textMuted }]}>Wanted {wantedCount} · Growing {growingCount}</Text>
-            <Text style={[styles.metric, { color: theme.textMuted }]}>Perennial beds {perennialBedCount}</Text>
+            <Text style={[styles.metric, { color: theme.textMuted }]}>Beds {bedCount} | Features {featureCount}</Text>
+            <Text style={[styles.metric, { color: theme.textMuted }]}>Grow list {growCount} | Planned {plannedCount} | Growing {growingCount}</Text>
           </View>
 
-          <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Build</Text>
-            <Link
-              href={`/gardens/${selectedGarden.id}/setup`}
-              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
-            >
-              Setup & Scale
-            </Link>
-            <Link
-              href={`/gardens/${selectedGarden.id}/map`}
-              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
-            >
-              Garden Mapper
-            </Link>
-          </View>
-
-          <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Planting</Text>
-            <Link
-              href={`/gardens/${selectedGarden.id}/grow`}
-              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
-            >
-              Grow List
-            </Link>
-            <Link
-              href={`/gardens/${selectedGarden.id}/beds`}
-              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
-            >
-              Bed Planner
-            </Link>
-          </View>
+          <StepCard
+            title="1. Garden Setup"
+            helper={hasSetup ? "Boundary and scale saved." : "Set location, boundary, and scale."}
+            href={`/gardens/${selectedGarden.id}/setup`}
+            state={setupState}
+          />
+          <StepCard
+            title="2. Garden Design"
+            helper={hasDesign ? `${bedCount} beds and ${featureCount} features mapped.` : "Map your beds and garden features."}
+            href={`/gardens/${selectedGarden.id}/map`}
+            state={designState}
+          />
+          <StepCard
+            title="3. Grow List"
+            helper={growCount > 0 ? `${growCount} plants added.` : "Add the plants you want to grow."}
+            href={`/gardens/${selectedGarden.id}/grow`}
+            state={growState}
+          />
+          <StepCard
+            title="4. Bed Planner"
+            helper={
+              bedsReady
+                ? bedsDone
+                  ? `${placedCount}/${growCount} plants positioned in beds.`
+                  : `${placedCount}/${growCount} plants positioned in beds.`
+                : "Add beds and grow list plants first."
+            }
+            href={`/gardens/${selectedGarden.id}/beds`}
+            state={bedsState}
+          />
         </>
       )}
     </ScrollView>
   );
+}
+
+function StepCard(props: { title: string; helper: string; href: string; state: StepState }) {
+  const { theme } = useTheme();
+  return (
+    <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+      <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{props.title}</Text>
+      <Text style={[styles.metric, { color: theme.textMuted }]}>{props.helper}</Text>
+      <Link
+        href={props.href}
+        style={[
+          styles.primaryLink,
+          {
+            backgroundColor: props.state === "not_ready" ? theme.disabledActionBackground : theme.primaryActionBackground,
+            color: props.state === "not_ready" ? theme.disabledActionText : theme.primaryActionText,
+          },
+        ]}
+      >
+        {getStepStatus(props.state)}
+      </Link>
+    </View>
+  );
+}
+
+function getStepStatus(state: StepState): string {
+  if (state === "done") return "Review";
+  if (state === "in_progress") return "Continue";
+  if (state === "not_ready") return "Not ready";
+  return "Start";
 }
 
 const styles = StyleSheet.create({
@@ -161,13 +193,6 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontWeight: "800" },
   chipRow: { gap: 8 },
-  chip: {
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    overflow: "hidden",
-    fontWeight: "700",
-  },
   metric: { fontWeight: "600" },
   state: {},
   primaryLink: {
@@ -179,4 +204,3 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 });
-

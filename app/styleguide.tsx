@@ -36,6 +36,12 @@ const actionTokens: TokenSpec[] = [
   { key: "disabledActionText", label: "Disabled Text" },
   { key: "dangerActionBackground", label: "Delete Button" },
   { key: "dangerActionText", label: "Delete Text" },
+  { key: "filterControlBackground", label: "Filter Background" },
+  { key: "filterControlBorder", label: "Filter Border" },
+  { key: "filterControlText", label: "Filter Text" },
+  { key: "filterControlActiveBackground", label: "Filter Active Bg" },
+  { key: "filterControlActiveBorder", label: "Filter Active Border" },
+  { key: "filterControlActiveText", label: "Filter Active Text" },
   { key: "toggleOnBackground", label: "Toggle On" },
   { key: "toggleOffBackground", label: "Toggle Off" },
   { key: "toggleThumbColor", label: "Toggle Thumb" },
@@ -125,6 +131,17 @@ export default function StyleguideScreen() {
           <View style={styles.previewRow}>
             <TogglePreview label="On" on={true} theme={theme} />
             <TogglePreview label="Off" on={false} theme={theme} />
+          </View>
+          <View style={styles.previewRow}>
+            <View style={[styles.previewFilter, { backgroundColor: theme.filterControlBackground, borderColor: theme.filterControlBorder }]}>
+              <Text style={[styles.previewFilterText, { color: theme.filterControlText }]}>Filter</Text>
+            </View>
+            <View style={[styles.previewFilter, { backgroundColor: theme.filterControlActiveBackground, borderColor: theme.filterControlActiveBorder }]}>
+              <Text style={[styles.previewFilterText, { color: theme.filterControlActiveText }]}>Filter On</Text>
+            </View>
+            <View style={[styles.previewButton, { backgroundColor: theme.secondaryActionBackground }]}>
+              <Text style={[styles.previewButtonText, { color: theme.secondaryActionText }]}>Chip</Text>
+            </View>
           </View>
           <View style={[styles.modalPreviewWrap, { backgroundColor: theme.modalBackdrop }]}>
             <View style={[styles.modalPreviewCard, { backgroundColor: theme.modalSurfaceBackground, borderColor: theme.modalSurfaceBorder }]}>
@@ -478,6 +495,8 @@ const styles = StyleSheet.create({
   previewRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", alignItems: "center" },
   previewButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
   previewButtonText: { fontWeight: "700", fontSize: 12 },
+  previewFilter: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  previewFilterText: { fontWeight: "700", fontSize: 12 },
   togglePreviewWrap: { alignItems: "center", gap: 4 },
   toggleTrack: { width: 42, height: 24, borderRadius: 999, paddingVertical: 2, paddingHorizontal: 2, justifyContent: "center" },
   toggleThumb: { width: 18, height: 18, borderRadius: 999 },

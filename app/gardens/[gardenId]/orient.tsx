@@ -219,8 +219,8 @@ export default function GardenOrientationScreen() {
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.appBackground }]} edges={["left", "right"]}>
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={[styles.title, { color: theme.textPrimary }]}>Opening Planner...</Text>
-          <Text style={[styles.subtitle, { color: theme.textMuted }]}>Orientation step has been folded into planner flow.</Text>
+          <Text style={[styles.title, { color: theme.textPrimary }]}>Opening Garden Design...</Text>
+          <Text style={[styles.subtitle, { color: theme.textMuted }]}>Orientation step has been folded into the design flow.</Text>
 
           <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
             <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Preview</Text>

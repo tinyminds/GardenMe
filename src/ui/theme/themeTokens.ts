@@ -13,6 +13,12 @@ export type ThemeTokens = {
   disabledActionText: string;
   dangerActionBackground: string;
   dangerActionText: string;
+  filterControlBackground: string;
+  filterControlBorder: string;
+  filterControlText: string;
+  filterControlActiveBackground: string;
+  filterControlActiveBorder: string;
+  filterControlActiveText: string;
   toggleOnBackground: string;
   toggleOffBackground: string;
   toggleThumbColor: string;
@@ -61,6 +67,12 @@ export const DEFAULT_THEME_TOKENS: ThemeTokens = {
   disabledActionText: "#FFFFFF",
   dangerActionBackground: "#C74C3A",
   dangerActionText: "#FFFFFF",
+  filterControlBackground: "#F7FBF5",
+  filterControlBorder: "#A9C3AC",
+  filterControlText: "#2A4B38",
+  filterControlActiveBackground: "#1E6A42",
+  filterControlActiveBorder: "#1E6A42",
+  filterControlActiveText: "#FFFFFF",
   toggleOnBackground: "#2D6A49",
   toggleOffBackground: "#BFD1BC",
   toggleThumbColor: "#FFFFFF",

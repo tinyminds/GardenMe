@@ -793,7 +793,7 @@ export default function BedsListScreen() {
         {bedsQuery.isLoading && <Text style={[styles.empty, { color: theme.textMuted }]}>Loading beds...</Text>}
         {bedsQuery.isError && <Text style={[styles.empty, { color: theme.textMuted }]}>Could not load beds.</Text>}
         {!bedsQuery.isLoading && !bedsQuery.isError && bedCards.length === 0 && (
-          <Text style={[styles.empty, { color: theme.textMuted }]}>No beds yet. Add beds in Garden Planner.</Text>
+          <Text style={[styles.empty, { color: theme.textMuted }]}>No beds yet. Add beds in Garden Design.</Text>
         )}
 
         {bedCards.map((card) => {

@@ -840,7 +840,7 @@ export default function GardenMapEditorScreen() {
       <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.appBackground }]} edges={["left", "right"]}>
         <ScrollView contentContainerStyle={styles.scrollContent} scrollEnabled={!isEditingCanvas || canvasMode === "draw"}>
         <View style={styles.header}>
-          <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Mapper</Text>
+          <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Design</Text>
           <Text style={[styles.subtitle, { color: theme.textMuted }]}>Map beds and spaces quickly with tap-to-draw and tap-to-edit.</Text>
         </View>
 
@@ -848,7 +848,7 @@ export default function GardenMapEditorScreen() {
           <Text style={[styles.guidanceText, { color: theme.infoText }]}>{guidanceText}</Text>
           {!calibration && gardenId && (
             <Link href={`/gardens/${gardenId}/setup`} style={[styles.setupLinkText, { color: theme.primaryActionBackground }]}>
-              Set scale in Setup to enable sqm estimates
+              Set scale in Garden Setup to enable sqm estimates
             </Link>
           )}
         </View>
@@ -902,7 +902,7 @@ export default function GardenMapEditorScreen() {
 
         <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <View style={styles.sectionTitleRow}>
-            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>2. Planner Canvas</Text>
+            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>2. Design Canvas</Text>
             <View style={styles.zoomRow}>
               <Pressable style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={() => setZoom((z) => clamp(z - 0.25, 0.2, 15))}>
                 <Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>-</Text>

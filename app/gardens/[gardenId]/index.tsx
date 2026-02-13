@@ -105,16 +105,16 @@ export default function GardenDetailScreen() {
         {
           href: `/gardens/${gardenId}/setup`,
           key: "setup",
-          title: "Setup and Scale",
+          title: "Garden Setup",
           helper: hasSetup
             ? `Area ${garden?.scaleCalibration?.boundaryAreaSqM?.toFixed(1) ?? "?"} sqm`
-            : "Set boundary and calibration",
+            : "Set location, boundary, and scale",
           status: hasSetup ? "done" : "start",
         },
         {
           href: `/gardens/${gardenId}/map`,
           key: "mapper",
-          title: "Garden Mapper",
+          title: "Garden Design",
           helper: hasMappedContent ? `${bedCount} beds | ${featureCount} features` : "Add beds and features",
           status: mapperDone ? "done" : hasMappedContent ? "in_progress" : hasSetup ? "start" : "blocked",
         },
@@ -147,7 +147,7 @@ export default function GardenDetailScreen() {
         contentContainerStyle={styles.contentContainer}
       >
         <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Workspace</Text>
-        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Move through setup, mapping, and review without losing context.</Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Move through setup, design, and planning without losing context.</Text>
 
         {gardenId ? (
           <>

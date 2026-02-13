@@ -1,22 +1,74 @@
-﻿import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useGardensQuery } from "@/features/gardens/hooks/useGardensQuery";
-import { useGardenSummariesQuery } from "@/features/gardens/hooks/useGardenSummariesQuery";
 import { fetchCurrentWeather, fetchDailyForecast } from "@/features/weather/services/openMeteo";
+import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
+import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
+import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
+import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGardenTaskRepository";
 import { useSelectedGardenStore } from "@/state/selectedGardenStore";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { ChoiceChip } from "@/ui/components/ChoiceChip";
+
+const bedRepository = new SqliteBedRepository();
+const featureRepository = new SqliteGardenFeatureRepository();
+const growRepository = new SqliteGardenCropWishlistRepository();
+const taskRepository = new SqliteGardenTaskRepository();
 
 export default function DashboardScreen() {
   const { theme } = useTheme();
   const gardensQuery = useGardensQuery();
   const gardens = gardensQuery.data ?? [];
-  const summariesQuery = useGardenSummariesQuery(gardens);
-  const summaries = summariesQuery.data ?? {};
   const selectedGardenId = useSelectedGardenStore((state) => state.selectedGardenId);
   const setSelectedGardenId = useSelectedGardenStore((state) => state.setSelectedGardenId);
 
   const selectedGarden = gardens.find((garden) => garden.id === selectedGardenId) ?? gardens[0] ?? null;
+  const activeGardenId = selectedGarden?.id ?? null;
+
+  const bedsQuery = useQuery({
+    queryKey: ["beds", activeGardenId],
+    enabled: Boolean(activeGardenId),
+    queryFn: async () => {
+      if (!activeGardenId) return [];
+      return bedRepository.listByGarden(activeGardenId);
+    },
+  });
+
+  const featuresQuery = useQuery({
+    queryKey: ["garden-features", activeGardenId],
+    enabled: Boolean(activeGardenId),
+    queryFn: async () => {
+      if (!activeGardenId) return [];
+      return featureRepository.listByGarden(activeGardenId);
+    },
+  });
+
+  const growQuery = useQuery({
+    queryKey: ["garden-grow-list", activeGardenId],
+    enabled: Boolean(activeGardenId),
+    queryFn: async () => {
+      if (!activeGardenId) return [];
+      return growRepository.listByGarden(activeGardenId);
+    },
+  });
+
+  const tasksQuery = useQuery({
+    queryKey: ["dashboard-task-summary", activeGardenId],
+    enabled: Boolean(activeGardenId),
+    queryFn: async () => {
+      if (!activeGardenId) return { open: 0, unseen: 0 };
+      const [allTasks, unseen] = await Promise.all([
+        taskRepository.listByGarden(activeGardenId),
+        taskRepository.countOpenUnseenByGarden(activeGardenId),
+      ]);
+      return {
+        open: allTasks.filter((task) => task.status === "open").length,
+        unseen,
+      };
+    },
+  });
+
   const canLoadWeather = Boolean(
     selectedGarden && (Math.abs(selectedGarden.latitude) > 0.000001 || Math.abs(selectedGarden.longitude) > 0.000001)
   );
@@ -35,49 +87,110 @@ export default function DashboardScreen() {
     staleTime: 15 * 60 * 1000,
   });
 
-  const totalBeds = gardens.reduce((sum, garden) => sum + (summaries[garden.id]?.bedCount ?? 0), 0);
-  const mappedGardens = gardens.reduce((sum, garden) => {
-    const bedCount = summaries[garden.id]?.bedCount ?? 0;
-    const featureCount = summaries[garden.id]?.featureCount ?? 0;
-    return sum + (bedCount + featureCount > 0 ? 1 : 0);
-  }, 0);
-  const totalAreaSqM = gardens.reduce((sum, garden) => sum + (garden.scaleCalibration?.boundaryAreaSqM ?? 0), 0);
+  const bedCount = (bedsQuery.data ?? []).length;
+  const featureCount = (featuresQuery.data ?? []).length;
+  const growList = growQuery.data ?? [];
+  const growCount = growList.length;
+  const placedCount = growList.filter((entry) => Boolean(entry.bedId)).length;
+  const plannedCount = growList.filter((entry) => entry.status === "wanted").length;
+  const growingCount = growList.filter((entry) => entry.status === "already_growing").length;
+  const hasSetup = Boolean(selectedGarden?.scaleCalibration);
+  const hasDesign = bedCount + featureCount > 0;
+  const isBedPlannerReady = bedCount > 0 && growCount > 0;
+  const isBedPlannerDone = isBedPlannerReady && placedCount === growCount;
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
-      <Text style={[styles.title, { color: theme.textPrimary }]}>GardenMe</Text>
-      <Text style={[styles.subtitle, { color: theme.textMuted }]}>Plan smarter with one quick view of progress and next steps.</Text>
-
-      <View style={styles.metricsRow}>
-        <MetricCard label="Gardens" value={gardens.length.toString()} />
-        <MetricCard label="Mapped" value={mappedGardens.toString()} />
-      </View>
-      <View style={styles.metricsRow}>
-        <MetricCard label="Beds" value={totalBeds.toString()} />
-        <MetricCard label="Total Area" value={totalAreaSqM > 0 ? `${totalAreaSqM.toFixed(1)} sqm` : "-"} />
-      </View>
+      <Text style={[styles.title, { color: theme.textPrimary }]}>Home</Text>
+      <Text style={[styles.subtitle, { color: theme.textMuted }]}>Focus on your current garden, then jump straight into the next step.</Text>
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Quick Actions</Text>
-        <Link
-          href="/gardens/new"
-          style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
-        >
-          + New Garden
-        </Link>
-        <Link
-          href="/(tabs)/gardens"
-          style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
-        >
-          Open Gardens
-        </Link>
-        <Link
-          href="/(tabs)/plan"
-          style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
-        >
-          Open Plan
-        </Link>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Current Garden</Text>
+        {!selectedGarden ? (
+          <>
+            <Text style={[styles.helper, { color: theme.textMuted }]}>No gardens yet. Create your first garden to start planning.</Text>
+            <Link
+              href="/gardens/new"
+              style={[styles.primaryLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}
+            >
+              + New Garden
+            </Link>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.gardenName, { color: theme.textPrimary }]}>{selectedGarden.name}</Text>
+            <Text style={[styles.helper, { color: theme.textMuted }]}>
+              {selectedGarden.locationLabel ?? `${selectedGarden.latitude.toFixed(4)}, ${selectedGarden.longitude.toFixed(4)}`}
+            </Text>
+            <Text style={[styles.helper, { color: theme.textMuted }]}>
+              Area {selectedGarden.scaleCalibration?.boundaryAreaSqM ? `${selectedGarden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
+            </Text>
+            <View style={styles.metricsRow}>
+              <MetricChip label={`Beds ${bedCount}`} />
+              <MetricChip label={`Features ${featureCount}`} />
+              <MetricChip label={`Grow list ${growCount}`} />
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {gardens.map((garden) => {
+                const selected = garden.id === selectedGarden.id;
+                return (
+                  <ChoiceChip
+                    key={garden.id}
+                    label={garden.name}
+                    selected={selected}
+                    onPress={() => setSelectedGardenId(garden.id)}
+                  />
+                );
+              })}
+            </ScrollView>
+            <Link
+              href="/(tabs)/gardens"
+              style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+            >
+              Manage Gardens
+            </Link>
+          </>
+        )}
       </View>
+
+      {selectedGarden ? (
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Quick Actions</Text>
+          <View style={styles.actionGrid}>
+            <Link href={`/gardens/${selectedGarden.id}/setup`} style={[styles.actionLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+              {hasSetup ? "Garden Setup - Edit" : "Garden Setup - Start"}
+            </Link>
+            <Link href={`/gardens/${selectedGarden.id}/map`} style={[styles.actionLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+              {hasDesign ? "Garden Design - Continue" : "Garden Design - Start"}
+            </Link>
+            <Link href={`/gardens/${selectedGarden.id}/grow`} style={[styles.actionLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+              {growCount > 0 ? "Grow List - Continue" : "Grow List - Start"}
+            </Link>
+            <Link href={`/gardens/${selectedGarden.id}/beds`} style={[styles.actionLink, { backgroundColor: theme.primaryActionBackground, color: theme.primaryActionText }]}>
+              {isBedPlannerDone ? "Bed Planner - Review" : isBedPlannerReady ? "Bed Planner - Continue" : "Bed Planner - Start"}
+            </Link>
+          </View>
+          <Text style={[styles.helper, { color: theme.textMuted }]}>
+            Planned {plannedCount} · Growing now {growingCount} · Positioned {placedCount}/{growCount}
+          </Text>
+        </View>
+      ) : null}
+
+      {selectedGarden ? (
+        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Tasks Snapshot</Text>
+          <View style={styles.metricsRow}>
+            <MetricChip label={`Open ${tasksQuery.data?.open ?? 0}`} />
+            <MetricChip label={`Unseen ${tasksQuery.data?.unseen ?? 0}`} />
+          </View>
+          <Link
+            href="/(tabs)/tasks"
+            style={[styles.secondaryLink, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
+          >
+            Open Tasks
+          </Link>
+        </View>
+      ) : null}
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Garden Weather</Text>
@@ -96,58 +209,21 @@ export default function DashboardScreen() {
             <Text style={[styles.helper, { color: theme.textMuted }]}>Wind {Math.round(weatherQuery.data.current.windSpeedKmh)} km/h</Text>
             {weatherQuery.data.forecast.slice(0, 3).map((day) => (
               <Text key={day.date} style={[styles.helper, { color: theme.textMuted }]}>
-                {formatShortDate(day.date)}: {Math.round(day.tempMinC)}-{Math.round(day.tempMaxC)}C, {Math.round(day.precipMm)}mm rain (
-                {Math.round(day.precipProbPct)}%)
+                {formatShortDate(day.date)}: {Math.round(day.tempMinC)}-{Math.round(day.tempMaxC)}C, {Math.round(day.precipMm)}mm rain ({Math.round(day.precipProbPct)}%)
               </Text>
             ))}
           </>
         ) : null}
       </View>
-
-      <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Current Garden</Text>
-        {!selectedGarden && <Text style={[styles.helper, { color: theme.textMuted }]}>No gardens yet. Create one to get started.</Text>}
-        {selectedGarden && (
-          <>
-            <Text style={[styles.gardenName, { color: theme.textPrimary }]}>{selectedGarden.name}</Text>
-            <Text style={[styles.helper, { color: theme.textMuted }]}> 
-              {selectedGarden.locationLabel ?? `${selectedGarden.latitude.toFixed(4)}, ${selectedGarden.longitude.toFixed(4)}`}
-            </Text>
-            <Text style={[styles.helper, { color: theme.textMuted }]}> 
-              Area {selectedGarden.scaleCalibration?.boundaryAreaSqM ? `${selectedGarden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
-              {" | "}Beds {summaries[selectedGarden.id]?.bedCount ?? 0}
-              {" | "}Features {summaries[selectedGarden.id]?.featureCount ?? 0}
-            </Text>
-            <View style={styles.inlineActions}>
-              <Link
-                href={`/gardens/${selectedGarden.id}/setup`}
-                style={[styles.secondaryLinkSmall, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
-              >
-                Setup
-              </Link>
-              <Link
-                href={`/gardens/${selectedGarden.id}/map`}
-                style={[styles.secondaryLinkSmall, { backgroundColor: theme.secondaryActionBackground, color: theme.secondaryActionText }]}
-              >
-                Mapper
-              </Link>
-              <Pressable onPress={() => setSelectedGardenId(selectedGarden.id)}>
-                <Text style={[styles.selectText, { color: theme.primaryActionBackground }]}>Set as current</Text>
-              </Pressable>
-            </View>
-          </>
-        )}
-      </View>
     </ScrollView>
   );
 }
 
-function MetricCard(props: { label: string; value: string }) {
+function MetricChip(props: { label: string }) {
   const { theme } = useTheme();
   return (
-    <View style={[styles.metricCard, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}>
-      <Text style={[styles.metricLabel, { color: theme.textMuted }]}>{props.label}</Text>
-      <Text style={[styles.metricValue, { color: theme.textPrimary }]}>{props.value}</Text>
+    <View style={[styles.metricChip, { backgroundColor: theme.secondaryActionBackground }]}>
+      <Text style={[styles.metricChipText, { color: theme.secondaryActionText }]}>{props.label}</Text>
     </View>
   );
 }
@@ -173,16 +249,6 @@ const styles = StyleSheet.create({
   content: { padding: 16, gap: 12, paddingBottom: 40 },
   title: { fontSize: 30, fontWeight: "800" },
   subtitle: { fontSize: 15 },
-  metricsRow: { flexDirection: "row", gap: 10 },
-  metricCard: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 12,
-    gap: 4,
-  },
-  metricLabel: { fontWeight: "700", fontSize: 12 },
-  metricValue: { fontWeight: "800", fontSize: 20 },
   card: {
     borderRadius: 12,
     borderWidth: 1,
@@ -190,12 +256,38 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cardTitle: { fontWeight: "800" },
+  helper: {},
+  gardenName: { fontSize: 20, fontWeight: "800" },
+  metricsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  metricChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  metricChipText: { fontSize: 12, fontWeight: "700" },
+  chipRow: { gap: 8 },
+  actionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  actionLink: {
+    minWidth: "48%",
+    flexGrow: 1,
+    textAlign: "center",
+    fontWeight: "800",
+    borderRadius: 10,
+    overflow: "hidden",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   primaryLink: {
     fontWeight: "800",
     borderRadius: 10,
     overflow: "hidden",
     paddingHorizontal: 12,
     paddingVertical: 10,
+    textAlign: "center",
   },
   secondaryLink: {
     fontWeight: "700",
@@ -203,19 +295,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     paddingHorizontal: 12,
     paddingVertical: 9,
+    textAlign: "center",
   },
-  gardenName: { fontSize: 20, fontWeight: "800" },
-  helper: {},
   weatherNow: { fontSize: 16, fontWeight: "700" },
-  inlineActions: { marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  secondaryLinkSmall: {
-    fontWeight: "700",
-    borderRadius: 999,
-    overflow: "hidden",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    fontSize: 12,
-  },
-  selectText: { fontWeight: "700" },
 });
-

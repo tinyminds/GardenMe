@@ -12,6 +12,8 @@ import { getPlantingCalendarProfile } from "@/features/plants/services/plantingC
 import { fetchBestTreflePlantProfile, type TreflePlantProfile } from "@/features/plants/services/trefle";
 import { queryClient } from "@/state/queryClient";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { ChoiceChip } from "@/ui/components/ChoiceChip";
+import { FilterPill } from "@/ui/components/FilterPill";
 import type { GardenCropWishlistItemView, PlantCatalogEntry } from "@/domain/entities/Plant";
 import type { CompanionPlantingRelation } from "@/domain/entities/CompanionPlanting";
 
@@ -980,16 +982,14 @@ export default function GardenGrowListScreen() {
                   <Text style={[styles.configLabel, { color: theme.textPrimary }]}>Unmatched (tap to put in search)</Text>
                   <View style={styles.configChips}>
                     {bulkImportUnmatchedNames.map((name) => (
-                      <Pressable
+                      <ChoiceChip
                         key={`unmatched-${name}`}
-                        style={[styles.configChip, { backgroundColor: theme.secondaryActionBackground }]}
+                        label={name}
                         onPress={() => {
                           setSearch(name);
                           setBulkImportOpen(false);
                         }}
-                      >
-                        <Text style={[styles.configChipText, { color: theme.secondaryActionText }]}>{name}</Text>
-                      </Pressable>
+                      />
                     ))}
                   </View>
                 </View>
@@ -1006,13 +1006,12 @@ export default function GardenGrowListScreen() {
               {(gardensQuery.data ?? [])
                 .filter((garden) => garden.id !== gardenId)
                 .map((garden) => (
-                  <Pressable
+                  <ChoiceChip
                     key={garden.id}
-                    style={[styles.configChip, { backgroundColor: importSourceGardenId === garden.id ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                    label={garden.name}
+                    selected={importSourceGardenId === garden.id}
                     onPress={() => setImportSourceGardenId((current) => (current === garden.id ? null : garden.id))}
-                  >
-                    <Text style={[styles.configChipText, { color: importSourceGardenId === garden.id ? theme.primaryActionText : theme.secondaryActionText }]}>{garden.name}</Text>
-                  </Pressable>
+                  />
                 ))}
             </View>
             {!gardensQuery.isLoading &&
@@ -1049,38 +1048,13 @@ export default function GardenGrowListScreen() {
               autoCapitalize="none"
             />
             <View style={styles.configChips}>
-              <Pressable
-                style={[styles.configChip, { backgroundColor: listSortDirection === "asc" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-                onPress={() => setListSortDirection("asc")}
-              >
-                <Text style={[styles.configChipText, { color: listSortDirection === "asc" ? theme.primaryActionText : theme.secondaryActionText }]}>A-Z</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.configChip, { backgroundColor: listSortDirection === "desc" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-                onPress={() => setListSortDirection("desc")}
-              >
-                <Text style={[styles.configChipText, { color: listSortDirection === "desc" ? theme.primaryActionText : theme.secondaryActionText }]}>Z-A</Text>
-              </Pressable>
+              <FilterPill label="A-Z" selected={listSortDirection === "asc"} onPress={() => setListSortDirection("asc")} />
+              <FilterPill label="Z-A" selected={listSortDirection === "desc"} onPress={() => setListSortDirection("desc")} />
             </View>
             <View style={styles.configChips}>
-              <Pressable
-                style={[styles.configChip, { backgroundColor: listStatusFilter === "all" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-                onPress={() => setListStatusFilter("all")}
-              >
-                <Text style={[styles.configChipText, { color: listStatusFilter === "all" ? theme.primaryActionText : theme.secondaryActionText }]}>Both</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.configChip, { backgroundColor: listStatusFilter === "planned" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-                onPress={() => setListStatusFilter("planned")}
-              >
-                <Text style={[styles.configChipText, { color: listStatusFilter === "planned" ? theme.primaryActionText : theme.secondaryActionText }]}>Planned</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.configChip, { backgroundColor: listStatusFilter === "growing" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-                onPress={() => setListStatusFilter("growing")}
-              >
-                <Text style={[styles.configChipText, { color: listStatusFilter === "growing" ? theme.primaryActionText : theme.secondaryActionText }]}>Growing</Text>
-              </Pressable>
+              <FilterPill label="Both" selected={listStatusFilter === "all"} onPress={() => setListStatusFilter("all")} />
+              <FilterPill label="Planned" selected={listStatusFilter === "planned"} onPress={() => setListStatusFilter("planned")} />
+              <FilterPill label="Growing" selected={listStatusFilter === "growing"} onPress={() => setListStatusFilter("growing")} />
             </View>
           </View>
           {wishlistQuery.isLoading && <Text style={[styles.helper, { color: theme.textMuted }]}>Loading...</Text>}
@@ -1201,23 +1175,17 @@ export default function GardenGrowListScreen() {
                               {PLANT_CATEGORY_OPTIONS.map((option) => {
                                 const selected = plantDataDraft.category === option.value;
                                 return (
-                                  <Pressable
+                                  <ChoiceChip
                                     key={`${item.id}-category-${option.value}`}
-                                    style={[
-                                      styles.configChip,
-                                      { backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground },
-                                    ]}
+                                    label={option.label}
+                                    selected={selected}
                                     onPress={() =>
                                       setPlantDataDrafts((prev) => ({
                                         ...prev,
                                         [item.id]: { ...(prev[item.id] ?? getPlantDataDraft(item.plant.metaJson)), category: option.value },
                                       }))
                                     }
-                                  >
-                                    <Text style={[styles.configChipText, { color: selected ? theme.primaryActionText : theme.secondaryActionText }]}>
-                                      {option.label}
-                                    </Text>
-                                  </Pressable>
+                                  />
                                 );
                               })}
                             </View>
@@ -1468,9 +1436,10 @@ export default function GardenGrowListScreen() {
                         {(bedsQuery.data ?? []).map((bed) => {
                           const selected = (entryDrafts[item.id]?.bedId ?? item.bedId ?? null) === bed.id;
                           return (
-                            <Pressable
+                            <ChoiceChip
                               key={`${item.id}-${bed.id}`}
-                              style={[styles.configChip, { backgroundColor: selected ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                              label={bed.name}
+                              selected={selected}
                               onPress={() =>
                                 setEntryDrafts((prev) => ({
                                   ...prev,
@@ -1483,9 +1452,7 @@ export default function GardenGrowListScreen() {
                                   },
                                 }))
                               }
-                            >
-                              <Text style={[styles.configChipText, { color: selected ? theme.primaryActionText : theme.secondaryActionText }]}>{bed.name}</Text>
-                            </Pressable>
+                            />
                           );
                         })}
                       </View>
@@ -1561,38 +1528,21 @@ export default function GardenGrowListScreen() {
             </Pressable>
           </View>
           <View style={styles.configChips}>
-            <Pressable
-              style={[styles.configChip, { backgroundColor: suggestionTab === "companions" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-              onPress={() => setSuggestionTab("companions")}
-            >
-              <Text style={[styles.configChipText, { color: suggestionTab === "companions" ? theme.primaryActionText : theme.secondaryActionText }]}>Companions</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.configChip, { backgroundColor: suggestionTab === "common" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-              onPress={() => setSuggestionTab("common")}
-            >
-              <Text style={[styles.configChipText, { color: suggestionTab === "common" ? theme.primaryActionText : theme.secondaryActionText }]}>Common</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.configChip, { backgroundColor: suggestionTab === "unusual" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
-              onPress={() => setSuggestionTab("unusual")}
-            >
-              <Text style={[styles.configChipText, { color: suggestionTab === "unusual" ? theme.primaryActionText : theme.secondaryActionText }]}>Unusual</Text>
-            </Pressable>
+            <FilterPill label="Companions" selected={suggestionTab === "companions"} onPress={() => setSuggestionTab("companions")} />
+            <FilterPill label="Common" selected={suggestionTab === "common"} onPress={() => setSuggestionTab("common")} />
+            <FilterPill label="Unusual" selected={suggestionTab === "unusual"} onPress={() => setSuggestionTab("unusual")} />
           </View>
           {visibleSuggestionChips.length === 0 ? (
             <Text style={[styles.helper, { color: theme.textMuted }]}>No suggestions right now. Refresh or add more plants first.</Text>
           ) : (
             <View style={styles.configChips}>
               {visibleSuggestionChips.map((name) => (
-                <Pressable
+                <ChoiceChip
                   key={`${suggestionTab}-${name}`}
-                  style={[styles.configChip, { backgroundColor: theme.secondaryActionBackground }]}
+                  label={name}
                   onPress={() => addSuggestedPlantMutation.mutate(name)}
                   disabled={addSuggestedPlantMutation.isPending}
-                >
-                  <Text style={[styles.configChipText, { color: theme.secondaryActionText }]}>{name}</Text>
-                </Pressable>
+                />
               ))}
             </View>
           )}
@@ -2696,14 +2646,6 @@ const styles = StyleSheet.create({
   configRow: { gap: 6 },
   configLabel: { color: "#244130", fontWeight: "700" },
   configChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  configChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: "#D9E7D8",
-  },
-  configChipActive: { backgroundColor: "#9BC8A4" },
-  configChipText: { color: "#264433", textTransform: "capitalize" },
   suggestionsBox: {
     borderWidth: 1,
     borderColor: "#D4E2D2",
