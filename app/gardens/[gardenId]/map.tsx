@@ -1617,15 +1617,32 @@ function clamp(value: number, min: number, max: number): number {
 function withAlpha(color: string, alpha: number): string {
   const clamped = Math.max(0, Math.min(1, alpha));
   const hex = color.trim().replace(/^#/, "");
+  const a = Math.round(clamped * 255).toString(16).padStart(2, "0").toUpperCase();
+  
+  // Handle 8-digit hex (RGBA) - replace existing alpha
   if (/^[0-9a-fA-F]{8}$/.test(hex)) {
     const base = hex.slice(0, 6).toUpperCase();
-    const a = Math.round(clamped * 255).toString(16).padStart(2, "0").toUpperCase();
     return `#${base}${a}`;
   }
+  
+  // Handle 6-digit hex (RGB)
   if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-    const a = Math.round(clamped * 255).toString(16).padStart(2, "0").toUpperCase();
     return `#${hex.toUpperCase()}${a}`;
   }
+  
+  // Handle 3-digit hex (RGB shorthand)
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    const expanded = hex.split('').map(char => char + char).join('');
+    return `#${expanded.toUpperCase()}${a}`;
+  }
+  
+  // Handle 4-digit hex (RGBA shorthand) - replace existing alpha
+  if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+    const expanded = hex.slice(0, 3).split('').map(char => char + char).join('');
+    return `#${expanded.toUpperCase()}${a}`;
+  }
+  
+  console.warn(`withAlpha: Unable to process color "${color}", returning original`);
   return color;
 }
 
@@ -2293,83 +2310,73 @@ function getPolygonEdgeMeasurementLabels(
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#F0F6EE" },
-  safeArea: { flex: 1, backgroundColor: "#F0F6EE" },
+  page: { flex: 1 },
+  safeArea: { flex: 1 },
   scrollContent: { paddingHorizontal: 14, paddingBottom: 120, gap: 10 },
   header: { marginBottom: 4, paddingTop: 4 },
-  title: { fontSize: 26, fontWeight: "800", color: "#1E402C" },
-  subtitle: { color: "#4E6857", marginTop: 4 },
+  title: { fontSize: 26, fontWeight: "800" },
+  subtitle: { marginTop: 4 },
   guidanceCard: {
-    backgroundColor: "#E6F3E8",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#C3DCC6",
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  guidanceText: { color: "#27513A", fontWeight: "600" },
-  setupLinkText: { color: "#1E5D40", fontWeight: "800", marginTop: 6 },
+  guidanceText: { fontWeight: "600" },
+  setupLinkText: { fontWeight: "800", marginTop: 6 },
   sectionCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
-    borderColor: "#D8E5D5",
     gap: 8,
   },
-  sectionTitle: { fontSize: 14, fontWeight: "700", color: "#2C4737" },
+  sectionTitle: { fontSize: 14, fontWeight: "700" },
   sectionTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   typeRow: { gap: 8, paddingVertical: 2, paddingRight: 4 },
-  typeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: "#9DB8A6", backgroundColor: "#D8E4D8" },
-  typeChipActive: { backgroundColor: "#2F6F4F" },
-  typeChipText: { color: "#2C4737", fontWeight: "600", textTransform: "capitalize" },
-  typeChipTextActive: { color: "#FFFFFF" },
+  typeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  typeChipActive: {},
+  typeChipText: { fontWeight: "600", textTransform: "capitalize" },
+  typeChipTextActive: {},
   shapeChoiceContainer: { gap: 6, marginTop: 8 },
   shapeChoiceLabel: { fontSize: 12, fontWeight: "600" },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  zoomButton: { backgroundColor: "#DFEADF", borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", paddingHorizontal: 10, paddingVertical: 4 },
-  zoomButtonText: { fontSize: 18, fontWeight: "700", color: "#23412E" },
-  zoomText: { minWidth: 52, textAlign: "center", fontWeight: "700", color: "#375947" },
+  zoomButton: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4 },
+  zoomButtonText: { fontSize: 18, fontWeight: "700" },
+  zoomText: { minWidth: 52, textAlign: "center", fontWeight: "700" },
   switchRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#EAF2E7",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#A9C3B0",
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   switchRowDisabled: { opacity: 0.45 },
-  switchLabel: { color: "#1F3F2B", fontWeight: "700" },
+  switchLabel: { fontWeight: "700" },
   switchTrack: {
     width: 40,
     height: 22,
     borderRadius: 999,
-    backgroundColor: "#BFD1BC",
     justifyContent: "center",
     paddingHorizontal: 2,
   },
-  switchTrackActive: { backgroundColor: "#2D6A49" },
+  switchTrackActive: {},
   switchThumb: {
     width: 18,
     height: 18,
     borderRadius: 999,
-    backgroundColor: "#FFFFFF",
     alignSelf: "flex-start",
   },
   switchThumbActive: { alignSelf: "flex-end" },
-  infoText: { color: "#587063", fontWeight: "600" },
+  infoText: { fontWeight: "600" },
   rotationRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
   rotationInput: {
     width: 90,
     borderWidth: 1,
-    borderColor: "#BFD1BC",
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: "#FFFFFF",
   },
   canvasOuterScroll: { maxHeight: 330 },
   canvasViewport: { borderRadius: 16, overflow: "hidden", maxHeight: 330 },
@@ -2377,27 +2384,23 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "#C5D4C5",
-    backgroundColor: "#E5EDE4",
   },
   canvasImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
-  placeholder: { justifyContent: "center", alignItems: "center", backgroundColor: "#E5EDE4" },
-  placeholderText: { color: "#5E7262" },
+  placeholder: { justifyContent: "center", alignItems: "center" },
+  placeholderText: {},
   toolbarRow: { marginTop: 2, flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  secondaryButton: { backgroundColor: "#DFEADF", borderWidth: 1, borderColor: "#A9C3B0", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
-  secondaryButtonText: { color: "#1F3F2B", fontWeight: "600" },
-  secondaryButtonReady: { backgroundColor: "#CDE2D2", borderWidth: 1, borderColor: "#94B9A0" },
-  secondaryButtonTextReady: { color: "#1D4A33", fontWeight: "700" },
-  secondaryButtonActive: { backgroundColor: "#245A3E" },
-  secondaryButtonTextActive: { color: "#FFFFFF" },
+  secondaryButton: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  secondaryButtonText: { fontWeight: "600" },
+  secondaryButtonReady: { borderWidth: 1 },
+  secondaryButtonTextReady: { fontWeight: "700" },
+  secondaryButtonActive: {},
+  secondaryButtonTextActive: {},
   nameInput: {
     marginTop: 2,
     borderWidth: 1,
-    borderColor: "#BFD1BC",
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: "#FFFFFF",
   },
   metaRow: { marginTop: 8, gap: 12 },
   choiceRow: { gap: 6 },
@@ -2429,82 +2432,68 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#D8E5D5",
-    backgroundColor: "#F8FCF7",
     gap: 8,
   },
-  precisionTitle: { color: "#1F3F2B", fontWeight: "800" },
+  precisionTitle: { fontWeight: "800" },
   precisionDualRow: { flexDirection: "row", gap: 8 },
   precisionField: { flex: 1, gap: 4 },
   pickerRow: { gap: 6 },
-  pickerTitle: { fontWeight: "700", color: "#1D3D2A" },
+  pickerTitle: { fontWeight: "700" },
   pickerOptionsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  pickerChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", backgroundColor: "#DCE8DA" },
-  pickerChipActive: { backgroundColor: "#A9CFB2" },
-  pickerChipText: { textTransform: "capitalize", color: "#274431" },
+  pickerChip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
+  pickerChipActive: {},
+  pickerChipText: { textTransform: "capitalize" },
   zoneRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#E8EFE6",
   },
   zoneMeta: { flex: 1 },
-  zoneName: { fontWeight: "700", color: "#264534", textTransform: "capitalize" },
-  zoneSub: { color: "#557061", marginTop: 2, textTransform: "capitalize" },
+  zoneName: { fontWeight: "700", textTransform: "capitalize" },
+  zoneSub: { marginTop: 2, textTransform: "capitalize" },
   zoneActions: { flexDirection: "row", gap: 8 },
-  editButton: { backgroundColor: "#E6F0E4", borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", paddingHorizontal: 10, paddingVertical: 6 },
-  editButtonText: { color: "#275239", fontWeight: "700" },
-  deleteButton: { backgroundColor: "#FBE3DE", borderRadius: 10, borderWidth: 1, borderColor: "#D7A59C", paddingHorizontal: 10, paddingVertical: 6 },
-  deleteButtonText: { color: "#9A3B2B", fontWeight: "700" },
-  emptyText: { color: "#60766A" },
+  editButton: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  editButtonText: { fontWeight: "700" },
+  deleteButton: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  deleteButtonText: { fontWeight: "700" },
+  emptyText: {},
   saveCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 14,
     padding: 12,
     borderWidth: 2,
-    borderColor: "#C4D8C8",
     gap: 8,
   },
   primarySaveButton: {
-    backgroundColor: "#1E6A42",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#175238",
     paddingHorizontal: 14,
     paddingVertical: 14,
     alignItems: "center",
   },
-  primarySaveButtonDisabled: {
-    backgroundColor: "#A0B2A4",
-  },
+  primarySaveButtonDisabled: {},
   primarySaveButtonText: {
-    color: "#FFFFFF",
     fontWeight: "800",
     fontSize: 16,
     textTransform: "capitalize",
   },
   footerCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
-    borderColor: "#D8E5D5",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
   },
-  footerText: { color: "#4A6253", fontWeight: "600", flex: 1, marginRight: 10 },
+  footerText: { fontWeight: "600", flex: 1, marginRight: 10 },
   handle: {
     position: "absolute",
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "rgba(232,93,42,0.35)",
     borderWidth: 2,
-    borderColor: "#E85D2A",
   },
 });
 

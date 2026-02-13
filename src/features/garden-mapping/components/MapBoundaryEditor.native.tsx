@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
+import { useTheme } from "@/ui/theme/ThemeProvider";
 
 export type LatLngPoint = { latitude: number; longitude: number };
 export type SnapshotBoundaryPoint = { x: number; y: number };
@@ -23,6 +24,7 @@ export type MapBoundaryEditorProps = {
 };
 
 function MapBoundaryEditor(props: MapBoundaryEditorProps) {
+  const { theme } = useTheme();
   const mapRef = useRef<MapView | null>(null);
   const [hideOverlaysForSnapshot, setHideOverlaysForSnapshot] = useState(false);
   const [mapSize, setMapSize] = useState({ width: 1000, height: 700 });
@@ -115,8 +117,8 @@ function MapBoundaryEditor(props: MapBoundaryEditorProps) {
         {props.points.length >= 2 && !hideOverlaysForSnapshot && (
           <Polygon
             coordinates={props.points}
-            strokeColor="#2D6A49"
-            fillColor="rgba(53,130,82,0.25)"
+            strokeColor={theme.mapBoundaryStroke}
+            fillColor={`${theme.mapBoundaryFill}40`}
             strokeWidth={3}
           />
         )}
@@ -126,7 +128,7 @@ function MapBoundaryEditor(props: MapBoundaryEditorProps) {
             key={`map-point-${index.toString()}`}
             coordinate={point}
             draggable
-            pinColor={props.selectedPointIndex === index ? "#E85D2A" : "#2F6F4F"}
+            pinColor={props.selectedPointIndex === index ? theme.dangerActionBackground : theme.primaryActionBackground}
             onPress={() => props.onSelectPoint(index)}
             onDragEnd={(event) => {
               const { latitude, longitude } = event.nativeEvent.coordinate;

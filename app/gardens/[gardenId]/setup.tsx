@@ -384,8 +384,6 @@ export default function GardenSetupScreen() {
                     value={mapSearch}
                     onChangeText={setMapSearch}
                     style={[styles.input, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
-                    placeholder="Search address or place"
-                    placeholderTextColor={theme.textMuted}
                     returnKeyType="search"
                     onSubmitEditing={() => {
                       void searchMapLocation();

@@ -219,9 +219,9 @@ export function BedPlanPreview(props: {
                     plantedCount: planted,
                     perennialCount: perennial,
                     plannedCount: planned,
-                    annualColor: withAlpha(theme.primaryActionBackground, 0.82),
-                    perennialColor: withAlpha(theme.mapPerennialBedFill, 1),
-                    plannedColor: withAlpha(theme.textMuted, 0.52),
+                    annualColor: withAlpha("#16A34A", 0.9), // Strong green for annuals
+                    perennialColor: withAlpha("#2563EB", 0.9), // Strong blue for perennials  
+                    plannedColor: withAlpha(theme.textMuted, 0.6), // Muted grey for planned
                   });
                   return dots.map((dot, index) => (
                     <Circle key={`plant-dot-${bed.id}-${index.toString()}`} cx={dot.x} cy={dot.y} r={dot.r} fill={dot.color} />
@@ -342,8 +342,26 @@ function withAlpha(color: string, alpha: number): string {
     .toString(16)
     .padStart(2, "0")
     .toUpperCase();
+  
+  // Handle 6-digit hex (RGB)
   if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#${hex.toUpperCase()}${a}`;
+  
+  // Handle 8-digit hex (RGBA) - replace existing alpha
   if (/^[0-9a-fA-F]{8}$/.test(hex)) return `#${hex.slice(0, 6).toUpperCase()}${a}`;
+  
+  // Handle 3-digit hex (RGB shorthand)
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    const expanded = hex.split('').map(char => char + char).join('');
+    return `#${expanded.toUpperCase()}${a}`;
+  }
+  
+  // Handle 4-digit hex (RGBA shorthand) - replace existing alpha
+  if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+    const expanded = hex.slice(0, 3).split('').map(char => char + char).join('');
+    return `#${expanded.toUpperCase()}${a}`;
+  }
+  
+  console.warn(`withAlpha: Unable to process color "${color}", returning original`);
   return color;
 }
 
@@ -361,6 +379,20 @@ function buildPlantDotsForBed(params: {
   const plantedTarget = Math.max(0, Math.floor(params.plantedCount));
   const plannedTarget = Math.max(0, Math.floor(params.plannedCount));
   const target = plantedTarget + plannedTarget;
+  
+  // Debug logging to understand what's happening
+  console.log("buildPlantDotsForBed called with:", {
+    plantedCount: params.plantedCount,
+    perennialCount: params.perennialCount,
+    plannedCount: params.plannedCount,
+    plantedTarget,
+    plannedTarget,
+    target,
+    annualColor: params.annualColor,
+    perennialColor: params.perennialColor,
+    plannedColor: params.plannedColor
+  });
+  
   if (target <= 0 || params.polygon.length < 3) return [];
   const pxPolygon = params.polygon.map((point) => ({ x: point.x * params.width, y: point.y * params.height }));
   const bounds = getBounds(pxPolygon);
@@ -370,6 +402,9 @@ function buildPlantDotsForBed(params: {
   let spacing = clamp(Math.sqrt(area / target) * 0.85, 6, 28);
   const perennialCount = Math.min(plantedTarget, Math.max(0, Math.floor(params.perennialCount)));
   const annualPlantedCount = Math.max(0, plantedTarget - perennialCount);
+  
+  console.log("Calculated counts:", { perennialCount, annualPlantedCount });
+  
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const dots: Array<{ x: number; y: number; r: number; color: string }> = [];
     const radius = clamp(spacing * 0.22, 1.8, 3.8);
@@ -383,17 +418,24 @@ function buildPlantDotsForBed(params: {
             : index < perennialCount + annualPlantedCount
               ? params.annualColor
               : params.plannedColor;
+        
+        console.log(`Dot ${index}: type=${index < perennialCount ? 'perennial' : index < perennialCount + annualPlantedCount ? 'annual' : 'planned'}, color=${color}`);
+        
         dots.push({
           x,
           y,
           r: radius,
           color,
         });
-        if (dots.length >= target) return dots;
+        if (dots.length >= target) {
+          console.log(`Final dots array length: ${dots.length}`);
+          return dots;
+        }
       }
     }
     spacing = Math.max(5, spacing * 0.82);
   }
+  console.log("Failed to place enough dots, returning empty array");
   return [];
 }
 
