@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
+import Constants from "expo-constants";
 import { initDatabase } from "@/core/db/sqlite";
 import { runMigrations } from "@/core/db/migrate";
 import { loadAppPreferences, saveAppPreferences } from "@/core/settings/appPreferences";
@@ -26,6 +27,26 @@ export default function RootLayout() {
     })().catch((err) => {
       console.error("Database init failed", err);
     });
+  }, []);
+
+  useEffect(() => {
+    if (Constants.appOwnership === "expo") return;
+    void (async () => {
+      try {
+        const Notifications = await import("expo-notifications");
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
+            shouldPlaySound: false,
+            shouldSetBadge: false,
+          }),
+        });
+      } catch {
+        // Ignore notification setup errors in unsupported runtimes.
+      }
+    })();
   }, []);
 
   if (!ready) {

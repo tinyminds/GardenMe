@@ -1,10 +1,11 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+﻿import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { loadAppPreferences } from "@/core/settings/appPreferences";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGardenTaskRepository";
+import { notifyForOpenTasks } from "@/features/tasks/services/notifications";
 import { buildAutoTaskInputs, buildWeatherTaskInputs } from "@/features/tasks/services/taskGeneration";
 import { fetchDailyForecast } from "@/features/weather/services/openMeteo";
 import { queryClient } from "@/state/queryClient";
@@ -95,6 +96,16 @@ export default function TasksTabScreen() {
     },
   });
 
+  const clearHistoryMutation = useMutation({
+    mutationFn: async (gardenId: string) => {
+      await taskRepository.clearHistoryByGarden(gardenId);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["garden-tasks", activeGardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks-unseen-count", activeGardenId] });
+    },
+  });
+
   useEffect(() => {
     if (!activeGardenId) return;
     generateMutation.mutate(activeGardenId);
@@ -108,15 +119,24 @@ export default function TasksTabScreen() {
   const doneTasks = tasks.filter((task) => task.status !== "open");
   const currentGarden = (gardensQuery.data ?? []).find((garden) => garden.id === activeGardenId) ?? null;
 
+  useEffect(() => {
+    if (!currentGarden) return;
+    if (!preferencesQuery.data?.notificationsEnabled) return;
+    if (openTasks.length === 0) return;
+    void notifyForOpenTasks({
+      gardenId: currentGarden.id,
+      gardenName: currentGarden.name,
+      openTasks,
+    });
+  }, [currentGarden, openTasks, preferencesQuery.data?.notificationsEnabled]);
+
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
       <Text style={[styles.title, { color: theme.textPrimary }]}>Tasks</Text>
       <Text style={[styles.subtitle, { color: theme.textMuted }]}>
         {currentGarden ? `Active garden: ${currentGarden.name}` : "Choose a garden to see task alerts."}
       </Text>
-      <Text style={[styles.subtitle, { color: theme.textMuted }]}>
-        Notifications: {preferencesQuery.data?.notificationsEnabled ? "on" : "off"} (manage in Settings)
-      </Text>
+      <Text style={[styles.subtitle, { color: theme.textMuted }]}>Notifications: {preferencesQuery.data?.notificationsEnabled ? "on" : "off"} (manage in Settings)</Text>
 
       {gardensQuery.isLoading && <Text style={[styles.empty, { color: theme.textMuted }]}>Loading gardens...</Text>}
       {activeGardenId && (
@@ -139,9 +159,7 @@ export default function TasksTabScreen() {
             <View key={task.id} style={[styles.taskRow, { borderColor: theme.borderColor }]}>
               <View style={styles.taskMain}>
                 <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>{task.title}</Text>
-                <Text style={[styles.taskMeta, { color: theme.textMuted }]}>
-                  Due {formatDate(task.dueDate)} · {formatTaskType(task.taskType)}
-                </Text>
+                <Text style={[styles.taskMeta, { color: theme.textMuted }]}>Due {formatDate(task.dueDate)} | {formatTaskType(task.taskType)}</Text>
                 {task.detail ? <Text style={[styles.taskMeta, { color: theme.textMuted }]}>{task.detail}</Text> : null}
               </View>
               <View style={styles.actions}>
@@ -164,7 +182,25 @@ export default function TasksTabScreen() {
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>History</Text>
+        <View style={styles.historyHeader}>
+          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>History</Text>
+          {activeGardenId && doneTasks.length > 0 && (
+            <Pressable
+              style={[styles.actionButton, { backgroundColor: theme.dangerActionBackground }]}
+              onPress={() =>
+                Alert.alert("Clear task history", `Delete ${doneTasks.length} completed/dismissed tasks?`, [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Clear", style: "destructive", onPress: () => clearHistoryMutation.mutate(activeGardenId) },
+                ])
+              }
+              disabled={clearHistoryMutation.isPending}
+            >
+              <Text style={[styles.actionText, { color: theme.dangerActionText }]}> 
+                {clearHistoryMutation.isPending ? "Clearing..." : "Clear history"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
         {doneTasks.length === 0 ? (
           <Text style={[styles.empty, { color: theme.textMuted }]}>Nothing completed/dismissed yet.</Text>
         ) : (
@@ -172,8 +208,8 @@ export default function TasksTabScreen() {
             <View key={task.id} style={[styles.taskRow, { borderColor: theme.borderColor }]}>
               <View style={styles.taskMain}>
                 <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>{task.title}</Text>
-                <Text style={[styles.taskMeta, { color: theme.textMuted }]}>
-                  {task.status === "done" ? "Completed" : "Dismissed"} · Due {formatDate(task.dueDate)}
+                <Text style={[styles.taskMeta, { color: theme.textMuted }]}> 
+                  {task.status === "done" ? "Completed" : "Dismissed"} | Due {formatDate(task.dueDate)}
                 </Text>
               </View>
             </View>
@@ -209,6 +245,7 @@ const styles = StyleSheet.create({
   taskTitle: { fontWeight: "700", fontSize: 14 },
   taskMeta: { fontSize: 12 },
   actions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  historyHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   actionButton: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   actionText: { fontSize: 12, fontWeight: "700" },
 });

@@ -18,4 +18,5 @@ export interface GardenTaskRepository {
   upsertAutoTask(input: UpsertAutoTaskInput): Promise<void>;
   markSeenByGarden(gardenId: string): Promise<void>;
   setStatus(id: string, status: GardenTaskStatus): Promise<void>;
+  clearHistoryByGarden(gardenId: string): Promise<void>;
 }

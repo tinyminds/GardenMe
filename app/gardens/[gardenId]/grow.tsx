@@ -67,6 +67,7 @@ type BulkImportSummary = {
 };
 
 type PlantCategory = "unspecified" | "tree" | "shrub" | "herb" | "vegetable" | "fruit" | "flower" | "climber";
+type ListStatusFilter = "all" | "planned" | "growing";
 
 const PLANT_CATEGORY_OPTIONS: Array<{ value: PlantCategory; label: string }> = [
   { value: "unspecified", label: "Not chosen" },
@@ -88,6 +89,7 @@ export default function GardenGrowListScreen() {
   const [entryDrafts, setEntryDrafts] = useState<Record<string, CropEntryDraft>>({});
   const [listSearch, setListSearch] = useState("");
   const [listSortDirection, setListSortDirection] = useState<"asc" | "desc">("asc");
+  const [listStatusFilter, setListStatusFilter] = useState<ListStatusFilter>("all");
   const [importSourceGardenId, setImportSourceGardenId] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [showAllSuggestions, setShowAllSuggestions] = useState(false);
@@ -454,24 +456,6 @@ export default function GardenGrowListScreen() {
     setEntryDrafts((prev) => (areEntryDraftsEqual(prev, next) ? prev : next));
   }, [wishlistQuery.data]);
 
-  const updateEntryMutation = useMutation({
-    mutationFn: async (entryId: string) => {
-      const draft = entryDrafts[entryId];
-      if (!draft) return;
-      await wishlistRepository.update({
-        id: entryId,
-        status: draft.status,
-        ...(draft.status === "already_growing" && draft.bedId ? { bedId: draft.bedId } : {}),
-        ...(draft.varietyName.trim() ? { varietyName: draft.varietyName.trim() } : { varietyName: "" }),
-        ...(draft.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
-        quantity: Math.max(1, Math.floor(draft.quantity || 1)),
-      });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
-    },
-  });
-
   const bulkImportMutation = useMutation({
     onMutate: () => {
       setAddError(null);
@@ -620,19 +604,33 @@ export default function GardenGrowListScreen() {
     setPlantDataDrafts((prev) => (arePlantDataDraftsEqual(prev, next) ? prev : next));
   }, [wishlistQuery.data]);
 
-  const updatePlantDataMutation = useMutation({
+  const saveRowMutation = useMutation({
     mutationFn: async (item: GardenCropWishlistItemView) => {
-      const draft = plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson);
-      const nextMetaJson = mergePlantDataMetaJson(item.plant.metaJson, draft);
-      await plantCatalogRepository.upsert({
-        source: item.plant.source,
-        ...(item.plant.externalId ? { externalId: item.plant.externalId } : {}),
-        commonName: item.plant.commonName,
-        ...(item.plant.scientificName ? { scientificName: item.plant.scientificName } : {}),
-        ...(item.plant.familyName ? { familyName: item.plant.familyName } : {}),
-        ...(item.plant.imageUrl ? { imageUrl: item.plant.imageUrl } : {}),
-        metaJson: nextMetaJson,
-      });
+      const entryDraft = entryDrafts[item.id];
+      if (entryDraft && hasEntryDraftChanges(item, entryDraft)) {
+        await wishlistRepository.update({
+          id: item.id,
+          status: entryDraft.status,
+          ...(entryDraft.status === "already_growing" && entryDraft.bedId ? { bedId: entryDraft.bedId } : {}),
+          ...(entryDraft.varietyName.trim() ? { varietyName: entryDraft.varietyName.trim() } : { varietyName: "" }),
+          ...(entryDraft.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
+          quantity: Math.max(1, Math.floor(entryDraft.quantity || 1)),
+        });
+      }
+
+      const plantDraft = plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson);
+      if (hasPlantDataDraftChanges(item, plantDraft)) {
+        const nextMetaJson = mergePlantDataMetaJson(item.plant.metaJson, plantDraft);
+        await plantCatalogRepository.upsert({
+          source: item.plant.source,
+          ...(item.plant.externalId ? { externalId: item.plant.externalId } : {}),
+          commonName: item.plant.commonName,
+          ...(item.plant.scientificName ? { scientificName: item.plant.scientificName } : {}),
+          ...(item.plant.familyName ? { familyName: item.plant.familyName } : {}),
+          ...(item.plant.imageUrl ? { imageUrl: item.plant.imageUrl } : {}),
+          metaJson: nextMetaJson,
+        });
+      }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
@@ -690,6 +688,9 @@ export default function GardenGrowListScreen() {
   const visibleWishlistItems = useMemo(() => {
     const searchTerm = listSearch.trim().toLowerCase();
     const list = [...(wishlistQuery.data ?? [])].filter((item) => {
+      const effectiveStatus = entryDrafts[item.id]?.status ?? item.status;
+      if (listStatusFilter === "planned" && effectiveStatus !== "wanted") return false;
+      if (listStatusFilter === "growing" && effectiveStatus !== "already_growing") return false;
       if (!searchTerm) return true;
       const haystack = [
         item.plant.commonName,
@@ -697,7 +698,7 @@ export default function GardenGrowListScreen() {
         item.plant.scientificName ?? "",
         item.plant.familyName ?? "",
         item.bedName ?? "",
-        item.status === "already_growing" ? "already growing" : "wanted",
+        effectiveStatus === "already_growing" ? "already growing" : "wanted",
       ]
         .join(" ")
         .toLowerCase();
@@ -711,7 +712,7 @@ export default function GardenGrowListScreen() {
       return listSortDirection === "asc" ? varietySort : -varietySort;
     });
     return list;
-  }, [listNameCollator, wishlistQuery.data, listSearch, listSortDirection]);
+  }, [entryDrafts, listNameCollator, listStatusFilter, wishlistQuery.data, listSearch, listSortDirection]);
 
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
@@ -920,6 +921,26 @@ export default function GardenGrowListScreen() {
                 onPress={() => setListSortDirection("desc")}
               >
                 <Text style={[styles.configChipText, { color: listSortDirection === "desc" ? theme.primaryActionText : theme.secondaryActionText }]}>Z-A</Text>
+              </Pressable>
+            </View>
+            <View style={styles.configChips}>
+              <Pressable
+                style={[styles.configChip, { backgroundColor: listStatusFilter === "all" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                onPress={() => setListStatusFilter("all")}
+              >
+                <Text style={[styles.configChipText, { color: listStatusFilter === "all" ? theme.primaryActionText : theme.secondaryActionText }]}>Both</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.configChip, { backgroundColor: listStatusFilter === "planned" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                onPress={() => setListStatusFilter("planned")}
+              >
+                <Text style={[styles.configChipText, { color: listStatusFilter === "planned" ? theme.primaryActionText : theme.secondaryActionText }]}>Planned</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.configChip, { backgroundColor: listStatusFilter === "growing" ? theme.primaryActionBackground : theme.secondaryActionBackground }]}
+                onPress={() => setListStatusFilter("growing")}
+              >
+                <Text style={[styles.configChipText, { color: listStatusFilter === "growing" ? theme.primaryActionText : theme.secondaryActionText }]}>Growing</Text>
               </Pressable>
             </View>
           </View>
@@ -1198,15 +1219,6 @@ export default function GardenGrowListScreen() {
                             >
                               <Text style={[styles.cloneInlineButtonText, { color: theme.secondaryActionText }]}>Reset</Text>
                             </Pressable>
-                            <Pressable
-                              style={[styles.saveInlineButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground }]}
-                              disabled={updatePlantDataMutation.isPending}
-                              onPress={() => updatePlantDataMutation.mutate(item)}
-                            >
-                              <Text style={[styles.saveInlineButtonText, { color: theme.primaryActionText }]}>
-                                {updatePlantDataMutation.isPending ? "Saving..." : "Save plant data"}
-                              </Text>
-                            </Pressable>
                           </View>
                         </View>
                       )}
@@ -1370,10 +1382,16 @@ export default function GardenGrowListScreen() {
                 </Pressable>
                 <Pressable
                   style={[styles.saveInlineButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground }]}
-                  disabled={updateEntryMutation.isPending}
-                  onPress={() => updateEntryMutation.mutate(item.id)}
+                  disabled={
+                    saveRowMutation.isPending ||
+                    (!hasEntryDraftChanges(item, entryDrafts[item.id]) &&
+                      !hasPlantDataDraftChanges(item, plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson)))
+                  }
+                  onPress={() => saveRowMutation.mutate(item)}
                 >
-                  <Text style={[styles.saveInlineButtonText, { color: theme.primaryActionText }]}>Save</Text>
+                  <Text style={[styles.saveInlineButtonText, { color: theme.primaryActionText }]}>
+                    {saveRowMutation.isPending ? "Saving..." : "Save changes"}
+                  </Text>
                 </Pressable>
                 <Pressable
                   style={[styles.removeButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.dangerActionBackground }]}
@@ -1459,6 +1477,48 @@ function arePlantDataDraftsEqual(
     }
   }
   return true;
+}
+
+function hasEntryDraftChanges(item: GardenCropWishlistItemView, draft?: CropEntryDraft): boolean {
+  if (!draft) return false;
+  const currentStatus = item.status;
+  const currentBedId = currentStatus === "already_growing" ? item.bedId ?? null : null;
+  const currentVariety = (item.varietyName ?? "").trim();
+  const currentSupport = item.supportNeeded;
+  const currentQty = Math.max(1, item.quantity ?? 1);
+
+  const nextStatus = draft.status;
+  const nextBedId = nextStatus === "already_growing" ? draft.bedId ?? null : null;
+  const nextVariety = draft.varietyName.trim();
+  const nextSupport = draft.supportNeeded;
+  const nextQty = Math.max(1, Math.floor(draft.quantity || 1));
+
+  return (
+    currentStatus !== nextStatus ||
+    currentBedId !== nextBedId ||
+    currentVariety !== nextVariety ||
+    currentSupport !== nextSupport ||
+    currentQty !== nextQty
+  );
+}
+
+function hasPlantDataDraftChanges(item: GardenCropWishlistItemView, draft: PlantDataDraft): boolean {
+  const current = getPlantDataDraft(item.plant.metaJson);
+  return !areSinglePlantDataDraftEqual(current, draft);
+}
+
+function areSinglePlantDataDraftEqual(left: PlantDataDraft, right: PlantDataDraft): boolean {
+  return (
+    left.category === right.category &&
+    left.sunRequirements === right.sunRequirements &&
+    left.rowSpacing === right.rowSpacing &&
+    left.spread === right.spread &&
+    left.height === right.height &&
+    left.startIndoorsMonths === right.startIndoorsMonths &&
+    left.directSowMonths === right.directSowMonths &&
+    left.plantOutMonths === right.plantOutMonths &&
+    left.harvestMonths === right.harvestMonths
+  );
 }
 
 function getPlantDataDraft(metaJson?: string): PlantDataDraft {

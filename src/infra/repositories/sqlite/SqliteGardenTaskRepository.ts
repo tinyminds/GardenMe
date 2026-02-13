@@ -99,6 +99,14 @@ export class SqliteGardenTaskRepository implements GardenTaskRepository {
       [status, status === "done" ? now : null, now, id]
     );
   }
+
+  async clearHistoryByGarden(gardenId: string): Promise<void> {
+    await getDatabase().runAsync(
+      `DELETE FROM garden_tasks
+       WHERE garden_id = ? AND status <> 'open'`,
+      [gardenId]
+    );
+  }
 }
 
 function toEntity(row: GardenTaskRow): GardenTask {

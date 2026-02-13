@@ -102,6 +102,7 @@ export function buildAutoTaskInputs(params: {
         ruleKey: `harvest_eta:${entry.id}:${harvestDate.toISOString().slice(0, 10)}`,
       });
     }
+
   }
 
   return tasks;
@@ -116,31 +117,28 @@ export function buildWeatherTaskInputs(params: {
   const tasks: UpsertAutoTaskInput[] = [];
   if (params.forecast.length === 0 || params.activeEntries.length === 0) return tasks;
 
-  const next3 = params.forecast.slice(0, 3);
-  const hotDays = next3.filter((day) => day.tempMaxC >= 24);
-  const dryDays = next3.filter((day) => day.precipMm <= 1.5 && day.precipProbPct <= 45);
-  const drySpell = hotDays.length >= 2 && dryDays.length >= 2;
-  const totalRain3d = next3.reduce((sum, day) => sum + day.precipMm, 0);
-  const avgHotMax = hotDays.length > 0 ? Math.round(hotDays.reduce((sum, day) => sum + day.tempMaxC, 0) / hotDays.length) : null;
-  const firstFrostDay = params.forecast.find((day) => day.tempMinC <= 1);
-  const heavyRainDay = params.forecast.find((day) => day.precipMm >= 18 || day.precipProbPct >= 90);
-  const heavyRainSpell = totalRain3d >= 30 || Boolean(heavyRainDay);
+  const next7 = params.forecast.slice(0, 7);
+  const hotDays = next7.filter((day) => day.tempMaxC >= 28);
+  const dryDays = next7.filter((day) => day.precipMm <= 1.0 && day.precipProbPct <= 35);
+  const prolongedHotDry = hotDays.length >= 4 && dryDays.length >= 5;
+  const avgHotMax =
+    hotDays.length > 0 ? Math.round(hotDays.reduce((sum, day) => sum + day.tempMaxC, 0) / hotDays.length) : null;
+  const firstFrostDay = params.forecast.find((day) => day.tempMinC <= -1);
 
-  const labels = buildEntryLabelPreview(params.activeEntries);
   const todayIso = new Date(params.now.getFullYear(), params.now.getMonth(), params.now.getDate()).toISOString();
 
-  if (drySpell) {
+  if (prolongedHotDry) {
     tasks.push({
       gardenId: params.gardenId,
       taskType: "water_alert",
-      title: "Watering check: warm and dry spell",
+      title: "Garden watering alert: prolonged heat and dry spell",
       detail:
         avgHotMax === null
-          ? `Low rain expected for the next few days. Check moisture for ${labels}.`
-          : `Warm (${avgHotMax}C) and low-rain conditions expected. Check moisture for ${labels}.`,
+          ? "Very low rain with sustained heat expected. Check moisture across the whole garden."
+          : `Sustained hot weather (~${avgHotMax}C) with very low rain expected. Check moisture across the whole garden.`,
       dueDate: todayIso,
-      priority: 9,
-      ruleKey: `weather:dry_spell:${params.now.toISOString().slice(0, 10)}`,
+      priority: 10,
+      ruleKey: `weather:hot_dry_garden:${params.now.toISOString().slice(0, 10)}`,
     });
   }
 
@@ -148,24 +146,11 @@ export function buildWeatherTaskInputs(params: {
     tasks.push({
       gardenId: params.gardenId,
       taskType: "manual",
-      title: "Frost alert: protect tender plants",
-      detail: `Forecast low near ${Math.round(firstFrostDay.tempMinC)}C on ${formatIsoDay(firstFrostDay.date)}. Consider fleece/cloche protection for ${labels}.`,
+      title: "Garden frost alert: protect tender crops",
+      detail: `Forecast low near ${Math.round(firstFrostDay.tempMinC)}C on ${formatIsoDay(firstFrostDay.date)}. Protect tender crops across the garden.`,
       dueDate: isoDateToStart(firstFrostDay.date),
       priority: 10,
-      ruleKey: `weather:frost:${firstFrostDay.date}`,
-    });
-  }
-
-  if (heavyRainSpell) {
-    const day = heavyRainDay?.date ?? next3[0]?.date ?? params.now.toISOString().slice(0, 10);
-    tasks.push({
-      gardenId: params.gardenId,
-      taskType: "manual",
-      title: "Heavy rain alert: drainage and supports",
-      detail: `High rainfall risk in the next few days. Check bed drainage, staking, and support ties for ${labels}.`,
-      dueDate: isoDateToStart(day),
-      priority: 8,
-      ruleKey: `weather:rain:${day}`,
+      ruleKey: `weather:frost_garden:${firstFrostDay.date}`,
     });
   }
 
@@ -280,20 +265,6 @@ function addDays(date: Date, days: number): Date {
 function dayDiff(a: Date, b: Date): number {
   const ms = b.getTime() - a.getTime();
   return Math.round(ms / 86400000);
-}
-
-function buildEntryLabelPreview(entries: GardenCropWishlistItemView[]): string {
-  const labels = Array.from(
-    new Set(
-      entries
-        .map((entry) => entry.plant.commonName.trim())
-        .filter(Boolean)
-        .slice(0, 4)
-    )
-  );
-  if (labels.length === 0) return "active crops";
-  if (entries.length <= labels.length) return labels.join(", ");
-  return `${labels.join(", ")} and others`;
 }
 
 function formatIsoDay(value: string): string {

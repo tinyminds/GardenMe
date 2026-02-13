@@ -46,6 +46,7 @@ type BedSuggestion = {
   score: number;
   scoreLabel: string;
   confidenceLabel: string;
+  scoreComponents: Array<{ label: string; value: number }>;
   scoreBreakdown: string[];
   fitCount?: number;
 };
@@ -111,6 +112,7 @@ export default function BedsListScreen() {
   const [scoreExpandedByKey, setScoreExpandedByKey] = useState<Record<string, boolean>>({});
   const [pinnedSuggestionIdsByBed, setPinnedSuggestionIdsByBed] = useState<Record<string, string[]>>({});
   const [rejectedSuggestionIdsByBed, setRejectedSuggestionIdsByBed] = useState<Record<string, string[]>>({});
+  const [dismissedSpaceWarningSig, setDismissedSpaceWarningSig] = useState<string | null>(null);
   const [undoToast, setUndoToast] = useState<UndoToastState | null>(null);
   const [undoPending, setUndoPending] = useState(false);
   const [finishDialog, setFinishDialog] = useState<FinishDialogState | null>(null);
@@ -514,6 +516,7 @@ export default function BedsListScreen() {
             score: scoreParts.total,
             scoreLabel: getScoreLabel(scoreParts.total),
             confidenceLabel: scoreParts.confidenceLabel,
+            scoreComponents: scoreParts.components,
             scoreBreakdown: scoreParts.breakdown,
             ...(typeof fitCount === "number" ? { fitCount } : {}),
           };
@@ -710,23 +713,82 @@ export default function BedsListScreen() {
   const previewHeight = Math.round(previewWidth * previewRatio);
 
   const bedInfoById = useMemo(() => {
-    const map = new Map<string, { bedName: string; growing: string[]; planned: string[]; isPerennialBed: boolean }>();
+    const map = new Map<string, { bedName: string; growing: string[]; planned: string[]; suggestions: string[] }>();
     for (const card of bedCards) {
+      const hasExistingPlants = card.growingNames.length > 0;
+      const hasSpareSpace = hasSpareSpaceByBed[card.bed.id] ?? false;
+      const showSuggestions = !hasExistingPlants || hasSpareSpace;
       map.set(card.bed.id, {
         bedName: card.bed.name,
         growing: card.growingNames,
         planned: card.plannedInBed.map((entry) => formatEntryName(entry)),
-        isPerennialBed: card.bed.containsPerennials,
+        suggestions: showSuggestions ? card.suggestions.map((entry) => formatEntryName(entry.entry)) : [],
       });
     }
     return map;
+  }, [bedCards, hasSpareSpaceByBed]);
+
+  const growListCount = wishlist.length;
+  const plannedCount = wishlist.filter((item) => item.status === "wanted" && Boolean(item.bedId)).length;
+  const plantedCount = wishlist.filter((item) => item.status === "already_growing").length;
+  const pinnedCount = Object.values(pinnedSuggestionIdsByBed).reduce((sum, ids) => sum + ids.length, 0);
+
+  const spaceWarning = useMemo(() => {
+    const overBeds: string[] = [];
+    for (const card of bedCards) {
+      if (!Number.isFinite(card.areaSqM) || !card.areaSqM || card.areaSqM <= 0) continue;
+      const entries = [...card.activeGrowingRows.map((row) => row.entry), ...card.plannedInBed];
+      let requiredAreaSqM = 0;
+      let trackedEntries = 0;
+      for (const entry of entries) {
+        const required = estimateRequiredAreaSqM(entry);
+        if (!required) continue;
+        requiredAreaSqM += required;
+        trackedEntries += 1;
+      }
+      if (trackedEntries === 0) continue;
+      if (requiredAreaSqM > card.areaSqM * 1.05) overBeds.push(card.bed.name);
+    }
+    const signature = overBeds.join("|");
+    return { overBeds, signature };
   }, [bedCards]);
+
+  const showSpaceWarning = spaceWarning.overBeds.length > 0 && dismissedSpaceWarningSig !== spaceWarning.signature;
 
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={[styles.title, { color: theme.textPrimary }]}>Bed Planner</Text>
         <Text style={[styles.subtitle, { color: theme.textMuted }]}>Review beds and place crops from your grow list.</Text>
+        <View style={styles.statsRow}>
+          <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
+            <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Grow list {growListCount}</Text>
+          </View>
+          <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
+            <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Planned {plannedCount}</Text>
+          </View>
+          <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
+            <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Planted {plantedCount}</Text>
+          </View>
+          <View style={[styles.statChip, { backgroundColor: theme.secondaryActionBackground }]}>
+            <Text style={[styles.statChipText, { color: theme.secondaryActionText }]}>Pinned {pinnedCount}</Text>
+          </View>
+        </View>
+        {showSpaceWarning && (
+          <View style={[styles.warningCard, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]}>
+            <Text style={[styles.warningText, { color: theme.dangerActionText }]}>
+              Potential over-capacity: {spaceWarning.overBeds.join(", ")}
+            </Text>
+            <View style={styles.warningActions}>
+              <Pressable
+                style={[styles.smallActionButton, { backgroundColor: theme.appBackground }]}
+                onPress={() => setDismissedSpaceWarningSig(spaceWarning.signature)}
+              >
+                <Text style={[styles.smallActionButtonText, { color: theme.textPrimary }]}>Dismiss</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
 
         {bedsQuery.isLoading && <Text style={[styles.empty, { color: theme.textMuted }]}>Loading beds...</Text>}
         {bedsQuery.isError && <Text style={[styles.empty, { color: theme.textMuted }]}>Could not load beds.</Text>}
@@ -751,7 +813,7 @@ export default function BedsListScreen() {
                 <View style={styles.bedHeaderMain}>
                   <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{card.bed.name}</Text>
                   <Text style={[styles.meta, { color: theme.textMuted }]}>
-                    {card.activeGrowingRows.length} growing - {card.plannedInBed.length} planned - {card.suggestions.length} suggestions
+                    {card.activeGrowingRows.length} growing - {card.plannedInBed.length} planned{showSuggestions ? ` - ${card.suggestions.length} suggestions` : ""}
                   </Text>
                 </View>
                 <Text style={[styles.bedHeaderCaret, { color: theme.textMuted }]}>{bedExpanded ? "v" : ">"}</Text>
@@ -767,8 +829,7 @@ export default function BedsListScreen() {
                 <>
               <Text style={[styles.meta, { color: theme.textMuted }]}>Sun: {formatLabel(card.bed.sunExposure)} - Drainage: {formatLabel(card.bed.drainage)}</Text>
               <Text style={[styles.meta, { color: theme.textMuted }]}>
-                {card.bed.containsPerennials ? "Perennial bed" : "Annual/mixed bed"}
-                {typeof card.areaSqM === "number" ? ` - Area ~${card.areaSqM.toFixed(1)} sqm` : ""}
+                {typeof card.areaSqM === "number" ? `Area ~${card.areaSqM.toFixed(1)} sqm` : "Area unavailable (set garden scale)"}
               </Text>
 
               <View style={styles.block}>
@@ -889,6 +950,15 @@ export default function BedsListScreen() {
                               <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.sunReason}</Text>
                               <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>{suggestion.spacingReason}</Text>
                               <Text style={[styles.suggestionReason, { color: theme.textMuted }]}>Confidence: {suggestion.confidenceLabel}</Text>
+                              <View style={styles.scoreChipRow}>
+                                {suggestion.scoreComponents.map((part) => (
+                                  <View key={`${scoreKey}-${part.label}`} style={[styles.scoreChip, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
+                                    <Text style={[styles.scoreChipText, { color: theme.textMuted }]}>
+                                      {part.label} {formatSignedScore(part.value)}
+                                    </Text>
+                                  </View>
+                                ))}
+                              </View>
                               {suggestion.companionMessages.map((message) => (
                                 <Text key={`${suggestion.entry.id}-${normalizePlantKey(message)}`} style={[styles.suggestionReason, { color: theme.textMuted }]}>
                                   {message}
@@ -1012,9 +1082,9 @@ export default function BedsListScreen() {
                       <Pressable key={bed.id} style={[styles.previewPin, { left, top, backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionText }]} onPress={() => {
                         if (!info) return;
                         Alert.alert(info.bedName, [
-                          info.isPerennialBed ? "Type: perennial bed" : "Type: annual/mixed bed",
                           info.growing.length > 0 ? `Growing: ${info.growing.join(", ")}` : "Growing: none",
                           info.planned.length > 0 ? `Planned: ${info.planned.join(", ")}` : "Planned: none",
+                          ...(info.suggestions.length > 0 ? [`Suggestions: ${info.suggestions.join(", ")}`] : []),
                         ].join("\n"));
                       }}>
                         <Text style={[styles.previewPinText, { color: theme.primaryActionText }]}>i</Text>
@@ -1102,7 +1172,12 @@ function scoreSuggestion(params: {
   bedCategories: PlantCategory[];
   diseaseProfile: BedDiseaseProfile;
   rotationProfile: BedRotationProfile;
-}): { total: number; confidenceLabel: string; breakdown: string[] } {
+}): {
+  total: number;
+  confidenceLabel: string;
+  components: Array<{ label: string; value: number }>;
+  breakdown: string[];
+} {
   const { entry, bedSunExposure, companionDelta, fitCount, meta, bedCategories, diseaseProfile, rotationProfile } = params;
   const sunScore = getSunMatchScore(bedSunExposure, meta.sunRequirements);
   const categoryScore = getCategoryCompatibilityScore(meta.category, bedCategories);
@@ -1114,6 +1189,14 @@ function scoreSuggestion(params: {
     typeof fitCount === "number" ? (entry.quantity <= fitCount ? 6 : Math.max(-8, fitCount - entry.quantity)) : 0;
   const dataCoverage = getDataCoverageScore(meta, fitCount);
   const total = sunScore + categoryScore + diseaseScore + rotationScore + companionDelta + supportScore + spacingScore + quantityScore + dataCoverage;
+  const components = [
+    { label: "Sun", value: sunScore },
+    { label: "Category", value: categoryScore },
+    { label: "Companion", value: companionDelta },
+    { label: "Disease", value: diseaseScore },
+    { label: "Rotation", value: rotationScore },
+    { label: "Capacity", value: quantityScore },
+  ];
   const breakdown = [
     `Category fit: ${formatSignedScore(categoryScore)}`,
     `Disease history: ${formatSignedScore(diseaseScore)}`,
@@ -1126,7 +1209,7 @@ function scoreSuggestion(params: {
     `Data confidence boost: ${formatSignedScore(dataCoverage)}`,
     `Total score: ${total}`,
   ];
-  return { total, confidenceLabel: getConfidenceLabel(meta, fitCount), breakdown };
+  return { total, confidenceLabel: getConfidenceLabel(meta, fitCount), components, breakdown };
 }
 
 function getDataCoverageScore(meta: PlantMeta, fitCount: number | null): number {
@@ -1371,6 +1454,16 @@ function estimateFitCount(areaSqM: number | undefined, meta: PlantMeta): number 
   return Math.max(1, Math.floor(areaSqM / perPlantSqM));
 }
 
+function estimateRequiredAreaSqM(entry: GardenCropWishlistItemView): number | null {
+  const meta = parsePlantMeta(entry.plant.metaJson);
+  const spacingCm = Math.max(meta.rowSpacing ?? 0, meta.spread ?? 0);
+  if (!Number.isFinite(spacingCm) || spacingCm <= 0) return null;
+  const spacingM = spacingCm / 100;
+  if (spacingM <= 0) return null;
+  const quantity = Math.max(1, entry.quantity ?? 1);
+  return spacingM * spacingM * quantity;
+}
+
 function parsePlantMeta(metaJson?: string): PlantMeta {
   if (!metaJson) return {};
   try {
@@ -1495,6 +1588,12 @@ const styles = StyleSheet.create({
   container: { padding: 14, gap: 10, paddingBottom: 96 },
   title: { fontSize: 26, fontWeight: "800", color: "#1D3D2A" },
   subtitle: { color: "#4A6553", marginTop: -2 },
+  statsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  statChip: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  statChipText: { fontSize: 12, fontWeight: "700" },
+  warningCard: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 8 },
+  warningText: { fontSize: 12, fontWeight: "700" },
+  warningActions: { flexDirection: "row", justifyContent: "flex-end" },
   empty: { color: "#54645A" },
   card: {
     backgroundColor: "#FFFFFF",
@@ -1544,6 +1643,9 @@ const styles = StyleSheet.create({
   suggestionMain: { flex: 1, gap: 2 },
   suggestionName: { color: "#1E3E2E", fontWeight: "700" },
   suggestionScore: { fontSize: 11, fontWeight: "700" },
+  scoreChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  scoreChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3 },
+  scoreChipText: { fontSize: 10, fontWeight: "700" },
   companionSummaryChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3 },
   companionSummaryChipText: { fontSize: 10, fontWeight: "700" },
   suggestionReason: { color: "#597363", fontSize: 12 },
