@@ -3,6 +3,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
+  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -22,6 +23,8 @@ import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/state/queryClient";
 import { makeId } from "@/utils/id";
 import { useTheme } from "@/ui/theme/ThemeProvider";
+import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
+import { AppButton } from "@/ui/components/AppButton";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/SqliteGardenFeatureRepository";
@@ -94,7 +97,7 @@ export default function GardenMapEditorScreen() {
   const [isEditingCanvas, setIsEditingCanvas] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [canvasMode, setCanvasMode] = useState<CanvasMode>("draw");
-  const [shapeDraftMode, setShapeDraftMode] = useState<ShapeDraftMode>("points");
+  const [shapeDraftMode, setShapeDraftMode] = useState<ShapeDraftMode>("rectangle");
   const [presetShape, setPresetShape] = useState<PresetShapeDraft | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [viewRotationDeg, setViewRotationDeg] = useState(0);
@@ -109,6 +112,7 @@ export default function GardenMapEditorScreen() {
   const [canvas, setCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
   const [isExportingImage, setIsExportingImage] = useState(false);
   const [isExportRenderMode, setIsExportRenderMode] = useState(false);
+  const [deleteZoneDraft, setDeleteZoneDraft] = useState<ZonePreview | null>(null);
   const gestureStartRef = useRef<{ distance: number; angle: number; zoom: number; rotation: number } | null>(null);
   const exportCanvasRef = useRef<View | null>(null);
   const rectLengthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -179,7 +183,7 @@ export default function GardenMapEditorScreen() {
   const gridStepX = calibration ? 1 / Math.max(calibration.metersPerPixel * calibration.baseWidth, 1e-6) : 0;
   const gridStepY = calibration ? 1 / Math.max(calibration.metersPerPixel * calibration.baseHeight, 1e-6) : 0;
   const shapeOptions = getShapeOptionsForType(activeType);
-  const defaultShapeMode = shapeOptions[0]?.mode ?? "points";
+  const defaultShapeMode = shapeOptions[0]?.mode ?? "rectangle";
   const typeColors: Record<GardenFeatureType, { fill: string; stroke: string }> = useMemo(
     () => ({
       bed: { fill: theme.mapBedFill, stroke: theme.mapBedStroke },
@@ -595,10 +599,7 @@ export default function GardenMapEditorScreen() {
   };
 
   const confirmDeleteZone = (zone: ZonePreview) => {
-    Alert.alert("Delete area", `Delete ${zone.name}?`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => void deleteZone(zone) },
-    ]);
+    setDeleteZoneDraft(zone);
   };
 
   const saveZone = async () => {
@@ -859,48 +860,28 @@ export default function GardenMapEditorScreen() {
 
         <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>1. Select Area Type</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeRow}>
-            {featureTypes.map((type) => {
-              const selected = type === activeType;
-              return (
-                <Pressable
-                  key={type}
-                  onPress={() => {
-                    if (editingZoneId) {
-                      Alert.alert("Finish editing first", "Tap Cancel Edit before switching area type.");
-                      return;
-                    }
-                    setActiveType(type);
-                    const nextOptions = getShapeOptionsForType(type);
-                    setShapeDraftMode(nextOptions[0]?.mode ?? "points");
-                    setPresetShape(null);
-                    setName(nextZoneName(type, existingZones));
-                  }}
-                  style={[
-                    styles.typeChip,
-                    { backgroundColor: selected ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
-                  ]}
-                >
-                  <Text style={[styles.typeChipText, { color: selected ? theme.choiceControlActiveText : theme.choiceControlText }]}>{type}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          <View style={styles.toolbarRow}>
-            {shapeOptions.map((option) => (
-              <Pressable
-                key={option.mode}
-                style={[
-                  styles.secondaryButton,
-                  { backgroundColor: shapeDraftMode === option.mode ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
-                ]}
-                onPress={() => setShapeDraftMode(option.mode)}
-              >
-                <Text style={[styles.secondaryButtonText, { color: shapeDraftMode === option.mode ? theme.choiceControlActiveText : theme.choiceControlText }]}>
-                  {option.label}
-                </Text>
-              </Pressable>
-            ))}
+          <SegmentedChoice
+            options={featureTypes.map((type) => ({ id: type, label: type }))}
+            selectedId={activeType}
+            onSelect={(type) => {
+              if (editingZoneId) {
+                Alert.alert("Finish editing first", "Tap Cancel Edit before switching area type.");
+                return;
+              }
+              setActiveType(type as GardenFeatureType);
+              const nextOptions = getShapeOptionsForType(type as GardenFeatureType);
+              setShapeDraftMode(nextOptions[0]?.mode ?? "points");
+              setPresetShape(null);
+              setName(nextZoneName(type as GardenFeatureType, existingZones));
+            }}
+          />
+          <View style={styles.shapeChoiceContainer}>
+            <Text style={[styles.shapeChoiceLabel, { color: theme.textMuted }]}>Shape:</Text>
+            <SegmentedChoice
+              options={shapeOptions.map((option) => ({ id: option.mode, label: option.label }))}
+              selectedId={shapeDraftMode}
+              onSelect={(mode) => setShapeDraftMode(mode as ShapeDraftMode)}
+            />
           </View>
         </View>
 
@@ -918,55 +899,33 @@ export default function GardenMapEditorScreen() {
             </View>
           </View>
           <View style={styles.toolbarRow}>
-            <ToggleSwitch
-              label="Image"
-              value={showImageLayer}
-              onToggle={(next) => {
-                setShowImageLayer(next);
-                void persistCanvasViewSettings(next, showGridLayer, showBedMeasurementsLayer);
-              }}
-            />
-            <ToggleSwitch
-              label="Grid"
-              value={showGridLayer}
-              disabled={!calibration}
-              onToggle={(next) => {
-                setShowGridLayer(next);
-                void persistCanvasViewSettings(showImageLayer, next, showBedMeasurementsLayer);
-              }}
-            />
-            <ToggleSwitch
-              label="Bed Sizes"
-              value={showBedMeasurementsLayer}
-              disabled={!calibration}
-              onToggle={(next) => {
-                setShowBedMeasurementsLayer(next);
-                void persistCanvasViewSettings(showImageLayer, showGridLayer, next);
-              }}
-            />
+            <SimpleToggle label="Image" value={showImageLayer} onToggle={(next) => {
+              setShowImageLayer(next);
+              void persistCanvasViewSettings(next, showGridLayer, showBedMeasurementsLayer);
+            }} />
+            <SimpleToggle label="Grid" value={showGridLayer} disabled={!calibration} onToggle={(next) => {
+              setShowGridLayer(next);
+              void persistCanvasViewSettings(showImageLayer, next, showBedMeasurementsLayer);
+            }} />
+            <SimpleToggle label="Bed Sizes" value={showBedMeasurementsLayer} disabled={!calibration} onToggle={(next) => {
+              setShowBedMeasurementsLayer(next);
+              void persistCanvasViewSettings(showImageLayer, showGridLayer, next);
+            }} />
           </View>
           <View style={styles.toolbarRow}>
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: canvasMode === "draw" ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
+            <SegmentedChoice
+              options={[
+                { id: "draw", label: "Draw" },
+                { id: "pan", label: "Pan" }
               ]}
-              onPress={() => setCanvasMode("draw")}
-            >
-              <Text style={[styles.secondaryButtonText, { color: canvasMode === "draw" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Draw</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: canvasMode === "pan" ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
-              ]}
-              onPress={() => {
-                setCanvasMode("pan");
-                setSelectedPointIndex(null);
+              selectedId={canvasMode}
+              onSelect={(mode) => {
+                setCanvasMode(mode as CanvasMode);
+                if (mode === "pan") {
+                  setSelectedPointIndex(null);
+                }
               }}
-            >
-              <Text style={[styles.secondaryButtonText, { color: canvasMode === "pan" ? theme.choiceControlActiveText : theme.choiceControlText }]}>Pan</Text>
-            </Pressable>
+            />
             <Pressable
               style={[
                 styles.secondaryButton,
@@ -1257,7 +1216,7 @@ export default function GardenMapEditorScreen() {
         <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>3. Tools</Text>
           <View style={styles.toolbarRow}>
-            <ToggleSwitch
+            <SimpleToggle
               label="Snap"
               value={snapToGrid}
               disabled={!calibration}
@@ -1330,36 +1289,47 @@ export default function GardenMapEditorScreen() {
 
           {activeType === GardenFeatureType.BED && (
             <View style={styles.metaRow}>
-              <PickerRow
-                title="Sun"
-                options={[SunExposure.FULL_SUN, SunExposure.PART_SUN, SunExposure.SHADE]}
-                selected={sunExposure}
-                onSelect={(value) => setSunExposure(value as SunExposure)}
-              />
-              <PickerRow
-                title="Drainage"
-                options={[Drainage.GOOD, Drainage.MEDIUM, Drainage.POOR]}
-                selected={drainage}
-                onSelect={(value) => setDrainage(value as Drainage)}
-              />
-              <PickerRow
-                title="Raised Bed"
-                options={["yes", "no"]}
-                selected={isRaisedBed ? "yes" : "no"}
-                onSelect={(value) => setIsRaisedBed(value === "yes")}
-              />
-              <PickerRow
-                title="Perennial Bed"
-                options={["yes", "no"]}
-                selected={containsPerennials ? "yes" : "no"}
-                onSelect={(value) => setContainsPerennials(value === "yes")}
-              />
-              <PickerRow
-                title="Irrigation"
-                options={["yes", "no"]}
-                selected={hasIrrigation ? "yes" : "no"}
-                onSelect={(value) => setHasIrrigation(value === "yes")}
-              />
+              <View style={styles.choiceRow}>
+                <Text style={[styles.choiceLabel, { color: theme.textMuted }]}>Sun:</Text>
+                <SegmentedChoice
+                  options={[
+                    { id: SunExposure.FULL_SUN, label: "Full Sun" },
+                    { id: SunExposure.PART_SUN, label: "Part Sun" },
+                    { id: SunExposure.SHADE, label: "Shade" }
+                  ]}
+                  selectedId={sunExposure}
+                  onSelect={(value) => setSunExposure(value as SunExposure)}
+                />
+              </View>
+              <View style={styles.choiceRow}>
+                <Text style={[styles.choiceLabel, { color: theme.textMuted }]}>Drainage:</Text>
+                <SegmentedChoice
+                  options={[
+                    { id: Drainage.GOOD, label: "Good" },
+                    { id: Drainage.MEDIUM, label: "Medium" },
+                    { id: Drainage.POOR, label: "Poor" }
+                  ]}
+                  selectedId={drainage}
+                  onSelect={(value) => setDrainage(value as Drainage)}
+                />
+              </View>
+              <View style={styles.toggleGrid}>
+                <SimpleToggle
+                  label="Raised Bed"
+                  value={isRaisedBed}
+                  onToggle={setIsRaisedBed}
+                />
+                <SimpleToggle
+                  label="Perennial"
+                  value={containsPerennials}
+                  onToggle={setContainsPerennials}
+                />
+                <SimpleToggle
+                  label="Irrigation"
+                  value={hasIrrigation}
+                  onToggle={setHasIrrigation}
+                />
+              </View>
               {canPrecisionEditBed && (
                 <View style={styles.precisionCard}>
                   <Text style={[styles.precisionTitle, { color: theme.textPrimary }]}>Precision Controls (Beds)</Text>
@@ -1441,15 +1411,15 @@ export default function GardenMapEditorScreen() {
               <View style={styles.zoneMeta}>
                 <Text style={[styles.zoneName, { color: theme.textPrimary }]}>{zone.name}</Text>
                 <Text style={[styles.zoneSub, { color: theme.textMuted }]}>
-                  {zone.type} · {zone.polygon.length} pts
-                  {zone.source === "bed" && zone.containsPerennials ? " · perennial" : ""}
+                  {zone.type} | {zone.polygon.length} pts
+                  {zone.source === "bed" && zone.containsPerennials ? " | perennial" : ""}
                   {calibration
-                    ? ` · ~${normalizedAreaToSqM(
+                    ? ` | ~${normalizedAreaToSqM(
                         polygonArea(zone.polygon),
                         calibration.metersPerPixel,
                         calibration.baseWidth,
                         calibration.baseHeight
-                      ).toFixed(1)} sqm`
+                        ).toFixed(1)} sqm`
                     : ""}
                 </Text>
               </View>
@@ -1468,13 +1438,42 @@ export default function GardenMapEditorScreen() {
         <View style={[styles.footerCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.footerText, { color: theme.textMuted }]}>
             Draft points: {draftPoints.length}
-            {" · "}Area ratio: {area.toFixed(3)}
-            {areaSqM !== null ? ` · ~${areaSqM.toFixed(1)} sqm` : ""}
-            {" · "}Saved zones: {existingZones.length}
+            {" | "}Area ratio: {area.toFixed(3)}
+            {areaSqM !== null ? ` | ~${areaSqM.toFixed(1)} sqm` : ""}
+            {" | "}Saved zones: {existingZones.length}
           </Text>
         </View>
         </ScrollView>
       </SafeAreaView>
+
+      {/* Delete Zone Modal */}
+      <Modal visible={Boolean(deleteZoneDraft)} transparent animationType="fade" onRequestClose={() => setDeleteZoneDraft(null)}>
+        <View style={[styles.modalBackdrop, { backgroundColor: theme.modalBackdrop }]}>
+          <View style={[styles.modalCard, { backgroundColor: theme.modalSurfaceBackground, borderColor: theme.modalSurfaceBorder }]}>
+            <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Delete Area</Text>
+            <Text style={[styles.modalText, { color: theme.textMuted }]}>
+              {deleteZoneDraft ? `Delete "${deleteZoneDraft.name}"?` : ""}
+            </Text>
+            <View style={styles.modalActions}>
+              <AppButton
+                label="Cancel"
+                variant="secondary"
+                onPress={() => setDeleteZoneDraft(null)}
+              />
+              <AppButton
+                label="Delete"
+                variant="danger"
+                onPress={() => {
+                  if (deleteZoneDraft) {
+                    void deleteZone(deleteZoneDraft);
+                    setDeleteZoneDraft(null);
+                  }
+                }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1518,6 +1517,34 @@ function VertexHandle(props: {
         },
       ]}
     />
+  );
+}
+
+function SimpleToggle(props: {
+  label: string;
+  value: boolean;
+  onToggle: (nextValue: boolean) => void;
+  disabled?: boolean;
+}) {
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      style={[styles.simpleToggleRow, { opacity: props.disabled ? 0.45 : 1 }]}
+      onPress={() => {
+        if (props.disabled) return;
+        props.onToggle(!props.value);
+      }}
+    >
+      <Text style={[styles.simpleToggleLabel, { color: theme.textPrimary }]}>{props.label}</Text>
+      <View
+        style={[
+          styles.simpleToggleTrack,
+          { backgroundColor: props.value ? theme.toggleOnBackground : theme.toggleOffBackground },
+        ]}
+      >
+        <View style={[styles.simpleToggleThumb, { backgroundColor: theme.toggleThumbColor }, props.value && styles.simpleToggleThumbActive]} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -1633,9 +1660,9 @@ function getShapeOptionsForType(type: GardenFeatureType): Array<{ mode: ShapeDra
     case GardenFeatureType.BED:
     case GardenFeatureType.LAWN:
       return [
-        { mode: "points", label: "Points" },
         { mode: "rectangle", label: "Rectangle" },
         { mode: "ellipse", label: "Ellipse" },
+        { mode: "points", label: "Points" },
       ];
     case GardenFeatureType.TREE:
       return [{ mode: "ellipse", label: "Tree" }];
@@ -1896,7 +1923,7 @@ function getPolygonLabelPlacement(
 function truncateLabel(value: string, maxChars: number): string {
   const trimmed = value.trim();
   if (trimmed.length <= maxChars) return trimmed;
-  return `${trimmed.slice(0, Math.max(1, maxChars - 1))}…`;
+  return `${trimmed.slice(0, Math.max(1, maxChars - 1))}ï¿½`;
 }
 
 function pointsFromPresetShape(shape: PresetShapeDraft): Point2D[] {
@@ -2297,6 +2324,8 @@ const styles = StyleSheet.create({
   typeChipActive: { backgroundColor: "#2F6F4F" },
   typeChipText: { color: "#2C4737", fontWeight: "600", textTransform: "capitalize" },
   typeChipTextActive: { color: "#FFFFFF" },
+  shapeChoiceContainer: { gap: 6, marginTop: 8 },
+  shapeChoiceLabel: { fontSize: 12, fontWeight: "600" },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   zoomButton: { backgroundColor: "#DFEADF", borderRadius: 10, borderWidth: 1, borderColor: "#A9C3B0", paddingHorizontal: 10, paddingVertical: 4 },
   zoomButtonText: { fontSize: 18, fontWeight: "700", color: "#23412E" },
@@ -2370,7 +2399,31 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: "#FFFFFF",
   },
-  metaRow: { marginTop: 8, gap: 8 },
+  metaRow: { marginTop: 8, gap: 12 },
+  choiceRow: { gap: 6 },
+  choiceLabel: { fontSize: 12, fontWeight: "600" },
+  toggleGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  simpleToggleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  simpleToggleLabel: { fontWeight: "600", fontSize: 14 },
+  simpleToggleTrack: {
+    width: 40,
+    height: 22,
+    borderRadius: 999,
+    justifyContent: "center",
+    paddingHorizontal: 2,
+  },
+  simpleToggleThumb: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    alignSelf: "flex-start",
+  },
+  simpleToggleThumbActive: { alignSelf: "flex-end" },
+  modalBackdrop: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
+  modalCard: { width: "100%", maxWidth: 420, borderWidth: 1, borderRadius: 12, padding: 12, gap: 10 },
+  modalTitle: { fontSize: 18, fontWeight: "800" },
+  modalText: { fontSize: 14 },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
   precisionCard: {
     marginTop: 6,
     padding: 10,
