@@ -526,11 +526,11 @@ export default function GardenSetupScreen() {
                   <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={undoMapBoundaryPoint}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Undo</Text>
                   </Pressable>
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={deleteSelectedMapPoint}>
-                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Delete Point</Text>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]} onPress={deleteSelectedMapPoint}>
+                    <Text style={[styles.toolButtonText, { color: theme.dangerActionText }]}>Delete Point</Text>
                   </Pressable>
-                  <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={resetMapBoundary}>
-                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Reset</Text>
+                  <Pressable style={[styles.toolButton, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]} onPress={resetMapBoundary}>
+                    <Text style={[styles.toolButtonText, { color: theme.dangerActionText }]}>Reset</Text>
                   </Pressable>
                   <Pressable style={[styles.toolButton, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]} onPress={finishMapBoundary}>
                     <Text style={[styles.toolButtonText, { color: theme.primaryActionText }]}>Finish Shape</Text>

@@ -1413,7 +1413,7 @@ export default function GardenMapEditorScreen() {
               <View style={styles.toolbarRow}>
                 <AppButton
                   label="Cancel"
-                  variant="secondary"
+                  variant="danger"
                   onPress={cancelBoundaryEdit}
                 />
                 <AppButton
@@ -1464,12 +1464,12 @@ export default function GardenMapEditorScreen() {
               <Pressable
                 style={[
                   styles.secondaryButton,
-                  { backgroundColor: canDeletePoint ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
+                  { backgroundColor: canDeletePoint ? theme.dangerActionBackground : theme.disabledActionBackground },
                 ]}
                 onPress={deleteSelectedPoint}
                 disabled={!canDeletePoint}
               >
-                <Text style={[styles.secondaryButtonText, { color: canDeletePoint ? theme.choiceControlActiveText : theme.choiceControlText }]}>Delete Point</Text>
+                <Text style={[styles.secondaryButtonText, { color: canDeletePoint ? theme.dangerActionText : theme.disabledActionText }]}>Delete Point</Text>
               </Pressable>
             </View>
           )}
@@ -2546,7 +2546,7 @@ const styles = StyleSheet.create({
   shapeChoiceContainer: { gap: 6, marginTop: 8 },
   shapeChoiceLabel: { fontSize: 12, fontWeight: "600" },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  zoomButton: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4 },
+  zoomButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   zoomButtonText: { fontSize: 18, fontWeight: "700" },
   zoomText: { minWidth: 52, textAlign: "center", fontWeight: "700" },
   switchRow: {
@@ -2554,7 +2554,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderRadius: 10,
-    borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -2579,7 +2578,6 @@ const styles = StyleSheet.create({
   rotationRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
   rotationInput: {
     width: 90,
-    borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -2595,15 +2593,14 @@ const styles = StyleSheet.create({
   placeholder: { justifyContent: "center", alignItems: "center" },
   placeholderText: {},
   toolbarRow: { marginTop: 2, flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  secondaryButton: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  secondaryButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   secondaryButtonText: { fontWeight: "600" },
-  secondaryButtonReady: { borderWidth: 1 },
+  secondaryButtonReady: {},
   secondaryButtonTextReady: { fontWeight: "700" },
   secondaryButtonActive: {},
   secondaryButtonTextActive: {},
   nameInput: {
     marginTop: 2,
-    borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -2660,20 +2657,19 @@ const styles = StyleSheet.create({
   zoneName: { fontWeight: "700", textTransform: "capitalize" },
   zoneSub: { marginTop: 2, textTransform: "capitalize" },
   zoneActions: { flexDirection: "row", gap: 8 },
-  editButton: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  editButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   editButtonText: { fontWeight: "700" },
-  deleteButton: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  deleteButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   deleteButtonText: { fontWeight: "700" },
   emptyText: {},
   saveCard: {
     borderRadius: 14,
     padding: 12,
-    borderWidth: 2,
+    borderWidth: 1,
     gap: 8,
   },
   primarySaveButton: {
     borderRadius: 10,
-    borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 14,
     alignItems: "center",
