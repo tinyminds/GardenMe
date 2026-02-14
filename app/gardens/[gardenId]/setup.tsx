@@ -620,8 +620,8 @@ export default function GardenSetupScreen() {
                   >
                     <Polygon
                       points={measurementBoundary.map(p => `${p.x * measurementCanvas.width},${p.y * measurementCanvas.height}`).join(' ')}
-                      fill={theme.mapBoundaryFill || 'rgba(34, 139, 34, 0.2)'}
-                      stroke={theme.mapBoundaryStroke || '#228B22'}
+                      fill={theme.mapBoundaryFill}
+                      stroke={theme.mapBoundaryStroke}
                       strokeWidth={3}
                     />
                     {measurementLabels.map((label, index) => (
