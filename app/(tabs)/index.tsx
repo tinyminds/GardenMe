@@ -310,9 +310,11 @@ export default function DashboardScreen() {
         ) : (
           <>
             <Text style={[styles.gardenName, { color: theme.textPrimary }]}>{selectedGarden.name}</Text>
-            <Text style={[styles.helper, { color: theme.textMuted }]}>
-              {selectedGarden.locationLabel ?? `${selectedGarden.latitude.toFixed(4)}, ${selectedGarden.longitude.toFixed(4)}`}
-            </Text>
+            {selectedGarden.locationLabel && (
+              <Text style={[styles.helper, { color: theme.textMuted }]}>
+                {selectedGarden.locationLabel}
+              </Text>
+            )}
             <Text style={[styles.helper, { color: theme.textMuted }]}>
               Area {selectedGarden.scaleCalibration?.boundaryAreaSqM ? `${selectedGarden.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}
             </Text>
@@ -340,9 +342,16 @@ export default function DashboardScreen() {
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Quick Actions</Text>
           <View style={styles.actionGrid}>
-            <Link href={`/gardens/${selectedGarden.id}/setup`} style={[styles.actionLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}>
-              {hasSetup ? "Garden Setup - Edit" : "Garden Setup - Start"}
-            </Link>
+            {(bedsQuery.data && bedsQuery.data.length > 0) || (featuresQuery.data && featuresQuery.data.length > 0) ? (
+              <View style={[styles.actionLink, { backgroundColor: theme.disabledActionBackground, borderColor: theme.borderColor }]}>
+                <Text style={{ color: theme.disabledActionText, textAlign: "center", fontWeight: "600" }}>Garden Setup - Completed</Text>
+                <Text style={[styles.disabledHelper, { color: theme.infoText }]}>No longer editable</Text>
+              </View>
+            ) : (
+              <Link href={`/gardens/${selectedGarden.id}/setup`} style={[styles.actionLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}>
+                {hasSetup ? "Garden Setup - Edit" : "Garden Setup - Start"}
+              </Link>
+            )}
             <Link href={`/gardens/${selectedGarden.id}/map`} style={[styles.actionLink, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor, color: theme.secondaryActionText }]}>
               {hasDesign ? "Garden Design - Continue" : "Garden Design - Start"}
             </Link>
@@ -629,6 +638,7 @@ const styles = StyleSheet.create({
     width: 1400,
   },
   weatherNow: { fontSize: 16, fontWeight: "700" },
+  disabledHelper: { fontSize: 12, fontStyle: "italic", marginTop: 2, textAlign: "center" },
 });
 
 function normalizeSearchText(value: string): string {

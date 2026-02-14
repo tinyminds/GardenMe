@@ -11,6 +11,7 @@ export interface GardenScaleCalibration {
   latitude?: number;
   zoomLevel?: number;
   boundaryPolygon?: { x: number; y: number }[];
+  // Geographic boundary only used during initial setup - removed when design begins
   boundaryGeoPolygon?: { latitude: number; longitude: number }[];
   boundaryAreaSqM?: number;
   manualLengthM?: number;

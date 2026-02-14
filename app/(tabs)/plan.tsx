@@ -112,6 +112,8 @@ export default function PlanTabScreen() {
             helper={hasSetup ? "Boundary and scale saved." : "Set location, boundary, and scale."}
             href={`/gardens/${selectedGarden.id}/setup`}
             state={setupState}
+            disabled={(bedsQuery.data && bedsQuery.data.length > 0) || (featuresQuery.data && featuresQuery.data.length > 0)}
+            disabledReason={(bedsQuery.data && bedsQuery.data.length > 0) || (featuresQuery.data && featuresQuery.data.length > 0) ? "No longer editable - garden design has begun" : undefined}
           />
           <StepCard
             title="2. Garden Design"
@@ -143,8 +145,32 @@ export default function PlanTabScreen() {
   );
 }
 
-function StepCard(props: { title: string; helper: string; href: string; state: StepState }) {
+function StepCard(props: { title: string; helper: string; href: string; state: StepState; disabled?: boolean; disabledReason?: string }) {
   const { theme } = useTheme();
+  
+  if (props.disabled) {
+    return (
+      <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+        <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{props.title}</Text>
+        <Text style={[styles.metric, { color: theme.textMuted }]}>{props.helper}</Text>
+        <View
+          style={[
+            styles.primaryLink,
+            {
+              backgroundColor: theme.disabledActionBackground,
+              borderColor: theme.disabledActionBackground,
+            },
+          ]}
+        >
+          <Text style={{ color: theme.disabledActionText }}>Completed</Text>
+        </View>
+        {props.disabledReason && (
+          <Text style={[styles.infoText, { color: theme.infoText }]}>{props.disabledReason}</Text>
+        )}
+      </View>
+    );
+  }
+  
   return (
     <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
       <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{props.title}</Text>
@@ -197,4 +223,5 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     textAlign: "center",
   },
+  infoText: { fontSize: 12, fontStyle: "italic", marginTop: 4 },
 });

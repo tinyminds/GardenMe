@@ -14,8 +14,10 @@ import {
   Text,
   TextInput,
   View,
+  type LayoutChangeEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Svg, { Polygon, Text as SvgText } from "react-native-svg";
 import { useQuery } from "@tanstack/react-query";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { queryClient } from "@/state/queryClient";
@@ -56,6 +58,10 @@ export default function GardenSetupScreen() {
   const [locatingUser, setLocatingUser] = useState(false);
   const [captureMapSnapshot, setCaptureMapSnapshot] = useState<(() => Promise<MapSnapshotResult>) | null>(null);
   const [locationHydrated, setLocationHydrated] = useState(false);
+  
+  // Canvas preview for measurements mode
+  const [measurementCanvas, setMeasurementCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
+  const [measurementZoom, setMeasurementZoom] = useState(0.8); // Start zoomed out to show padding
 
   const gardenQuery = useQuery({
     queryKey: ["garden", gardenId],
@@ -67,12 +73,22 @@ export default function GardenSetupScreen() {
   });
 
   useEffect(() => {
-    const existingGeoBoundary = gardenQuery.data?.scaleCalibration?.boundaryGeoPolygon;
-    if (!existingGeoBoundary || existingGeoBoundary.length < 3) return;
-    if (mapBoundary.length > 0) return;
-    setMapBoundary(existingGeoBoundary);
-    setIsMapClosed(true);
-  }, [gardenQuery.data?.scaleCalibration?.boundaryGeoPolygon, mapBoundary.length]);
+    // Geographic boundary display is disabled when design begins
+    // Setup becomes locked after beds/features are created
+  }, []);
+
+  // Load saved measurements into input fields
+  useEffect(() => {
+    if (gardenQuery.data?.scaleCalibration) {
+      const { manualLengthM, manualWidthM } = gardenQuery.data.scaleCalibration;
+      if (typeof manualLengthM === 'number' && manualLengthM > 0) {
+        setManualLengthM(manualLengthM.toString());
+      }
+      if (typeof manualWidthM === 'number' && manualWidthM > 0) {
+        setManualWidthM(manualWidthM.toString());
+      }
+    }
+  }, [gardenQuery.data?.scaleCalibration]);
 
   useEffect(() => {
     const hydrateCenter = async () => {
@@ -124,7 +140,7 @@ export default function GardenSetupScreen() {
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert("Permission needed", "Allow location access to center map on your position.");
+        Alert.alert("Location permission needed", "Please allow location access to center the map on your current position.");
         return;
       }
       const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
@@ -133,7 +149,7 @@ export default function GardenSetupScreen() {
       await gardenRepository.updateLocation(gardenId, nextCenter.latitude, nextCenter.longitude);
       await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
     } catch (error) {
-      Alert.alert("Location unavailable", error instanceof Error ? error.message : "Could not fetch your location.");
+      Alert.alert("Location unavailable", `Could not access your location: ${error instanceof Error ? error.message : 'Unknown error'}. You can still search for an address manually.`);
     } finally {
       setLocatingUser(false);
     }
@@ -144,8 +160,8 @@ export default function GardenSetupScreen() {
     const query = mapSearch.trim();
     if (!query) {
       Alert.alert(
-        "Search needed", 
-        "Enter an address, postcode, or place name.",
+        "Enter search location", 
+        "Type an address, postcode, or place name to find your garden location on the map.",
         [{ text: "OK", style: "default" }]
       );
       return;
@@ -156,7 +172,7 @@ export default function GardenSetupScreen() {
       const results = await Location.geocodeAsync(query);
       const first = results[0];
       if (!first) {
-        Alert.alert("No results", "Try a more specific address.");
+        Alert.alert("Location not found", "No results found. Try a more specific address or different search terms.");
         return;
       }
       const nextCenter = { latitude: first.latitude, longitude: first.longitude };
@@ -164,7 +180,7 @@ export default function GardenSetupScreen() {
       await gardenRepository.updateLocation(gardenId, nextCenter.latitude, nextCenter.longitude, query);
       await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
     } catch (error) {
-      Alert.alert("Search failed", error instanceof Error ? error.message : "Could not search this location.");
+      Alert.alert("Search error", `Location search failed: ${error instanceof Error ? error.message : 'Unknown error'}. Try a different search term.`);
     } finally {
       setSearchingMap(false);
     }
@@ -182,7 +198,7 @@ export default function GardenSetupScreen() {
 
   const finishMapBoundary = () => {
     if (mapBoundary.length < 3) {
-      Alert.alert("Need 3 points", "Add at least 3 points before finishing the map boundary.");
+      Alert.alert("Need more points", "Add at least 3 points around your garden boundary before finishing.");
       return;
     }
     setIsMapClosed(true);
@@ -212,24 +228,18 @@ export default function GardenSetupScreen() {
   const saveMapSetup = async () => {
     if (!gardenId) return;
     if (Platform.OS === "web") {
-      Alert.alert("Native only", "Map boundary mode currently works on iOS/Android only.");
+      Alert.alert("Device not supported", "Map boundary mode requires a mobile device with camera access. Please use the Measurement mode instead.");
       return;
     }
 
     if (mapBoundary.length < 3) {
-      Alert.alert("Draw boundary", "Tap around your garden on the map with at least 3 points.");
+      Alert.alert("Draw boundary first", "Tap around your garden on the satellite map to create a boundary with at least 3 points.");
       return;
     }
 
     const finalBoundaryGeo = isMapClosed ? mapBoundary : [...mapBoundary];
     if (!isMapClosed) {
       setIsMapClosed(true);
-    }
-
-    const boundaryAreaSqM = polygonAreaSqMeters(finalBoundaryGeo);
-    if (!Number.isFinite(boundaryAreaSqM) || boundaryAreaSqM <= 0) {
-      Alert.alert("Area invalid", "Could not calculate area from this boundary. Try redrawing.");
-      return;
     }
 
     let snapshotSaved = false;
@@ -256,7 +266,14 @@ export default function GardenSetupScreen() {
 
     const normalizedArea = polygonArea(boundaryForCalibration);
     if (!Number.isFinite(normalizedArea) || normalizedArea <= 0) {
-      Alert.alert("Boundary invalid", "Could not normalize this boundary. Try redrawing.");
+      Alert.alert("Boundary error", "Could not process this boundary shape. Try redrawing with fewer complex curves.");
+      return;
+    }
+
+    // Calculate initial area estimate from map polygon (will be refined when boundary is edited)
+    const boundaryAreaSqM = polygonAreaSqMeters(finalBoundaryGeo);
+    if (!Number.isFinite(boundaryAreaSqM) || boundaryAreaSqM <= 0) {
+      Alert.alert("Area calculation failed", "Could not calculate garden area from this boundary. Please try redrawing.");
       return;
     }
 
@@ -271,7 +288,7 @@ export default function GardenSetupScreen() {
       baseHeight: baseHeightForCalibration,
       latitude: mapCenter.latitude,
       boundaryPolygon: boundaryForCalibration,
-      boundaryGeoPolygon: finalBoundaryGeo,
+      // Remove geographic polygon - setup will be locked after design begins
       boundaryAreaSqM,
       showBaseImage: true,
       showGridOverlay: false,
@@ -282,8 +299,8 @@ export default function GardenSetupScreen() {
     await gardenRepository.updateScaleCalibration(gardenId, calibration);
     await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
     Alert.alert(
-      "Map saved",
-      `Garden area: ${boundaryAreaSqM.toFixed(1)} sqm.${snapshotSaved ? " Design image captured." : ""}`
+      "Map boundary saved",
+      `Garden area: ${boundaryAreaSqM.toFixed(1)} sqm.${snapshotSaved ? " Satellite image captured." : ""} You can edit the boundary on the design page until you add beds or features.`
     );
   };
 
@@ -300,19 +317,45 @@ export default function GardenSetupScreen() {
     const length = Number(manualLengthM);
     const width = Number(manualWidthM);
     if (!Number.isFinite(length) || !Number.isFinite(width) || length <= 0 || width <= 0) {
-      Alert.alert("Invalid dimensions", "Enter valid length and width in meters.");
+      Alert.alert("Invalid measurements", "Please enter valid positive numbers for both length and width in meters.");
       return;
     }
 
+    // Work backward from desired measurements to get correct boundary
+    // We want exact length×width measurements with padding around
+    
+    // Determine scale first - how many pixels per meter?
+    // Use a reasonable scale that fits the garden with padding
+    const padding = 0.15;
+    const availableWidth = (1 - 2 * padding) * BASE_CANVAS_WIDTH;  // pixels available for garden
+    const availableHeight = (1 - 2 * padding) * BASE_CANVAS_HEIGHT; // pixels available for garden
+    
+    // Scale to fit the larger dimension
+    const scaleX = availableWidth / length;   // pixels per meter based on length
+    const scaleY = availableHeight / width;   // pixels per meter based on width
+    const pixelsPerMeter = Math.min(scaleX, scaleY); // use smaller to ensure both fit
+    const metersPerPixel = 1 / pixelsPerMeter;
+    
+    // Calculate exact garden size in pixels
+    const gardenWidthPixels = length * pixelsPerMeter;
+    const gardenHeightPixels = width * pixelsPerMeter;
+    
+    // Convert to normalized coordinates
+    const gardenWidthNorm = gardenWidthPixels / BASE_CANVAS_WIDTH;
+    const gardenHeightNorm = gardenHeightPixels / BASE_CANVAS_HEIGHT;
+    
+    // Center the garden
+    const startX = 0.5 - gardenWidthNorm / 2;
+    const startY = 0.5 - gardenHeightNorm / 2;
+    
     const boundaryPolygon = [
-      { x: 0.08, y: 0.08 },
-      { x: 0.92, y: 0.08 },
-      { x: 0.92, y: 0.92 },
-      { x: 0.08, y: 0.92 },
+      { x: startX, y: startY },
+      { x: startX + gardenWidthNorm, y: startY },
+      { x: startX + gardenWidthNorm, y: startY + gardenHeightNorm },
+      { x: startX, y: startY + gardenHeightNorm },
     ];
-    const imageAreaPixels = BASE_CANVAS_WIDTH * BASE_CANVAS_HEIGHT;
-    const boundaryNormalizedArea = polygonArea(boundaryPolygon);
-    const metersPerPixel = Math.sqrt((length * width) / (imageAreaPixels * boundaryNormalizedArea));
+    
+    const totalAreaSqM = BASE_CANVAS_WIDTH * BASE_CANVAS_HEIGHT * metersPerPixel * metersPerPixel;
 
     const calibration: GardenScaleCalibration = {
       method: "reference_line",
@@ -320,7 +363,7 @@ export default function GardenSetupScreen() {
       baseWidth: BASE_CANVAS_WIDTH,
       baseHeight: BASE_CANVAS_HEIGHT,
       boundaryPolygon,
-      boundaryAreaSqM: length * width,
+      boundaryAreaSqM: totalAreaSqM,
       manualLengthM: length,
       manualWidthM: width,
       showBaseImage: false,
@@ -331,10 +374,90 @@ export default function GardenSetupScreen() {
 
     await gardenRepository.updateScaleCalibration(gardenId, calibration);
     await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
-    Alert.alert("Measurements saved", `Garden area: ${(length * width).toFixed(1)} sqm.`);
+    Alert.alert("Measurements saved", `Garden layout: ${length}m × ${width}m created. You can edit dimensions until you add beds or features. Note: No location or satellite image has been saved.`);
   };
 
   const mapAreaSqM = useMemo(() => polygonAreaSqMeters(mapBoundary), [mapBoundary]);
+
+  const onMeasurementCanvasLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setMeasurementCanvas({ width, height });
+  };
+
+  const measurementBoundary = useMemo(() => {
+    const length = Number(manualLengthM);
+    const width = Number(manualWidthM);
+    
+    if (!Number.isFinite(length) || !Number.isFinite(width) || length <= 0 || width <= 0) {
+      // Default square if no valid measurements
+      return [
+        { x: 0.1, y: 0.1 },
+        { x: 0.9, y: 0.1 },
+        { x: 0.9, y: 0.9 },
+        { x: 0.1, y: 0.9 },
+      ];
+    }
+    
+    // Create rectangle with EXACT proportions of length×width
+    // Length = horizontal, Width = vertical
+    const aspectRatio = width / length;
+    const maxDim = 0.8; // Use 80% of available space
+    const padding = 0.1;
+    
+    let rectWidth, rectHeight;
+    
+    if (aspectRatio > 1) {
+      // Taller than wide: fit to height, scale width
+      rectHeight = maxDim;
+      rectWidth = maxDim / aspectRatio;
+    } else {
+      // Wider than tall: fit to width, scale height  
+      rectWidth = maxDim;
+      rectHeight = maxDim * aspectRatio;
+    }
+    
+    // Center the rectangle
+    const startX = 0.5 - rectWidth / 2;
+    const startY = 0.5 - rectHeight / 2;
+    
+    return [
+      { x: startX, y: startY },
+      { x: startX + rectWidth, y: startY },
+      { x: startX + rectWidth, y: startY + rectHeight },
+      { x: startX, y: startY + rectHeight },
+    ];
+  }, [manualLengthM, manualWidthM]);
+
+  const measurementLabels = useMemo(() => {
+    const length = Number(manualLengthM);
+    const width = Number(manualWidthM);
+    if (!Number.isFinite(length) || !Number.isFinite(width) || length <= 0 || width <= 0) return [];
+    
+    const [topLeft, topRight, bottomRight, bottomLeft] = measurementBoundary;
+    
+    return [
+      {
+        x: measurementCanvas.width * (topLeft.x + topRight.x) / 2,
+        y: measurementCanvas.height * (topLeft.y - 0.04),
+        text: `${length}m`,
+      },
+      {
+        x: measurementCanvas.width * (topRight.x + 0.04),
+        y: measurementCanvas.height * (topRight.y + bottomRight.y) / 2,
+        text: `${width}m`,
+      },
+      {
+        x: measurementCanvas.width * (bottomLeft.x + bottomRight.x) / 2,
+        y: measurementCanvas.height * (bottomRight.y + 0.06),
+        text: `${length}m`,
+      },
+      {
+        x: measurementCanvas.width * (bottomLeft.x - 0.04),
+        y: measurementCanvas.height * (topLeft.y + bottomLeft.y) / 2,
+        text: `${width}m`,
+      },
+    ];
+  }, [manualLengthM, manualWidthM, measurementCanvas, measurementBoundary]);
 
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
@@ -346,7 +469,7 @@ export default function GardenSetupScreen() {
         >
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
             <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Setup</Text>
-            <Text style={[styles.subtitle, { color: theme.textMuted }]}>Set your garden boundary on map, or enter measurements in meters.</Text>
+            <Text style={[styles.subtitle, { color: theme.textMuted }]}>Choose how to set up your garden layout. Map mode captures satellite imagery and location, while measurements create a basic rectangular layout.</Text>
 
             <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
               <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Mode</Text>
@@ -365,7 +488,7 @@ export default function GardenSetupScreen() {
             {setupMode === "map" ? (
               <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
                 <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Map Boundary</Text>
-                <Text style={[styles.cardText, { color: theme.textMuted }]}>Tap points around the outer garden edge, then save.</Text>
+                <Text style={[styles.cardText, { color: theme.textMuted }]}>Tap around your garden edge, then save. Zoom in close and fill the screen with your garden - this will be your design layout. Boundary can be edited later, but only until you add beds or features.</Text>
 
                 <SegmentedChoice
                   options={[
@@ -437,7 +560,7 @@ export default function GardenSetupScreen() {
             ) : (
               <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
                 <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Manual Measurements (meters)</Text>
-                <Text style={[styles.cardText, { color: theme.textMuted }]}>Enter your approximate garden dimensions.</Text>
+                <Text style={[styles.cardText, { color: theme.textMuted }]}>Enter your garden dimensions for a basic rectangular layout. No satellite image or location will be saved. Once you add features or beds, you cannot return to add location data.</Text>
 
                 <View style={styles.inputRow}>
                   <TextInput
@@ -456,6 +579,66 @@ export default function GardenSetupScreen() {
                     placeholder="Width (m)"
                     placeholderTextColor={theme.textMuted}
                   />
+                </View>
+
+                <View style={[styles.separator, { backgroundColor: theme.borderColor }]} />
+
+                {/* Canvas Preview */}
+                <Text style={[styles.cardText, { color: theme.textMuted }]}>Preview</Text>
+                <View style={styles.zoomRow}>
+                  <Pressable
+                    style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                    onPress={() => setMeasurementZoom(Math.max(0.5, measurementZoom - 0.1))}
+                  >
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Zoom Out</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                    onPress={() => setMeasurementZoom(Math.min(2, measurementZoom + 0.1))}
+                  >
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Zoom In</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                    onPress={() => setMeasurementZoom(0.8)}
+                  >
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Reset</Text>
+                  </Pressable>
+                </View>
+
+                <View
+                  style={[
+                    styles.measurementCanvas,
+                    { backgroundColor: theme.appBackground, borderColor: theme.borderColor }
+                  ]}
+                  onLayout={onMeasurementCanvasLayout}
+                >
+                  <Svg
+                    width="100%"
+                    height="100%"
+                    viewBox={`${measurementCanvas.width * (1 - measurementZoom) / 2} ${measurementCanvas.height * (1 - measurementZoom) / 2} ${measurementCanvas.width * measurementZoom} ${measurementCanvas.height * measurementZoom}`}
+                  >
+                    <Polygon
+                      points={measurementBoundary.map(p => `${p.x * measurementCanvas.width},${p.y * measurementCanvas.height}`).join(' ')}
+                      fill={theme.mapBoundaryFill || 'rgba(34, 139, 34, 0.2)'}
+                      stroke={theme.mapBoundaryStroke || '#228B22'}
+                      strokeWidth={3}
+                    />
+                    {measurementLabels.map((label, index) => (
+                      <SvgText
+                        key={`measure-${index}`}
+                        x={label.x}
+                        y={label.y}
+                        textAnchor="middle"
+                        alignmentBaseline="middle"
+                        fontSize={14}
+                        fontWeight="700"
+                        fill={theme.textPrimary}
+                      >
+                        {label.text}
+                      </SvgText>
+                    ))}
+                  </Svg>
                 </View>
 
                 <Text style={[styles.infoText, { color: theme.infoText }]}>Garden area: {manualAreaSqM ? `${manualAreaSqM.toFixed(1)} sqm` : "-"}</Text>
@@ -560,6 +743,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: "hidden",
     textAlign: "center",
+  },
+  measurementCanvas: {
+    height: 200,
+    borderWidth: 1,
+    borderRadius: 10,
+    overflow: "hidden",
   },
 });
 

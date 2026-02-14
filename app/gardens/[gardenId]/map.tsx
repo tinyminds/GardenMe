@@ -31,6 +31,7 @@ import { SqliteGardenFeatureRepository } from "@/infra/repositories/sqlite/Sqlit
 import { Drainage, SunExposure, type Point2D } from "@/domain/entities/Bed";
 import { GardenFeatureType } from "@/domain/entities/GardenFeature";
 import { clipLineToPolygon, isPointInsidePolygon, polygonArea } from "@/features/garden-mapping/utils/geometry";
+import type { GardenScaleCalibration } from "@/domain/entities/Garden";
 
 const gardenRepository = new SqliteGardenRepository();
 const bedRepository = new SqliteBedRepository();
@@ -63,7 +64,7 @@ type ZonePreview = {
   isRaisedBed?: boolean;
   hasIrrigation?: boolean;
 };
-type CanvasMode = "draw" | "pan";
+type CanvasMode = "draw" | "pan" | "boundary";
 type ShapeDraftMode = "points" | "rectangle" | "ellipse" | "line";
 type PresetShapeDraft = {
   kind: "rectangle" | "ellipse" | "line";
@@ -118,6 +119,11 @@ export default function GardenMapEditorScreen() {
   const rectLengthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rectWidthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [didNormalizeLegacyCalibration, setDidNormalizeLegacyCalibration] = useState(false);
+  
+  // Boundary editing state
+  const [isEditingBoundary, setIsEditingBoundary] = useState(false);
+  const [selectedBoundaryPoint, setSelectedBoundaryPoint] = useState<number | null>(null);
+  const [editingBoundary, setEditingBoundary] = useState<Point2D[] | null>(null);
 
   const gardenQuery = useQuery({
     queryKey: ["garden", gardenId],
@@ -173,7 +179,9 @@ export default function GardenMapEditorScreen() {
   }, [bedsQuery.data, featuresQuery.data]);
 
   const calibration = gardenQuery.data?.scaleCalibration;
-  const gardenBoundary = getBoundaryOrDefault(calibration?.boundaryPolygon);
+  // Use editing boundary if available, otherwise use the original boundary
+  const currentBoundary = editingBoundary || getBoundaryOrDefault(calibration?.boundaryPolygon);
+  const gardenBoundary = currentBoundary;
   const boundaryXs = gardenBoundary.map((p) => p.x);
   const boundaryYs = gardenBoundary.map((p) => p.y);
   const boundaryMinX = boundaryXs.length > 0 ? Math.min(...boundaryXs) : 0;
@@ -335,6 +343,83 @@ export default function GardenMapEditorScreen() {
     }
   };
 
+  // Boundary editing functions
+  const startBoundaryEdit = () => {
+    if (calibration?.boundaryPolygon) {
+      setEditingBoundary([...calibration.boundaryPolygon]);
+    }
+    setIsEditingCanvas(true);
+    setIsEditingBoundary(true);
+    setSelectedBoundaryPoint(null);
+    setCanvasMode("boundary");
+  };
+
+  const startEditBoundary = () => {
+    startBoundaryEdit();
+  };
+
+  const cancelBoundaryEdit = () => {
+    setEditingBoundary(null);
+    setIsEditingBoundary(false);
+    setSelectedBoundaryPoint(null);
+    setCanvasMode("draw");
+  };
+
+  const saveBoundary = async () => {
+    if (!gardenId || !calibration || !editingBoundary) {
+      Alert.alert("Error", "No garden, calibration, or boundary data found.");
+      return;
+    }
+
+    if (editingBoundary.length < 3) {
+      Alert.alert("Invalid boundary", "A boundary must have at least 3 points.");
+      return;
+    }
+
+    try {
+      // Calculate the area using the edited boundary
+      const boundaryAreaSqM = polygonArea(editingBoundary) * (calibration.baseWidth * calibration.baseHeight) * Math.pow(calibration.metersPerPixel, 2);
+      
+      // Update the calibration with the modified boundary
+      const updatedCalibration: GardenScaleCalibration = {
+        ...calibration,
+        boundaryPolygon: editingBoundary,
+        boundaryAreaSqM,
+        // Clear geographic boundary since canvas editing invalidates lat/lng coordinates
+        // This will require re-mapping on the setup page
+        boundaryGeoPolygon: undefined,
+      };
+
+      // Update local query cache immediately for instant UI updates
+      queryClient.setQueryData(["garden", gardenId], (old: any) => ({
+        ...old,
+        scaleCalibration: updatedCalibration,
+      }));
+
+      // Persist to database
+      await gardenRepository.updateScaleCalibration(gardenId, updatedCalibration);
+      
+      // Force complete cache refresh for all garden-related queries
+      queryClient.removeQueries({ queryKey: ["garden", gardenId] });
+      queryClient.removeQueries({ queryKey: ["gardens"] });
+      queryClient.removeQueries({ queryKey: ["garden-features", gardenId] });  
+      queryClient.removeQueries({ queryKey: ["garden-areas", gardenId] });
+      
+      // Refetch fresh data
+      await queryClient.refetchQueries({ queryKey: ["garden", gardenId] });
+      
+      setEditingBoundary(null);
+      setIsEditingBoundary(false);
+      setSelectedBoundaryPoint(null);
+      setCanvasMode("draw");
+      
+      Alert.alert("Boundary updated", "Garden boundary has been successfully updated. Navigate to other pages to see changes.");
+    } catch (error) {
+      console.error("Error saving boundary:", error);
+      Alert.alert("Error", "Failed to save boundary. Please try again.");
+    }
+  };
+
   const snapPoint = (point: Point2D): Point2D => {
     if (!snapToGrid || !calibration || gridStepX <= 0 || gridStepY <= 0) {
       return point;
@@ -386,10 +471,32 @@ export default function GardenMapEditorScreen() {
   };
 
   const onCanvasPress = (event: GestureResponderEvent) => {
-    if (!isEditingCanvas || canvasMode !== "draw") return;
-
     const tapPointRaw = getNormalizedTapPoint(event, canvas);
     if (!tapPointRaw) return;
+    
+    // Handle boundary editing mode
+    if (canvasMode === "boundary" && currentBoundary) {
+      const tapPoint = snapPoint(tapPointRaw);
+      if (!tapPoint) return;
+      
+      // Check if we tapped near a boundary point to select it
+      const boundaryPoints = currentBoundary;
+      const threshold = 15 / Math.min(canvas.width, canvas.height); // 15px threshold
+      
+      for (let i = 0; i < boundaryPoints.length; i++) {
+        const point = boundaryPoints[i];
+        const distance = Math.hypot(tapPoint.x - point.x, tapPoint.y - point.y);
+        if (distance <= threshold) {
+          setSelectedBoundaryPoint(selectedBoundaryPoint === i ? null : i);
+          return;
+        }
+      }
+      
+      setSelectedBoundaryPoint(null);
+      return;
+    }
+
+    if (!isEditingCanvas || canvasMode !== "draw") return;
     const tapPoint = snapPoint(tapPointRaw);
     if (!tapPoint) return;
     if (!isPointInsidePolygon(tapPoint, gardenBoundary)) {
@@ -843,7 +950,7 @@ export default function GardenMapEditorScreen() {
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.appBackground }]} edges={["left", "right"]}>
-        <ScrollView contentContainerStyle={styles.scrollContent} scrollEnabled={!isEditingCanvas || canvasMode === "draw"}>
+        <ScrollView contentContainerStyle={styles.scrollContent} scrollEnabled={!isEditingCanvas || canvasMode === "draw" || canvasMode === "boundary"}>
         <View style={styles.header}>
           <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Design</Text>
           <Text style={[styles.subtitle, { color: theme.textMuted }]}>Map beds and spaces quickly with tap-to-draw and tap-to-edit.</Text>
@@ -852,14 +959,30 @@ export default function GardenMapEditorScreen() {
         <View style={[styles.guidanceCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.guidanceText, { color: theme.infoText }]}>{guidanceText}</Text>
           {!calibration && gardenId && (
-            <Link href={`/gardens/${gardenId}/setup`} style={[styles.setupLinkText, { color: theme.primaryActionBackground }]}>
-              Set scale in Garden Setup to enable sqm estimates
-            </Link>
+            (bedsQuery.data && bedsQuery.data.length > 0) || (featuresQuery.data && featuresQuery.data.length > 0) ? (
+              <View>
+                <Text style={[styles.setupLinkText, { color: theme.disabledActionText }]}>
+                  Garden Setup completed - no longer editable
+                </Text>
+                <Text style={[styles.infoText, { color: theme.infoText, fontSize: 12, fontStyle: "italic" }]}>
+                  Setup locked after design begins
+                </Text>
+              </View>
+            ) : (
+              <Link href={`/gardens/${gardenId}/setup`} style={[styles.setupLinkText, { color: theme.primaryActionBackground }]}>
+                Set scale in Garden Setup to enable sqm estimates
+              </Link>
+            )
           )}
         </View>
 
         <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>1. Select Area Type</Text>
+          {isEditingBoundary && (
+            <Text style={[styles.infoText, { color: theme.textMuted, marginBottom: 8 }]}>
+              Finish editing the boundary before creating new areas.
+            </Text>
+          )}
           <SegmentedChoice
             options={featureTypes.map((type) => ({ id: type, label: type }))}
             selectedId={activeType}
@@ -868,12 +991,17 @@ export default function GardenMapEditorScreen() {
                 Alert.alert("Finish editing first", "Tap Cancel Edit before switching area type.");
                 return;
               }
+              if (isEditingBoundary) {
+                Alert.alert("Finish editing boundary", "Complete boundary editing before creating new areas.");
+                return;
+              }
               setActiveType(type as GardenFeatureType);
               const nextOptions = getShapeOptionsForType(type as GardenFeatureType);
               setShapeDraftMode(nextOptions[0]?.mode ?? "points");
               setPresetShape(null);
               setName(nextZoneName(type as GardenFeatureType, existingZones));
             }}
+            disabled={isEditingBoundary || canvasMode === "boundary"}
           />
           <View style={styles.shapeChoiceContainer}>
             <Text style={[styles.shapeChoiceLabel, { color: theme.textMuted }]}>Shape:</Text>
@@ -899,10 +1027,15 @@ export default function GardenMapEditorScreen() {
             </View>
           </View>
           <View style={styles.toolbarRow}>
-            <SimpleToggle label="Image" value={showImageLayer} onToggle={(next) => {
-              setShowImageLayer(next);
-              void persistCanvasViewSettings(next, showGridLayer, showBedMeasurementsLayer);
-            }} />
+            <SimpleToggle 
+              label="Image" 
+              value={showImageLayer} 
+              disabled={!gardenQuery.data?.photoUri}
+              onToggle={(next) => {
+                setShowImageLayer(next);
+                void persistCanvasViewSettings(next, showGridLayer, showBedMeasurementsLayer);
+              }} 
+            />
             <SimpleToggle label="Grid" value={showGridLayer} disabled={!calibration} onToggle={(next) => {
               setShowGridLayer(next);
               void persistCanvasViewSettings(showImageLayer, next, showBedMeasurementsLayer);
@@ -916,31 +1049,25 @@ export default function GardenMapEditorScreen() {
             <SegmentedChoice
               options={[
                 { id: "draw", label: "Draw" },
-                { id: "pan", label: "Pan" }
+                { id: "pan", label: "Pan" },
+                ...(calibration?.boundaryPolygon ? [{ id: "boundary", label: "Edit Boundary" }] : [])
               ]}
               selectedId={canvasMode}
               onSelect={(mode) => {
-                setCanvasMode(mode as CanvasMode);
-                if (mode === "pan") {
-                  setSelectedPointIndex(null);
+                if (mode === "boundary") {
+                  startBoundaryEdit();
+                } else {
+                  if (isEditingBoundary) cancelBoundaryEdit();
+                  setCanvasMode(mode as CanvasMode);
+                  if (mode === "pan") {
+                    setSelectedPointIndex(null);
+                  }
                 }
               }}
             />
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: isExportingImage ? theme.disabledActionBackground : theme.secondaryActionBackground },
-              ]}
-              onPress={() => void exportPlannerImage()}
-              disabled={isExportingImage}
-            >
-              <Text style={[styles.secondaryButtonText, { color: isExportingImage ? theme.disabledActionText : theme.secondaryActionText }]}>
-                {isExportingImage ? "Exporting..." : "Export Image"}
-              </Text>
-            </Pressable>
           </View>
           <Text style={[styles.infoText, { color: theme.infoText }]}>
-            Mode: {canvasMode === "draw" ? "Draw/edit points." : "Pan/zoom/twist canvas."}
+            Mode: {canvasMode === "draw" ? "Draw/edit points." : canvasMode === "boundary" ? "Edit boundary points." : "Pan/zoom/twist canvas."}
           </Text>
           <Text style={[styles.infoText, { color: theme.infoText }]}>View rotation: {viewRotationDeg.toFixed(1)}deg</Text>
 
@@ -950,12 +1077,12 @@ export default function GardenMapEditorScreen() {
               bounces={false}
               style={styles.canvasOuterScroll}
               nestedScrollEnabled
-              scrollEnabled={canvasMode === "pan" && zoom > 1.01}
+              scrollEnabled={(canvasMode === "pan" || canvasMode === "boundary") && zoom > 1.01}
             >
               <ScrollView
                 bounces={false}
                 nestedScrollEnabled
-                scrollEnabled={canvasMode === "pan" && zoom > 1.01}
+                scrollEnabled={(canvasMode === "pan" || canvasMode === "boundary") && zoom > 1.01}
               >
                 <View
                   ref={exportCanvasRef}
@@ -964,7 +1091,7 @@ export default function GardenMapEditorScreen() {
                     { width: zoomedWidth, height: zoomedHeight, transform: [{ rotate: `${viewRotationDeg}deg` }] },
                   ]}
                   onLayout={onCanvasLayout}
-                  {...(canvasMode === "pan" ? gestureResponder.panHandlers : {})}
+                  {...((canvasMode === "pan" || canvasMode === "boundary") ? gestureResponder.panHandlers : {})}
                 >
                 {showBaseImage && gardenQuery.data?.photoUri ? (
                   <Image source={{ uri: gardenQuery.data.photoUri }} style={styles.canvasImage} resizeMode="stretch" />
@@ -1013,6 +1140,25 @@ export default function GardenMapEditorScreen() {
                       stroke={theme.mapBoundaryStroke}
                       strokeWidth={showBaseImage && gardenQuery.data?.photoUri ? 3 : 4}
                     />
+                    
+                    {/* Boundary editing handles */}
+                    {canvasMode === "boundary" && gardenBoundary.map((point, index) => {
+                      const x = point.x * canvas.width;
+                      const y = point.y * canvas.height;
+                      const isSelected = selectedBoundaryPoint === index;
+                      return (
+                        <Circle
+                          key={`boundary-handle-${index}`}
+                          cx={x}
+                          cy={y}
+                          r={isSelected ? 8 : 6}
+                          fill={isSelected ? theme.dangerActionBackground : theme.primaryActionBackground}
+                          stroke={theme.borderColor}
+                          strokeWidth={2}
+                          onPress={() => setSelectedBoundaryPoint(index)}
+                        />
+                      );
+                    })}
                     {boundaryMeasurements.map((measurement, index) => (
                       <SvgText
                         key={`boundary-measure-${index.toString()}`}
@@ -1206,67 +1352,127 @@ export default function GardenMapEditorScreen() {
                       }}
                     />
                     ))}
+
+                  {/* Boundary editing handles */}
+                  {canvasMode === "boundary" && currentBoundary &&
+                    currentBoundary.map((point, index) => (
+                    <VertexHandle
+                      key={`boundary-handle-${index.toString()}`}
+                      point={point}
+                      width={canvas.width}
+                      height={canvas.height}
+                      onSelect={() => setSelectedBoundaryPoint(selectedBoundaryPoint === index ? null : index)}
+                      onDrag={(nextPoint) => {
+                        const snappedPoint = snapPoint(nextPoint);
+                        if (!editingBoundary) return;
+                        
+                        // Update the editing boundary state
+                        const updatedBoundary = editingBoundary.map((p, i) => 
+                          i === index ? snappedPoint : p
+                        );
+                        
+                        setEditingBoundary(updatedBoundary);
+                      }}
+                    />
+                    ))}
                 </Pressable>
                 </View>
               </ScrollView>
             </ScrollView>
           </View>
+          
+          {canvasMode !== "boundary" && (
+            <View style={styles.toolbarRow}>
+              <Pressable
+                style={[
+                  styles.secondaryButton,
+                  { backgroundColor: isExportingImage ? theme.disabledActionBackground : theme.secondaryActionBackground },
+                ]}
+                onPress={() => void exportPlannerImage()}
+                disabled={isExportingImage}
+              >
+                <Text style={[styles.secondaryButtonText, { color: isExportingImage ? theme.disabledActionText : theme.secondaryActionText }]}>
+                  {isExportingImage ? "Exporting..." : "Export Image"}
+                </Text>
+              </Pressable>
+            </View>
+          )}
         </View>
 
         <View style={[styles.sectionCard, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>3. Tools</Text>
-          <View style={styles.toolbarRow}>
-            <SimpleToggle
-              label="Snap"
-              value={snapToGrid}
-              disabled={!calibration}
-              onToggle={setSnapToGrid}
-            />
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: canApplyShape || canCloseShape ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
-              ]}
-              onPress={() => {
-                if (presetShape) {
-                  setPresetShape(null);
-                  setShapeDraftMode("points");
-                  return;
-                }
-                closePolygon();
-              }}
-              disabled={!canApplyShape && !canCloseShape}
-            >
-              <Text style={[styles.secondaryButtonText, { color: canApplyShape || canCloseShape ? theme.choiceControlActiveText : theme.choiceControlText }]}>
-                {shapeActionLabel}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: canUndo ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
-              ]}
-              onPress={handleUndo}
-              disabled={!canUndo}
-            >
-              <Text style={[styles.secondaryButtonText, { color: canUndo ? theme.choiceControlActiveText : theme.choiceControlText }]}>Undo</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                { backgroundColor: canDeletePoint ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
-              ]}
-              onPress={deleteSelectedPoint}
-              disabled={!canDeletePoint}
-            >
-              <Text style={[styles.secondaryButtonText, { color: canDeletePoint ? theme.choiceControlActiveText : theme.choiceControlText }]}>Delete Point</Text>
-            </Pressable>
-            {canCancelEdit && (
-              <Pressable style={[styles.secondaryButton, { backgroundColor: theme.primaryActionBackground }]} onPress={resetDraft}>
-                <Text style={[styles.secondaryButtonText, { color: theme.primaryActionText }]}>Cancel Edit</Text>
+          
+          {canvasMode === "boundary" ? (
+            // Boundary editing tools
+            <>
+              <View style={styles.toolbarRow}>
+                <Text style={[styles.infoText, { color: theme.infoText, flex: 1 }]}>
+                  Drag boundary points to reshape your garden area. Beds outside the new boundary may need to be moved.
+                </Text>
+              </View>
+              <View style={styles.toolbarRow}>
+                <AppButton
+                  label="Cancel"
+                  variant="secondary"
+                  onPress={cancelBoundaryEdit}
+                />
+                <AppButton
+                  label="Save Boundary"
+                  variant="primary"
+                  onPress={() => void saveBoundary()}
+                />
+              </View>
+            </>
+          ) : (
+            // Regular drawing tools
+            <View style={styles.toolbarRow}>
+              <SimpleToggle
+                label="Snap"
+                value={snapToGrid}
+                disabled={!calibration}
+                onToggle={setSnapToGrid}
+              />
+              <Pressable
+                style={[
+                  styles.secondaryButton,
+                  { backgroundColor: canApplyShape || canCloseShape ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
+                ]}
+                onPress={() => {
+                  if (presetShape) {
+                    setPresetShape(null);
+                    setShapeDraftMode("points");
+                    return;
+                  }
+                  closePolygon();
+                }}
+                disabled={!canApplyShape && !canCloseShape}
+              >
+                <Text style={[styles.secondaryButtonText, { color: canApplyShape || canCloseShape ? theme.choiceControlActiveText : theme.choiceControlText }]}>
+                  {shapeActionLabel}
+                </Text>
               </Pressable>
-            )}
-          </View>
+              <Pressable
+                style={[
+                  styles.secondaryButton,
+                  { backgroundColor: canUndo ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
+                ]}
+                onPress={handleUndo}
+                disabled={!canUndo}
+              >
+                <Text style={[styles.secondaryButtonText, { color: canUndo ? theme.choiceControlActiveText : theme.choiceControlText }]}>Undo</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.secondaryButton,
+                  { backgroundColor: canDeletePoint ? theme.choiceControlActiveBackground : theme.choiceControlBackground },
+                ]}
+                onPress={deleteSelectedPoint}
+                disabled={!canDeletePoint}
+              >
+                <Text style={[styles.secondaryButtonText, { color: canDeletePoint ? theme.choiceControlActiveText : theme.choiceControlText }]}>Delete Point</Text>
+              </Pressable>
+            </View>
+          )}
           <Text style={[styles.infoText, { color: theme.infoText }]}>Twist and zoom in Pan mode for easier drawing alignment.</Text>
           {showGridLayer && calibration && <Text style={[styles.infoText, { color: theme.infoText }]}>Grid spacing: 1 meter.</Text>}
           {presetShape && (
@@ -2134,7 +2340,7 @@ function getBoundaryMeasurementLabels(
       x,
       y,
       angle,
-      label: meters >= 10 ? `${Math.round(meters)}m` : `${meters.toFixed(1)}m`,
+      label: `${meters.toFixed(1)}m`,
     });
   }
   return labels;
@@ -2303,7 +2509,7 @@ function getPolygonEdgeMeasurementLabels(
       x,
       y,
       angle,
-      label: meters >= 10 ? `${Math.round(meters)}m` : `${meters.toFixed(1)}m`,
+      label: `${meters.toFixed(1)}m`,
     });
   }
   return labels;

@@ -194,7 +194,6 @@ export default function GardensTabScreen() {
               >
                 <Text style={[styles.name, { color: theme.textPrimary }]}>{item.name}</Text>
                 {item.locationLabel && <Text style={[styles.locationText, { color: theme.textMuted }]}>{item.locationLabel}</Text>}
-                <Text style={[styles.coordsText, { color: theme.infoText }]}>Coordinates: {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}</Text>
                 <View style={styles.metaRow}>
                   <StatusChip label={`Area ${item.scaleCalibration?.boundaryAreaSqM ? `${item.scaleCalibration.boundaryAreaSqM.toFixed(1)} sqm` : "not set"}`} />
                   <StatusChip label={`Beds ${summaries[item.id]?.bedCount ?? 0}`} />
