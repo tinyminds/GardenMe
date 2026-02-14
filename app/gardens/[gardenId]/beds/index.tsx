@@ -1,5 +1,5 @@
 
-import { Link, useLocalSearchParams } from "expo-router";
+import { Link, useLocalSearchParams, useRouter } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -7,6 +7,8 @@ import * as ImagePicker from "expo-image-picker";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { loadGardenBedPlannerSettings, saveGardenBedPlannerSettings, type GardenBedPlannerSettings } from "@/core/settings/gardenBedPlannerSettings";
 import { loadBedPhotoLogSettings, saveBedPhotoLogSettings, type BedPhotoLogEntry, type BedPhotoLogSettings } from "@/core/settings/bedPhotoLogSettings";
+import { QueryInvalidationPatterns, QueryConfig } from "@/utils/queryOptimization";
+import { SkeletonLoader, EmptyStateVariants, LoadingIndicator, ErrorState } from "@/ui/components/LoadingStates";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/SqliteCompanionPlantingRepository";
 import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/SqliteGardenCropWishlistRepository";
@@ -105,6 +107,7 @@ const MAX_SUGGESTIONS_PER_BED = 2;
 
 export default function BedsListScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
   const params = useLocalSearchParams<{ gardenId?: string | string[] }>();
   const gardenId = Array.isArray(params.gardenId) ? params.gardenId[0] : params.gardenId;
   const [hasSpareSpaceByBed, setHasSpareSpaceByBed] = useState<Record<string, boolean>>({});
@@ -130,6 +133,7 @@ export default function BedsListScreen() {
       if (!gardenId) throw new Error("Missing gardenId");
       return bedRepository.listByGarden(gardenId);
     },
+    ...QueryConfig.gardenData,
   });
 
   const gardenQuery = useQuery({
@@ -148,6 +152,7 @@ export default function BedsListScreen() {
       if (!gardenId) return [];
       return wishlistRepository.listByGarden(gardenId);
     },
+    ...QueryConfig.gardenData,
   });
 
   const plantingsQuery = useQuery({
@@ -164,6 +169,7 @@ export default function BedsListScreen() {
     queryFn: async () => {
       return companionRepository.listAll();
     },
+    ...QueryConfig.staticData,
   });
   const bedPlannerSettingsQuery = useQuery({
     queryKey: ["garden-bed-planner-settings"],
@@ -186,8 +192,8 @@ export default function BedsListScreen() {
       });
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      if (!gardenId) return;
+      await QueryInvalidationPatterns.bedPlanningChange(gardenId);
     },
   });
 
@@ -196,9 +202,8 @@ export default function BedsListScreen() {
       await wishlistRepository.markPlanted(payload);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["garden-plantings", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      if (!gardenId) return;
+      await QueryInvalidationPatterns.plantingStatusChange(gardenId);
     },
   });
 
@@ -207,9 +212,8 @@ export default function BedsListScreen() {
       await wishlistRepository.finishPlanting(payload);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["garden-plantings", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      if (!gardenId) return;
+      await QueryInvalidationPatterns.plantingStatusChange(gardenId);
     },
   });
 
@@ -220,9 +224,8 @@ export default function BedsListScreen() {
       }
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["garden-plantings", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      if (!gardenId) return;
+      await QueryInvalidationPatterns.plantingStatusChange(gardenId);
     },
   });
 
@@ -236,8 +239,8 @@ export default function BedsListScreen() {
       });
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
-      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      if (!gardenId) return;
+      await QueryInvalidationPatterns.bedPlanningChange(gardenId);
     },
   });
 
@@ -252,14 +255,14 @@ export default function BedsListScreen() {
       });
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      if (!gardenId) return;
+      await QueryInvalidationPatterns.bedPropertiesChange(gardenId);
     },
   });
 
   const invalidateBedsQueries = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
-    await queryClient.invalidateQueries({ queryKey: ["garden-plantings", gardenId] });
-    await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+    if (!gardenId) return;
+    await QueryInvalidationPatterns.plantingStatusChange(gardenId);
   };
 
   const queueUndoToast = (label: string, action: () => Promise<void>) => {
@@ -959,10 +962,20 @@ export default function BedsListScreen() {
           </View>
         )}
 
-        {bedsQuery.isLoading && <Text style={[styles.empty, { color: theme.textMuted }]}>Loading beds...</Text>}
-        {bedsQuery.isError && <Text style={[styles.empty, { color: theme.textMuted }]}>Could not load beds.</Text>}
+        {bedsQuery.isLoading && (
+          <SkeletonLoader count={2} />
+        )}
+        {bedsQuery.isError && (
+          <ErrorState
+            title="Could not load beds"
+            subtitle="Please check your connection and try again."
+            onRetry={() => bedsQuery.refetch()}
+          />
+        )}
         {!bedsQuery.isLoading && !bedsQuery.isError && bedCards.length === 0 && (
-          <Text style={[styles.empty, { color: theme.textMuted }]}>No beds yet. Add beds in Garden Design.</Text>
+          <EmptyStateVariants.Beds 
+            onAction={() => router.push(`/gardens/${gardenId}/map`)}
+          />
         )}
 
         {plannerMode === "list" && bedCards.map((card) => {

@@ -1,6 +1,6 @@
 import { Stack } from "expo-router";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, memo } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import Constants from "expo-constants";
 import { initDatabase } from "@/core/db/sqlite";
@@ -13,6 +13,7 @@ import { AppTopBar } from "@/ui/components/AppTopBar";
 import { PersistentNav } from "@/ui/components/PersistentNav";
 import { ThemeProvider, useTheme } from "@/ui/theme/ThemeProvider";
 import { DEFAULT_THEME_TOKENS } from "@/ui/theme/themeTokens";
+import { ErrorBoundary } from "@/ui/components/ErrorBoundary";
 
 const gardenRepository = new SqliteGardenRepository();
 
@@ -60,25 +61,31 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <ThemedShell />
+        <ErrorBoundary>
+          <ThemedShell />
+        </ErrorBoundary>
       </ThemeProvider>
     </QueryClientProvider>
   );
 }
 
-function ThemedShell() {
+const ThemedShell = memo(function ThemedShell() {
   const { theme } = useTheme();
   return (
     <View style={[styles.shell, { backgroundColor: theme.appBackground }]}>
-      <SelectedGardenBootstrap />
+      <ErrorBoundary>
+        <SelectedGardenBootstrap />
+      </ErrorBoundary>
       <AppTopBar />
       <View style={styles.content}>
-        <Stack screenOptions={{ headerShown: false }} />
+        <ErrorBoundary>
+          <Stack screenOptions={{ headerShown: false }} />
+        </ErrorBoundary>
       </View>
       <PersistentNav />
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   shell: { flex: 1, backgroundColor: DEFAULT_THEME_TOKENS.appBackground },

@@ -20,6 +20,8 @@ import { AppButton } from "@/ui/components/AppButton";
 import { SegmentedChoice } from "@/ui/components/SegmentedChoice";
 import { buildGardenCalendarItems, getCurrentMonthItems } from "@/features/calendar/services/calendarPlanner";
 import { getCalendarTypeMeta, getCalendarVisualKind } from "@/features/calendar/services/calendarPresentation";
+import { QueryConfig } from "@/utils/queryOptimization";
+import { LoadingIndicator, EmptyStateVariants } from "@/ui/components/LoadingStates";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 
 const bedRepository = new SqliteBedRepository();
@@ -62,6 +64,7 @@ export default function DashboardScreen() {
       if (!activeGardenId) return [];
       return bedRepository.listByGarden(activeGardenId);
     },
+    ...QueryConfig.gardenData,
   });
 
   const featuresQuery = useQuery({
@@ -71,6 +74,7 @@ export default function DashboardScreen() {
       if (!activeGardenId) return [];
       return featureRepository.listByGarden(activeGardenId);
     },
+    ...QueryConfig.gardenData,
   });
 
   const growQuery = useQuery({
