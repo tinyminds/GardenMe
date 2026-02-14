@@ -2,7 +2,7 @@
 import { Link, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { loadGardenBedPlannerSettings, saveGardenBedPlannerSettings, type GardenBedPlannerSettings } from "@/core/settings/gardenBedPlannerSettings";
@@ -93,6 +93,12 @@ type FinishDialogState = {
   diseaseName: string;
   notes: string;
 };
+
+type PhotoViewerState = {
+  photo: BedPhotoLogEntry;
+  bedName: string;
+};
+
 type PlannerMode = "list" | "visual";
 
 const MAX_SUGGESTIONS_PER_BED = 2;
@@ -110,6 +116,8 @@ export default function BedsListScreen() {
   const [undoToast, setUndoToast] = useState<UndoToastState | null>(null);
   const [undoPending, setUndoPending] = useState(false);
   const [finishDialog, setFinishDialog] = useState<FinishDialogState | null>(null);
+  const [photoViewer, setPhotoViewer] = useState<PhotoViewerState | null>(null);
+  const [photoNotesInputFocused, setPhotoNotesInputFocused] = useState(false);
   const [plannerMode, setPlannerMode] = useState<PlannerMode>("list");
   const [selectedVisualBedId, setSelectedVisualBedId] = useState<string | null>(null);
   const [plannerSettingsHydratedGardenId, setPlannerSettingsHydratedGardenId] = useState<string | null>(null);
@@ -836,6 +844,53 @@ export default function BedsListScreen() {
     queryClient.setQueryData(["bed-photo-log-settings"], next);
   };
 
+  const deleteBedPhoto = async (bedId: string, photoId: string) => {
+    if (!gardenId) return;
+    Alert.alert(
+      "Delete Photo",
+      "Remove this photo from the bed log?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive",
+          onPress: async () => {
+            const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
+            const current = cached ?? (await loadBedPhotoLogSettings());
+            const currentPhotos = current[gardenId] ?? [];
+            const filteredPhotos = currentPhotos.filter(photo => photo.id !== photoId);
+            const next: BedPhotoLogSettings = {
+              ...current,
+              [gardenId]: filteredPhotos,
+            };
+            await saveBedPhotoLogSettings(next);
+            queryClient.setQueryData(["bed-photo-log-settings"], next);
+          }
+        }
+      ]
+    );
+  };
+
+  const updatePhotoNotes = async (photoId: string, notes: string) => {
+    if (!gardenId) return;
+    const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
+    const current = cached ?? (await loadBedPhotoLogSettings());
+    const currentPhotos = current[gardenId] ?? [];
+    const updatedPhotos = currentPhotos.map(photo => 
+      photo.id === photoId ? { ...photo, notes: notes.trim() || undefined } : photo
+    );
+    const next: BedPhotoLogSettings = {
+      ...current,
+      [gardenId]: updatedPhotos,
+    };
+    await saveBedPhotoLogSettings(next);
+    queryClient.setQueryData(["bed-photo-log-settings"], next);
+  };
+
+  const openPhotoViewer = (photo: BedPhotoLogEntry, bedName: string) => {
+    setPhotoViewer({ photo, bedName });
+  };
+
   const selectedVisualCard = useMemo(
     () => bedCards.find((card) => card.bed.id === selectedVisualBedId) ?? null,
     [bedCards, selectedVisualBedId]
@@ -1048,9 +1103,22 @@ export default function BedsListScreen() {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>
                     {(bedPhotoRowsByBedId.get(card.bed.id) ?? []).map((photo) => (
                       <View key={photo.id} style={[styles.photoCard, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
-                        <Image source={{ uri: photo.uri }} style={[styles.photoThumb, { backgroundColor: theme.chipBackground }]} />
+                        <Pressable
+                          style={[styles.photoDeleteButton, { backgroundColor: theme.dangerActionBackground }]}
+                          onPress={() => deleteBedPhoto(card.bed.id, photo.id)}
+                        >
+                          <Text style={[styles.photoDeleteButtonText, { color: theme.dangerActionText }]}>×</Text>
+                        </Pressable>
+                        <Pressable onPress={() => openPhotoViewer(photo, card.bed.name)}>
+                          <Image source={{ uri: photo.uri }} style={[styles.photoThumb, { backgroundColor: theme.chipBackground }]} />
+                        </Pressable>
                         <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{formatDate(photo.createdAt)}</Text>
                         <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{photo.source === "camera" ? "Camera" : "Gallery"}</Text>
+                        {photo.notes && (
+                          <Pressable onPress={() => openPhotoViewer(photo, card.bed.name)}>
+                            <Text style={[styles.photoNotes, { color: theme.textPrimary }]} numberOfLines={2}>{photo.notes}</Text>
+                          </Pressable>
+                        )}
                       </View>
                     ))}
                   </ScrollView>
@@ -1303,9 +1371,18 @@ export default function BedsListScreen() {
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>
                         {(bedPhotoRowsByBedId.get(card.bed.id) ?? []).map((photo) => (
                           <View key={`visual-${photo.id}`} style={[styles.photoCard, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
-                            <Image source={{ uri: photo.uri }} style={[styles.photoThumb, { backgroundColor: theme.chipBackground }]} />
+                            <Pressable
+                              style={[styles.photoDeleteButton, { backgroundColor: theme.dangerActionBackground }]}
+                              onPress={() => deleteBedPhoto(card.bed.id, photo.id)}
+                            >
+                              <Text style={[styles.photoDeleteButtonText, { color: theme.dangerActionText }]}>×</Text>
+                            </Pressable>
+                            <Pressable onPress={() => openPhotoViewer(photo, card.bed.name)}>
+                              <Image source={{ uri: photo.uri }} style={[styles.photoThumb, { backgroundColor: theme.chipBackground }]} />
+                            </Pressable>
                             <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{formatDate(photo.createdAt)}</Text>
                             <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{photo.source === "camera" ? "Camera" : "Gallery"}</Text>
+                            {photo.notes && <Text style={[styles.photoNotes, { color: theme.textPrimary }]} numberOfLines={2}>{photo.notes}</Text>}
                           </View>
                         ))}
                       </ScrollView>
@@ -1495,6 +1572,66 @@ export default function BedsListScreen() {
           <Pressable style={[styles.undoButton, { backgroundColor: theme.secondaryActionBackground }]} onPress={handleUndoPress} disabled={undoPending}>
             <Text style={[styles.undoButtonText, { color: theme.secondaryActionText }]}>{undoPending ? "Undoing..." : "Undo"}</Text>
           </Pressable>
+        </View>
+      )}
+      {photoViewer && (
+        <View style={[styles.photoViewerOverlay, { backgroundColor: theme.modalBackdrop }]}>
+          <View style={[styles.photoViewerModal, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+            <View style={styles.photoViewerHeader}>
+              <Text style={[styles.photoViewerTitle, { color: theme.textPrimary }]}>
+                {photoViewer.bedName} - {formatDate(photoViewer.photo.createdAt)}
+              </Text>
+              <Pressable
+                style={[styles.photoViewerClose, { backgroundColor: theme.appBackground }]}
+                onPress={() => setPhotoViewer(null)}
+              >
+                <Text style={[styles.photoViewerCloseText, { color: theme.textPrimary }]}>×</Text>
+              </Pressable>
+            </View>
+            
+            <ScrollView contentContainerStyle={styles.photoViewerContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Image 
+                source={{ uri: photoViewer.photo.uri }} 
+                style={styles.photoViewerImage}
+                resizeMode="contain"
+              />
+              
+              <View style={styles.photoViewerFooter}>
+                <Text style={[styles.photoViewerSource, { color: theme.textMuted }]}>
+                  Source: {photoViewer.photo.source === "camera" ? "Camera" : "Gallery"}
+                </Text>
+                <TextInput
+                  value={photoViewer.photo.notes || ""}
+                  onChangeText={(text) => {
+                    setPhotoViewer(prev => prev ? {
+                      ...prev,
+                      photo: { ...prev.photo, notes: text }
+                    } : null);
+                  }}
+                  onFocus={() => setPhotoNotesInputFocused(true)}
+                  onBlur={() => {
+                    setPhotoNotesInputFocused(false);
+                    if (photoViewer) {
+                      updatePhotoNotes(photoViewer.photo.id, photoViewer.photo.notes || "");
+                    }
+                  }}
+                  placeholder="Add notes about this photo..."
+                  style={[styles.photoViewerNotesInput, { 
+                    borderColor: theme.borderColor, 
+                    backgroundColor: theme.appBackground, 
+                    color: theme.textPrimary 
+                  }]}
+                  multiline
+                  numberOfLines={4}
+                />
+                {photoNotesInputFocused && (
+                  <Text style={[styles.photoViewerSaveInfo, { color: theme.textMuted }]}>
+                    Tap away to save notes
+                  </Text>
+                )}
+              </View>
+            </ScrollView>
+          </View>
         </View>
       )}
     </View>
@@ -1925,9 +2062,11 @@ const styles = StyleSheet.create({
   optionChipText: { textTransform: "capitalize", fontSize: 12 },
   optionsScroll: { maxHeight: 170 },
   photoStrip: { gap: 8, paddingRight: 6 },
-  photoCard: { borderRadius: 10, padding: 6, gap: 2, width: 120 },
+  photoCard: { borderRadius: 10, padding: 6, gap: 2, width: 120, position: "relative" },
   photoThumb: { width: 106, height: 72, borderRadius: 7 },
   photoMeta: { fontSize: 10 },
+  photoDeleteButton: { position: "absolute", top: 2, right: 2, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", zIndex: 1 },
+  photoDeleteButtonText: { fontSize: 16, fontWeight: "800", lineHeight: 16 },
   linkText: { fontWeight: "700", marginTop: 2 },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   zoomButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
@@ -2002,5 +2141,80 @@ const styles = StyleSheet.create({
   disabledToggle: {
     opacity: 0.5,
   },
+  photoNotes: {
+    fontSize: 10,
+    marginTop: 4,
+    flexWrap: "wrap",
+    lineHeight: 12,
+  },
+  photoViewerOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "flex-start",
+    alignItems: "center",
+    paddingTop: 60,
+    paddingHorizontal: 20,
+  },
+  photoViewerModal: {
+    borderRadius: 12,
+    padding: 0,
+    overflow: "hidden",
+    width: "100%",
+    maxHeight: "70%",
+    flex: 0,
+  },
+  photoViewerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  photoViewerTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  photoViewerClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoViewerImage: {
+    width: "100%",
+    height: 300,
+    resizeMode: "contain",
+  },
+  photoViewerFooter: {
+    padding: 16,
+    paddingBottom: 120,
+  },
+  photoViewerNotesInput: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 80,
+    textAlignVertical: "top",
+    fontSize: 14,
+  },
+  photoViewerCloseText: {
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  photoViewerSource: {
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  photoViewerSaveInfo: {
+    fontSize: 11,
+    marginTop: 8,
+    textAlign: "center",
+    fontStyle: "italic",
+  },
+
 });
 

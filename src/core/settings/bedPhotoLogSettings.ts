@@ -12,6 +12,7 @@ export type BedPhotoLogEntry = {
   uri: string;
   source: "camera" | "gallery";
   createdAt: string;
+  notes?: string;
 };
 
 export type BedPhotoLogSettings = Record<string, BedPhotoLogEntry[]>;
