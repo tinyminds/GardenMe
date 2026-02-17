@@ -90,7 +90,7 @@ type GrowListCsvRow = {
   isPerennial: boolean;
 };
 
-type ListStatusFilter = "all" | "planned" | "growing" | "started_indoors";
+type ListStatusFilter = Set<"planned" | "growing" | "started_indoors" | "perennial" | "annual" | "unassigned_beds">;
 type SuggestionTab = "companions" | "common" | "unusual";
 
 const COMMON_CROP_SUGGESTIONS = [
@@ -170,7 +170,7 @@ export default function GardenGrowListScreen() {
   const [entryDrafts, setEntryDrafts] = useState<Record<string, CropEntryDraft>>({});
   const [listSearch, setListSearch] = useState("");
   const [listSortDirection, setListSortDirection] = useState<"asc" | "desc">("asc");
-  const [listStatusFilter, setListStatusFilter] = useState<ListStatusFilter>("all");
+  const [listStatusFilter, setListStatusFilter] = useState<ListStatusFilter>(new Set());
   const [selectedWishlistIds, setSelectedWishlistIds] = useState<Record<string, boolean>>({});
   const [suggestionTab, setSuggestionTab] = useState<SuggestionTab>("companions");
   const [suggestionRefreshKey, setSuggestionRefreshKey] = useState(0);
@@ -907,9 +907,43 @@ export default function GardenGrowListScreen() {
     const list = [...(wishlistQuery.data ?? [])].filter((item) => {
       const effectiveStatus = entryDrafts[item.id]?.status ?? item.status;
       const effectiveStartedIndoorsAt = entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt;
-      if (listStatusFilter === "planned" && effectiveStatus !== "wanted") return false;
-      if (listStatusFilter === "growing" && effectiveStatus !== "already_growing") return false;
-      if (listStatusFilter === "started_indoors" && !effectiveStartedIndoorsAt) return false;
+      const effectiveIsPerennial = entryDrafts[item.id]?.isPerennial ?? item.isPerennial;
+      
+      // Keep items visible if they have ACTUAL unsaved changes, not just draft entries
+      const hasUnsavedChanges = Boolean(entryDrafts[item.id]) && (
+        entryDrafts[item.id]?.status !== item.status ||
+        (entryDrafts[item.id]?.startedIndoorsAt ?? null) !== (item.startedIndoorsAt ?? null) ||
+        (entryDrafts[item.id]?.bedId ?? null) !== (item.bedId ?? null) ||
+        entryDrafts[item.id]?.isPerennial !== item.isPerennial ||
+        (entryDrafts[item.id]?.varietyName ?? "") !== (item.varietyName ?? "") ||
+        entryDrafts[item.id]?.supportNeeded !== item.supportNeeded ||
+        entryDrafts[item.id]?.quantity !== Math.max(1, item.quantity ?? 1)
+      );
+      if (hasUnsavedChanges) {
+        // Still apply search filter for items with unsaved changes
+        if (!searchTerm) return true;
+        const haystack = [
+          item.plant.commonName,
+          item.varietyName ?? "",
+          item.plant.scientificName ?? "",
+          item.plant.familyName ?? "",
+          item.bedName ?? "",
+          effectiveStatus === "already_growing" ? "already growing" : "wanted",
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(searchTerm);
+      }
+      
+      // Apply multiple filters - all selected filters must match
+      if (listStatusFilter.has("planned") && effectiveStatus !== "wanted") return false;
+      if (listStatusFilter.has("growing") && effectiveStatus !== "already_growing") return false;
+      if (listStatusFilter.has("started_indoors") && !effectiveStartedIndoorsAt) return false;
+      if (listStatusFilter.has("perennial") && !effectiveIsPerennial) return false;
+      if (listStatusFilter.has("annual") && effectiveIsPerennial) return false;
+      if (listStatusFilter.has("unassigned_beds") && item.bedId) return false;
+      
+      // Apply search filter to items that passed the status/type filters
       if (!searchTerm) return true;
       const haystack = [
         item.plant.commonName,
@@ -1235,22 +1269,132 @@ export default function GardenGrowListScreen() {
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Plant List</Text>
           <View style={styles.listControls}>
-            <TextInput
-              value={listSearch}
-              onChangeText={setListSearch}
-              placeholder="Search list"
-              style={[styles.input, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
-              autoCapitalize="none"
-            />
-            <View style={styles.configChips}>
-              <FilterPill label="A-Z" selected={listSortDirection === "asc"} onPress={() => setListSortDirection("asc")} />
-              <FilterPill label="Z-A" selected={listSortDirection === "desc"} onPress={() => setListSortDirection("desc")} />
+            <View style={[styles.searchContainer, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
+              <TextInput
+                value={listSearch}
+                onChangeText={setListSearch}
+                placeholder="Search list"
+                style={[styles.searchInput, { color: theme.textPrimary }]}
+                autoCapitalize="none"
+              />
+              {listSearch.length > 0 && (
+                <Pressable
+                  style={styles.clearButton}
+                  onPress={() => setListSearch("")}
+                >
+                  <Text style={[styles.clearButtonText, { color: theme.textMuted }]}>×</Text>
+                </Pressable>
+              )}
             </View>
             <View style={styles.configChips}>
-              <FilterPill label="Both" selected={listStatusFilter === "all"} onPress={() => setListStatusFilter("all")} />
-              <FilterPill label="Planned" selected={listStatusFilter === "planned"} onPress={() => setListStatusFilter("planned")} />
-              <FilterPill label="Growing" selected={listStatusFilter === "growing"} onPress={() => setListStatusFilter("growing")} />
-              <FilterPill label="Started indoors" selected={listStatusFilter === "started_indoors"} onPress={() => setListStatusFilter("started_indoors")} />
+              <Pressable
+                style={[
+                  styles.sortButton,
+                  {
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    backgroundColor: theme.filterControlBackground,
+                    borderColor: theme.filterControlBorder,
+                  },
+                ]}
+                onPress={() => setListSortDirection(listSortDirection === "asc" ? "desc" : "asc")}
+              >
+                <Text style={[styles.sortLabel, { color: theme.filterControlText }]}>Name</Text>
+                <Text style={[styles.sortArrow, { color: theme.filterControlText }]}>
+                  {listSortDirection === "asc" ? "↑" : "↓"}
+                </Text>
+              </Pressable>
+              <FilterPill 
+                label="Clear filters" 
+                selected={listStatusFilter.size === 0} 
+                onPress={() => setListStatusFilter(new Set())} 
+              />
+              <Text style={[styles.countText, { color: theme.textMuted }]}>
+                {listStatusFilter.size === 0 
+                  ? `${visibleWishlistItems.length} plants`
+                  : `${visibleWishlistItems.length} of ${wishlistQuery.data?.length ?? 0} plants`
+                }
+              </Text>
+            </View>
+            <View style={styles.configChips}>
+              <FilterPill 
+                label="Planned" 
+                selected={listStatusFilter.has("planned")} 
+                onPress={() => setListStatusFilter(prev => {
+                  const next = new Set(prev);
+                  if (next.has("planned")) {
+                    next.delete("planned");
+                  } else {
+                    next.add("planned");
+                    next.delete("growing"); // Remove growing since they're mutually exclusive
+                  }
+                  return next;
+                })} 
+              />
+              <FilterPill 
+                label="Growing" 
+                selected={listStatusFilter.has("growing")} 
+                onPress={() => setListStatusFilter(prev => {
+                  const next = new Set(prev);
+                  if (next.has("growing")) {
+                    next.delete("growing");
+                  } else {
+                    next.add("growing");
+                    next.delete("planned"); // Remove planned since they're mutually exclusive
+                  }
+                  return next;
+                })} 
+              />
+              <FilterPill 
+                label="Started indoors" 
+                selected={listStatusFilter.has("started_indoors")} 
+                onPress={() => setListStatusFilter(prev => {
+                  const next = new Set(prev);
+                  if (next.has("started_indoors")) next.delete("started_indoors"); 
+                  else next.add("started_indoors");
+                  return next;
+                })} 
+              />
+            </View>
+            <View style={styles.configChips}>
+              <FilterPill 
+                label="Perennial" 
+                selected={listStatusFilter.has("perennial")} 
+                onPress={() => setListStatusFilter(prev => {
+                  const next = new Set(prev);
+                  if (next.has("perennial")) {
+                    next.delete("perennial");
+                  } else {
+                    next.add("perennial");
+                    next.delete("annual"); // Remove annual since they're mutually exclusive
+                  }
+                  return next;
+                })} 
+              />
+              <FilterPill 
+                label="Annual" 
+                selected={listStatusFilter.has("annual")} 
+                onPress={() => setListStatusFilter(prev => {
+                  const next = new Set(prev);
+                  if (next.has("annual")) {
+                    next.delete("annual");
+                  } else {
+                    next.add("annual");
+                    next.delete("perennial"); // Remove perennial since they're mutually exclusive
+                  }
+                  return next;
+                })} 
+              />
+              <FilterPill 
+                label="Unassigned beds" 
+                selected={listStatusFilter.has("unassigned_beds")} 
+                onPress={() => setListStatusFilter(prev => {
+                  const next = new Set(prev);
+                  if (next.has("unassigned_beds")) next.delete("unassigned_beds"); 
+                  else next.add("unassigned_beds");
+                  return next;
+                })} 
+              />
             </View>
             <View style={[styles.bulkDivider, { backgroundColor: theme.borderColor }]} />
             <View style={styles.configChips}>
@@ -3412,6 +3556,37 @@ const styles = StyleSheet.create({
   },
   blockingOverlayText: { fontSize: 14, fontWeight: "700", textAlign: "center" },
   blockingOverlaySubtext: { fontSize: 12, textAlign: "center" },
+  sortButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  sortLabel: { fontWeight: "700" },
+  sortArrow: { fontSize: 12, fontWeight: "700" },
+  countText: { fontSize: 12, fontWeight: "600", alignSelf: "center" },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  searchInput: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  clearButton: {
+    padding: 4,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  clearButtonText: {
+    fontSize: 18,
+    fontWeight: "400",
+    lineHeight: 18,
+  },
 });
-
-
