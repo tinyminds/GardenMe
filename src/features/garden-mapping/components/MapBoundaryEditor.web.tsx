@@ -19,6 +19,9 @@ export type MapBoundaryEditorProps = {
   onSelectPoint: (index: number) => void;
   onDragPoint: (index: number, point: LatLngPoint) => void;
   onRequestSnapshot?: (capture: () => Promise<MapSnapshotResult>) => void;
+  onMapReady?: () => void;
+  onMapLayout?: (size: { width: number; height: number }) => void;
+  onMapTilesLoaded?: () => void;
 };
 
 export default function MapBoundaryEditor(_props: MapBoundaryEditorProps) {
