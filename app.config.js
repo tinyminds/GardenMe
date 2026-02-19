@@ -3,7 +3,7 @@ const appJson = require("./app.json");
 module.exports = ({ config }) => {
   const base = config ?? appJson.expo;
   const androidMapsApiKey = process.env.GOOGLE_MAPS_ANDROID_API_KEY?.trim();
-  if (!androidMapsApiKey) {
+  if (process.env.EAS_BUILD === "1" && !androidMapsApiKey) {
     throw new Error("Missing GOOGLE_MAPS_ANDROID_API_KEY in build environment.");
   }
 
@@ -14,7 +14,7 @@ module.exports = ({ config }) => {
       config: {
         ...(base.android?.config ?? {}),
         googleMaps: {
-          apiKey: androidMapsApiKey,
+          apiKey: androidMapsApiKey ?? "",
         },
       },
     },

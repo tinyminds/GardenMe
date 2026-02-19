@@ -2,7 +2,7 @@ import * as Location from "expo-location";
 import area from "@turf/area";
 import { polygon as turfPolygon } from "@turf/helpers";
 import { Link, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -58,10 +58,6 @@ export default function GardenSetupScreen() {
   const [locatingUser, setLocatingUser] = useState(false);
   const [captureMapSnapshot, setCaptureMapSnapshot] = useState<(() => Promise<MapSnapshotResult>) | null>(null);
   const [locationHydrated, setLocationHydrated] = useState(false);
-  const [mapReadyAlerted, setMapReadyAlerted] = useState(false);
-  const [mapLayoutAlerted, setMapLayoutAlerted] = useState(false);
-  const [mapTilesLoaded, setMapTilesLoaded] = useState(false);
-  const mapTilesTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Canvas preview for measurements mode
   const [measurementCanvas, setMeasurementCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
@@ -75,43 +71,6 @@ export default function GardenSetupScreen() {
       return gardenRepository.getById(gardenId);
     },
   });
-
-  const showDebugAlert = (title: string, details: Record<string, unknown> | string) => {
-    const message = typeof details === "string" ? details : JSON.stringify(details, null, 2);
-    console.log(`[MapDiag] ${title}`, details);
-    Alert.alert(`MapDiag: ${title}`, message.length > 3800 ? `${message.slice(0, 3800)}...` : message);
-  };
-
-  const clearMapTilesTimeout = () => {
-    if (mapTilesTimeoutRef.current) {
-      clearTimeout(mapTilesTimeoutRef.current);
-      mapTilesTimeoutRef.current = null;
-    }
-  };
-
-  const runMapDiagnostics = async () => {
-    try {
-      const servicesEnabled = await Location.hasServicesEnabledAsync();
-      const foregroundPermission = await Location.getForegroundPermissionsAsync();
-      const backgroundPermission = await Location.getBackgroundPermissionsAsync();
-      showDebugAlert("Device + Permission Snapshot", {
-        platform: Platform.OS,
-        servicesEnabled,
-        foregroundStatus: foregroundPermission.status,
-        foregroundGranted: foregroundPermission.granted,
-        foregroundCanAskAgain: foregroundPermission.canAskAgain,
-        backgroundStatus: backgroundPermission.status,
-        mapCenterLatitude: mapCenter.latitude,
-        mapCenterLongitude: mapCenter.longitude,
-        savedGardenLatitude: gardenQuery.data?.latitude ?? null,
-        savedGardenLongitude: gardenQuery.data?.longitude ?? null,
-        mapBoundaryPoints: mapBoundary.length,
-        mapType,
-      });
-    } catch (error) {
-      showDebugAlert("Diagnostics failed", error instanceof Error ? error.message : "Unknown diagnostics error");
-    }
-  };
 
   useEffect(() => {
     // Geographic boundary display is disabled when design begins
@@ -147,17 +106,12 @@ export default function GardenSetupScreen() {
 
       setLocatingUser(true);
       try {
-        showDebugAlert("Hydrate center", "Requesting current device location for initial map center.");
         const nextCenter = await getCurrentUserLocation();
         setMapCenter(nextCenter);
         await gardenRepository.updateLocation(gardenId, nextCenter.latitude, nextCenter.longitude);
         await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
-        showDebugAlert("Hydrate center success", {
-          latitude: nextCenter.latitude,
-          longitude: nextCenter.longitude,
-        });
-      } catch (error) {
-        showDebugAlert("Hydrate center failed", error instanceof Error ? error.message : "Unknown location error");
+      } catch {
+        // Keep default center if lookup fails.
       } finally {
         setLocatingUser(false);
         setLocationHydrated(true);
@@ -173,28 +127,15 @@ export default function GardenSetupScreen() {
     locationHydrated,
   ]);
 
-  useEffect(
-    () => () => {
-      clearMapTilesTimeout();
-    },
-    []
-  );
-
   const moveToCurrentLocation = async () => {
     if (!gardenId) return;
     setLocatingUser(true);
     try {
-      showDebugAlert("My Location tapped", "Requesting foreground location permission and current position.");
       const nextCenter = await getCurrentUserLocation();
       setMapCenter(nextCenter);
       await gardenRepository.updateLocation(gardenId, nextCenter.latitude, nextCenter.longitude);
       await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
-      showDebugAlert("My Location success", {
-        latitude: nextCenter.latitude,
-        longitude: nextCenter.longitude,
-      });
     } catch (error) {
-      showDebugAlert("My Location failed", error instanceof Error ? error.message : "Unknown location error");
       Alert.alert("Location unavailable", `Could not access your location: ${error instanceof Error ? error.message : 'Unknown error'}. You can still search for an address manually.`);
     } finally {
       setLocatingUser(false);
@@ -215,11 +156,9 @@ export default function GardenSetupScreen() {
 
     setSearchingMap(true);
     try {
-      showDebugAlert("Search started", { query });
       const results = await Location.geocodeAsync(query);
       const first = results[0];
       if (!first) {
-        showDebugAlert("Search returned no results", { query, resultsCount: results.length });
         Alert.alert("Location not found", "No results found. Try a more specific address or different search terms.");
         return;
       }
@@ -227,14 +166,7 @@ export default function GardenSetupScreen() {
       setMapCenter(nextCenter);
       await gardenRepository.updateLocation(gardenId, nextCenter.latitude, nextCenter.longitude, query);
       await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
-      showDebugAlert("Search success", {
-        query,
-        resultsCount: results.length,
-        latitude: nextCenter.latitude,
-        longitude: nextCenter.longitude,
-      });
     } catch (error) {
-      showDebugAlert("Search failed", error instanceof Error ? error.message : "Unknown search error");
       Alert.alert("Search error", `Location search failed: ${error instanceof Error ? error.message : 'Unknown error'}. Try a different search term.`);
     } finally {
       setSearchingMap(false);
@@ -313,15 +245,8 @@ export default function GardenSetupScreen() {
           baseHeightForCalibration = snapshot.height;
           await gardenRepository.updatePhoto(gardenId, snapshot.uri, "satellite");
           snapshotSaved = true;
-          showDebugAlert("Map snapshot captured", {
-            uri: snapshot.uri,
-            width: snapshot.width,
-            height: snapshot.height,
-            boundaryPoints: snapshot.boundary.length,
-          });
         }
       } catch {
-        showDebugAlert("Map snapshot failed", "Snapshot capture threw an error. Continuing without image.");
         // keep save flow successful
       }
     }
@@ -360,14 +285,6 @@ export default function GardenSetupScreen() {
 
     await gardenRepository.updateScaleCalibration(gardenId, calibration);
     await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
-    showDebugAlert("Map setup saved", {
-      boundaryAreaSqM,
-      boundaryPoints: boundaryForCalibration.length,
-      metersPerPixel,
-      baseWidth: baseWidthForCalibration,
-      baseHeight: baseHeightForCalibration,
-      snapshotSaved,
-    });
     Alert.alert(
       "Map boundary saved",
       `Garden area: ${boundaryAreaSqM.toFixed(1)} sqm.${snapshotSaved ? " Satellite image captured." : ""} You can edit the boundary on the design page until you add beds or features.`
@@ -598,12 +515,6 @@ export default function GardenSetupScreen() {
                 <View style={[styles.separator, { backgroundColor: theme.borderColor }]} />
 
                 <View style={styles.zoomRow}>
-                  <Pressable
-                    style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
-                    onPress={() => void runMapDiagnostics()}
-                  >
-                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Run Diagnostics</Text>
-                  </Pressable>
                   <Pressable style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]} onPress={undoMapBoundaryPoint}>
                     <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Undo</Text>
                   </Pressable>
@@ -629,44 +540,6 @@ export default function GardenSetupScreen() {
                     setMapBoundary((prev) => prev.map((p, i) => (i === index ? point : p)));
                   }}
                   onRequestSnapshot={(capture) => setCaptureMapSnapshot(() => capture)}
-                  onMapReady={() => {
-                    if (mapReadyAlerted) return;
-                    setMapReadyAlerted(true);
-                    clearMapTilesTimeout();
-                    mapTilesTimeoutRef.current = setTimeout(() => {
-                      if (!mapTilesLoaded) {
-                        showDebugAlert("Tiles not loaded after map ready", {
-                          hint: "Likely Google Maps key auth/restriction/billing issue.",
-                          checks: [
-                            "Correct key value in build env",
-                            "Package name com.tinyminds.gardenme",
-                            "Play app signing SHA-1",
-                            "Maps SDK for Android enabled",
-                            "Billing active",
-                          ],
-                        });
-                      }
-                    }, 12000);
-                    showDebugAlert("MapView ready", {
-                      mapType,
-                      centerLatitude: mapCenter.latitude,
-                      centerLongitude: mapCenter.longitude,
-                      boundaryPoints: mapBoundary.length,
-                    });
-                  }}
-                  onMapTilesLoaded={() => {
-                    setMapTilesLoaded(true);
-                    clearMapTilesTimeout();
-                    showDebugAlert("Map tiles loaded", "Google map tiles successfully loaded on device.");
-                  }}
-                  onMapLayout={(size) => {
-                    if (mapLayoutAlerted) return;
-                    setMapLayoutAlerted(true);
-                    showDebugAlert("MapView layout", {
-                      width: size.width,
-                      height: size.height,
-                    });
-                  }}
                 />
 
                 <Text style={[styles.infoText, { color: theme.infoText }]}>Boundary points: {mapBoundary.length}{isMapClosed ? " (closed)" : ""}</Text>

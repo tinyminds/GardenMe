@@ -21,9 +21,6 @@ export type MapBoundaryEditorProps = {
   onSelectPoint: (index: number) => void;
   onDragPoint: (index: number, point: LatLngPoint) => void;
   onRequestSnapshot?: (capture: () => Promise<MapSnapshotResult>) => void;
-  onMapReady?: () => void;
-  onMapLayout?: (size: { width: number; height: number }) => void;
-  onMapTilesLoaded?: () => void;
 };
 
 function MapBoundaryEditor(props: MapBoundaryEditorProps) {
@@ -106,12 +103,6 @@ function MapBoundaryEditor(props: MapBoundaryEditorProps) {
           latitudeDelta: 0.004,
           longitudeDelta: 0.004,
         }}
-        onMapReady={() => {
-          props.onMapReady?.();
-        }}
-        onMapLoaded={() => {
-          props.onMapTilesLoaded?.();
-        }}
         onPress={(event) => {
           const { latitude, longitude } = event.nativeEvent.coordinate;
           props.onMapPress({ latitude, longitude });
@@ -120,7 +111,6 @@ function MapBoundaryEditor(props: MapBoundaryEditorProps) {
           const { width, height } = event.nativeEvent.layout;
           if (width > 0 && height > 0) {
             setMapSize({ width, height });
-            props.onMapLayout?.({ width, height });
           }
         }}
       >
