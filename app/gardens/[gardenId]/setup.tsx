@@ -106,17 +106,10 @@ export default function GardenSetupScreen() {
 
       setLocatingUser(true);
       try {
-        const permission = await Location.requestForegroundPermissionsAsync();
-        if (permission.granted) {
-          const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          const nextCenter = {
-            latitude: current.coords.latitude,
-            longitude: current.coords.longitude,
-          };
-          setMapCenter(nextCenter);
-          await gardenRepository.updateLocation(gardenId, nextCenter.latitude, nextCenter.longitude);
-          await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
-        }
+        const nextCenter = await getCurrentUserLocation();
+        setMapCenter(nextCenter);
+        await gardenRepository.updateLocation(gardenId, nextCenter.latitude, nextCenter.longitude);
+        await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
       } catch {
         // Keep default center if lookup fails.
       } finally {
@@ -138,13 +131,7 @@ export default function GardenSetupScreen() {
     if (!gardenId) return;
     setLocatingUser(true);
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert("Location permission needed", "Please allow location access to center the map on your current position.");
-        return;
-      }
-      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const nextCenter = { latitude: current.coords.latitude, longitude: current.coords.longitude };
+      const nextCenter = await getCurrentUserLocation();
       setMapCenter(nextCenter);
       await gardenRepository.updateLocation(gardenId, nextCenter.latitude, nextCenter.longitude);
       await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
@@ -355,7 +342,7 @@ export default function GardenSetupScreen() {
       { x: startX, y: startY + gardenHeightNorm },
     ];
     
-    const totalAreaSqM = BASE_CANVAS_WIDTH * BASE_CANVAS_HEIGHT * metersPerPixel * metersPerPixel;
+    const boundaryAreaSqM = length * width;
 
     const calibration: GardenScaleCalibration = {
       method: "reference_line",
@@ -363,7 +350,7 @@ export default function GardenSetupScreen() {
       baseWidth: BASE_CANVAS_WIDTH,
       baseHeight: BASE_CANVAS_HEIGHT,
       boundaryPolygon,
-      boundaryAreaSqM: totalAreaSqM,
+      boundaryAreaSqM,
       manualLengthM: length,
       manualWidthM: width,
       showBaseImage: false,
@@ -432,8 +419,13 @@ export default function GardenSetupScreen() {
     const length = Number(manualLengthM);
     const width = Number(manualWidthM);
     if (!Number.isFinite(length) || !Number.isFinite(width) || length <= 0 || width <= 0) return [];
+    if (measurementBoundary.length < 4) return [];
     
-    const [topLeft, topRight, bottomRight, bottomLeft] = measurementBoundary;
+    const topLeft = measurementBoundary[0];
+    const topRight = measurementBoundary[1];
+    const bottomRight = measurementBoundary[2];
+    const bottomLeft = measurementBoundary[3];
+    if (!topLeft || !topRight || !bottomRight || !bottomLeft) return [];
     
     return [
       {
@@ -662,6 +654,24 @@ export default function GardenSetupScreen() {
       </SafeAreaView>
     </View>
   );
+}
+
+async function getCurrentUserLocation(): Promise<LatLngPoint> {
+  const servicesEnabled = await Location.hasServicesEnabledAsync();
+  if (!servicesEnabled) {
+    throw new Error("Location services are turned off on this device.");
+  }
+
+  const permission = await Location.requestForegroundPermissionsAsync();
+  if (!permission.granted) {
+    if (!permission.canAskAgain) {
+      throw new Error("Location permission is blocked. Open system settings and allow location for GardenMe.");
+    }
+    throw new Error("Location permission was denied.");
+  }
+
+  const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+  return { latitude: current.coords.latitude, longitude: current.coords.longitude };
 }
 
 function polygonAreaSqMeters(points: LatLngPoint[]): number {

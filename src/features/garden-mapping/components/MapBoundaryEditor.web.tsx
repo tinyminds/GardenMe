@@ -1,6 +1,5 @@
 import { StyleSheet, Text, View } from "react-native";
 import { useTheme } from "@/ui/theme/ThemeProvider";
-import { useTheme } from "@/ui/theme/ThemeProvider";
 
 export type LatLngPoint = { latitude: number; longitude: number };
 export type SnapshotBoundaryPoint = { x: number; y: number };

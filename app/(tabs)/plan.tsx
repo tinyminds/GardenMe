@@ -74,6 +74,7 @@ export default function PlanTabScreen() {
   const bedsReady = bedCount > 0 && growCount > 0;
   const bedsDone = bedsReady && placedCount === growCount;
   const bedsState: StepState = !bedsReady ? "not_ready" : bedsDone ? "done" : "in_progress";
+  const setupLocked = bedCount > 0 || featureCount > 0;
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
@@ -112,8 +113,7 @@ export default function PlanTabScreen() {
             helper={hasSetup ? "Boundary and scale saved." : "Set location, boundary, and scale."}
             href={`/gardens/${selectedGarden.id}/setup`}
             state={setupState}
-            disabled={(bedsQuery.data && bedsQuery.data.length > 0) || (featuresQuery.data && featuresQuery.data.length > 0)}
-            disabledReason={(bedsQuery.data && bedsQuery.data.length > 0) || (featuresQuery.data && featuresQuery.data.length > 0) ? "No longer editable - garden design has begun" : undefined}
+            {...(setupLocked ? { disabled: true, disabledReason: "No longer editable - garden design has begun" } : {})}
           />
           <StepCard
             title="2. Garden Design"

@@ -13,7 +13,6 @@ import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/S
 import { fetchGrowstuffCropDetails, searchGrowstuffPlants, type GrowstuffCropDetails } from "@/features/plants/services/growstuff";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { getPlantingCalendarProfile } from "@/features/plants/services/plantingCalendar";
-import { fetchBestTreflePlantProfile, type TreflePlantProfile } from "@/features/plants/services/trefle";
 import { queryClient } from "@/state/queryClient";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 import { ChoiceChip } from "@/ui/components/ChoiceChip";
@@ -397,7 +396,6 @@ export default function GardenGrowListScreen() {
             plantCatalogRepository,
             gardenQuery.data?.latitude
           );
-          canonical = await enrichCatalogEntryWithTrefleIfMissing(canonical, plantCatalogRepository);
 
           plantCatalogId = canonical.id;
         }
@@ -667,7 +665,6 @@ export default function GardenGrowListScreen() {
                   plantCatalogRepository,
                   gardenQuery.data?.latitude
                 );
-                await enrichCatalogEntryWithTrefleIfMissing(updated, plantCatalogRepository);
               }
             } catch {
               // Keep added plant even if detail enrichment fails.
@@ -677,7 +674,6 @@ export default function GardenGrowListScreen() {
               plantCatalogRepository,
               gardenQuery.data?.latitude
             );
-            await enrichCatalogEntryWithTrefleIfMissing(matched, plantCatalogRepository);
           }
           existingPlantIds.add(matched.id);
           added += 1;
@@ -723,12 +719,15 @@ export default function GardenGrowListScreen() {
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index]!;
         const beforeMeta = item.plant.metaJson ?? "";
-        let next = await enrichCatalogEntryWithCalendarIfMissing(
+        let next = await enrichCatalogEntryWithGrowstuffDetailsIfMissing(
           item.plant,
+          plantCatalogRepository
+        );
+        next = await enrichCatalogEntryWithCalendarIfMissing(
+          next,
           plantCatalogRepository,
           gardenQuery.data?.latitude
         );
-        next = await enrichCatalogEntryWithTrefleIfMissing(next, plantCatalogRepository);
         if ((next.metaJson ?? "") !== beforeMeta) updated += 1;
         if (index < items.length - 1) await waitMs(90);
       }
@@ -1508,11 +1507,6 @@ export default function GardenGrowListScreen() {
                 {item.plant.scientificName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{item.plant.scientificName}</Text>}
                 {item.plant.familyName && <Text style={[styles.wishMeta, { color: theme.textMuted }]}>Family: {item.plant.familyName}</Text>}
                 {(() => {
-                  const trefleStatus = extractTrefleStatus(item.plant.metaJson);
-                  if (!trefleStatus) return null;
-                  return <Text style={[styles.wishMeta, { color: theme.textMuted }]}>{trefleStatus}</Text>;
-                })()}
-                {(() => {
                   const isPlantDataExpanded = Boolean(expandedPlantData[item.id]);
                   const plantDataDraft = plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson);
                   const missingLabels = getMissingPlantDataLabels(plantDataDraft);
@@ -1543,11 +1537,6 @@ export default function GardenGrowListScreen() {
                               const timingStatus = extractTimingStatus(item.plant.metaJson);
                               if (!timingStatus) return null;
                               return <StatusChip label={timingStatus} />;
-                            })()}
-                            {(() => {
-                              const trefleStatus = extractTrefleStatus(item.plant.metaJson);
-                              if (!trefleStatus) return null;
-                              return <StatusChip label={trefleStatus} />;
                             })()}
                           </View>
                           <View style={styles.dataField}>
@@ -2632,34 +2621,6 @@ function buildGrowstuffMetaJson(existingMetaJson: string | undefined, details: G
   return JSON.stringify(merged);
 }
 
-async function enrichCatalogEntryWithTrefleIfMissing(
-  entry: PlantCatalogEntry,
-  repository: SqlitePlantCatalogRepository
-): Promise<PlantCatalogEntry> {
-  if (entry.source !== "growstuff" || !entry.externalId) return entry;
-  if (hasSeasonTimingData(entry.metaJson)) return entry;
-
-  try {
-    const trefle = await fetchBestTreflePlantProfile({
-      commonName: entry.commonName,
-      ...(entry.scientificName ? { scientificName: entry.scientificName } : {}),
-    });
-    if (!trefle) return entry;
-
-    return repository.upsert({
-      source: entry.source,
-      externalId: entry.externalId,
-      commonName: entry.commonName,
-      ...(entry.scientificName ? { scientificName: entry.scientificName } : {}),
-      ...(entry.familyName ? { familyName: entry.familyName } : {}),
-      ...(entry.imageUrl ? { imageUrl: entry.imageUrl } : {}),
-      metaJson: buildTrefleMetaJson(entry.metaJson, trefle),
-    });
-  } catch {
-    return entry;
-  }
-}
-
 async function enrichCatalogEntryWithCalendarIfMissing(
   entry: PlantCatalogEntry,
   repository: SqlitePlantCatalogRepository,
@@ -2684,84 +2645,65 @@ async function enrichCatalogEntryWithCalendarIfMissing(
   });
 }
 
-function hasSeasonTimingData(metaJson?: string): boolean {
+async function enrichCatalogEntryWithGrowstuffDetailsIfMissing(
+  entry: PlantCatalogEntry,
+  repository: SqlitePlantCatalogRepository
+): Promise<PlantCatalogEntry> {
+  if (entry.source !== "growstuff" || !entry.externalId) return entry;
+  if (hasSufficientGrowstuffPlantData(entry.metaJson)) return entry;
+
+  try {
+    const details = await fetchGrowstuffCropDetails(entry.externalId);
+    if (!details) return entry;
+    const preferredScientificName = pickScientificName(details) || entry.scientificName;
+    return repository.upsert({
+      source: "growstuff",
+      externalId: entry.externalId,
+      commonName: details.name?.trim() || entry.commonName,
+      ...(preferredScientificName ? { scientificName: preferredScientificName } : {}),
+      ...(entry.familyName ? { familyName: entry.familyName } : {}),
+      ...(details.thumbnail_url?.trim() || entry.imageUrl
+        ? { imageUrl: details.thumbnail_url?.trim() || entry.imageUrl }
+        : {}),
+      metaJson: buildGrowstuffMetaJson(entry.metaJson, details),
+    });
+  } catch {
+    return entry;
+  }
+}
+
+function hasSufficientGrowstuffPlantData(metaJson?: string): boolean {
   if (!metaJson) return false;
   try {
     const parsed = JSON.parse(metaJson) as {
-      growth_months?: unknown;
-      fruit_months?: unknown;
-      days_to_harvest?: unknown;
-      median_days_to_first_harvest?: unknown;
+      sun_requirements?: unknown;
+      row_spacing?: unknown;
+      spread?: unknown;
+      height?: unknown;
       gardenme?: {
-        taskMonths?: {
-          startIndoors?: unknown;
-          directSow?: unknown;
-          plantOut?: unknown;
-          harvest?: unknown;
-        };
-        daysToFirstHarvest?: unknown;
+        sunRequirements?: unknown;
+        rowSpacing?: unknown;
+        spread?: unknown;
+        height?: unknown;
       };
     };
-    const hasMonths =
-      parseMonthInput(parsed.gardenme?.taskMonths?.harvest).length > 0 ||
-      parseMonthInput(parsed.gardenme?.taskMonths?.startIndoors).length > 0 ||
-      parseMonthInput(parsed.gardenme?.taskMonths?.directSow).length > 0 ||
-      parseMonthInput(parsed.gardenme?.taskMonths?.plantOut).length > 0 ||
-      parseMonthInput(parsed.fruit_months).length > 0 ||
-      parseMonthInput(parsed.growth_months).length > 0;
-    const hasHarvestDays =
-      typeof parsed.days_to_harvest === "number" ||
-      typeof parsed.median_days_to_first_harvest === "number" ||
-      typeof parsed.gardenme?.daysToFirstHarvest === "number";
-    return hasMonths || hasHarvestDays;
+    const hasSun =
+      (typeof parsed.gardenme?.sunRequirements === "string" && parsed.gardenme.sunRequirements.trim().length > 0) ||
+      (typeof parsed.sun_requirements === "string" && parsed.sun_requirements.trim().length > 0);
+    const hasRow =
+      isPositiveNumber(parsed.gardenme?.rowSpacing) || isPositiveNumber(parsed.row_spacing);
+    const hasSpread =
+      isPositiveNumber(parsed.gardenme?.spread) || isPositiveNumber(parsed.spread);
+    const hasHeight =
+      isPositiveNumber(parsed.gardenme?.height) || isPositiveNumber(parsed.height);
+    return hasSun && hasRow && hasSpread && hasHeight;
   } catch {
     return false;
   }
 }
 
-function buildTrefleMetaJson(existingMetaJson: string | undefined, details: TreflePlantProfile): string {
-  const existing = parseMetaJsonObject(existingMetaJson);
-  const gardenme = asRecord(existing.gardenme) ?? {};
-  const existingTaskMonths = asRecord(gardenme.taskMonths) ?? {};
-  const mergedHarvestMonths = Array.from(
-    new Set([
-      ...parseMonthInput(existingTaskMonths.harvest),
-      ...details.fruitMonths,
-      ...details.growthMonths,
-    ])
-  ).sort((a, b) => a - b);
-
-  const nextTaskMonths: Record<string, unknown> = {
-    ...existingTaskMonths,
-    ...(mergedHarvestMonths.length > 0 ? { harvest: mergedHarvestMonths } : {}),
-  };
-
-  const nextGardenme: Record<string, unknown> = {
-    ...gardenme,
-    ...(typeof details.daysToHarvest === "number" ? { daysToFirstHarvest: details.daysToHarvest } : {}),
-    taskMonths: nextTaskMonths,
-  };
-
-  const nextRoot: Record<string, unknown> = {
-    ...existing,
-    ...(details.growthMonths.length > 0 ? { growth_months: details.growthMonths } : {}),
-    ...(details.fruitMonths.length > 0 ? { fruit_months: details.fruitMonths } : {}),
-    ...(typeof details.daysToHarvest === "number" ? { days_to_harvest: details.daysToHarvest } : {}),
-    ...(details.sowing ? { sowing: details.sowing } : {}),
-    gardenme: nextGardenme,
-    trefle: {
-      ...(asRecord(existing.trefle) ?? {}),
-      id: details.trefleId,
-      ...(details.slug ? { slug: details.slug } : {}),
-      ...(details.commonName ? { commonName: details.commonName } : {}),
-      ...(details.scientificName ? { scientificName: details.scientificName } : {}),
-      ...(details.familyName ? { familyName: details.familyName } : {}),
-      ...(details.imageUrl ? { imageUrl: details.imageUrl } : {}),
-      fetchedAt: new Date().toISOString(),
-    },
-  };
-
-  return JSON.stringify(nextRoot);
+function isPositiveNumber(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function buildCalendarMetaJson(
@@ -2926,28 +2868,6 @@ function extractPlantTaskTiming(metaJson?: string): {
   }
 }
 
-function extractTrefleStatus(metaJson?: string): string | undefined {
-  if (!metaJson) return undefined;
-  try {
-    const parsed = JSON.parse(metaJson) as {
-      trefle?: {
-        id?: number | string;
-      };
-      growth_months?: unknown;
-      fruit_months?: unknown;
-      days_to_harvest?: unknown;
-    };
-    if (!parsed.trefle?.id) return undefined;
-    const hasTiming =
-      parseMonthInput(parsed.growth_months).length > 0 ||
-      parseMonthInput(parsed.fruit_months).length > 0 ||
-      typeof parsed.days_to_harvest === "number";
-    return hasTiming ? `Trefle data: linked (id ${parsed.trefle.id})` : `Trefle data: linked`;
-  } catch {
-    return undefined;
-  }
-}
-
 function extractTimingStatus(metaJson?: string): string | undefined {
   if (!metaJson) return undefined;
   try {
@@ -3054,9 +2974,6 @@ function extractTimingDisplayLines(metaJson?: string): string[] {
       fruit_months?: unknown;
       days_to_harvest?: unknown;
       median_days_to_first_harvest?: unknown;
-      trefle?: {
-        id?: unknown;
-      };
       gardenme?: {
         taskMonths?: {
           startIndoors?: unknown;
@@ -3096,11 +3013,9 @@ function extractTimingDisplayLines(metaJson?: string): string[] {
     const sourceLabel =
       typeof parsed.gardenme?.calendarSource === "string" && parsed.gardenme.calendarSource.trim()
         ? parsed.gardenme.calendarSource.trim()
-        : parsed.trefle?.id
-          ? "Trefle"
-          : startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0
-            ? "Manual/custom"
-            : "Unknown";
+        : startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0
+          ? "Manual/custom"
+          : "Unknown";
     const hasPlanningWindows = startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0 || harvest.length > 0;
     const confidence = hasPlanningWindows ? "high" : typeof harvestDays === "number" ? "low" : "low";
     lines.push(`Source: ${sourceLabel}`);

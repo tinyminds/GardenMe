@@ -379,15 +379,13 @@ export default function GardenMapEditorScreen() {
     try {
       // Calculate the area using the edited boundary
       const boundaryAreaSqM = polygonArea(editingBoundary) * (calibration.baseWidth * calibration.baseHeight) * Math.pow(calibration.metersPerPixel, 2);
+      const { boundaryGeoPolygon: _ignoredBoundaryGeoPolygon, ...calibrationWithoutGeoBoundary } = calibration;
       
       // Update the calibration with the modified boundary
       const updatedCalibration: GardenScaleCalibration = {
-        ...calibration,
+        ...calibrationWithoutGeoBoundary,
         boundaryPolygon: editingBoundary,
         boundaryAreaSqM,
-        // Clear geographic boundary since canvas editing invalidates lat/lng coordinates
-        // This will require re-mapping on the setup page
-        boundaryGeoPolygon: undefined,
       };
 
       // Update local query cache immediately for instant UI updates
@@ -485,6 +483,7 @@ export default function GardenMapEditorScreen() {
       
       for (let i = 0; i < boundaryPoints.length; i++) {
         const point = boundaryPoints[i];
+        if (!point) continue;
         const distance = Math.hypot(tapPoint.x - point.x, tapPoint.y - point.y);
         if (distance <= threshold) {
           setSelectedBoundaryPoint(selectedBoundaryPoint === i ? null : i);
@@ -1001,7 +1000,6 @@ export default function GardenMapEditorScreen() {
               setPresetShape(null);
               setName(nextZoneName(type as GardenFeatureType, existingZones));
             }}
-            disabled={isEditingBoundary || canvasMode === "boundary"}
           />
           <View style={styles.shapeChoiceContainer}>
             <Text style={[styles.shapeChoiceLabel, { color: theme.textMuted }]}>Shape:</Text>

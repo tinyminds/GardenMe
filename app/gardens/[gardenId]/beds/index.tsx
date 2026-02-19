@@ -880,7 +880,12 @@ export default function BedsListScreen() {
     const current = cached ?? (await loadBedPhotoLogSettings());
     const currentPhotos = current[gardenId] ?? [];
     const updatedPhotos = currentPhotos.map(photo => 
-      photo.id === photoId ? { ...photo, notes: notes.trim() || undefined } : photo
+      photo.id === photoId
+        ? (() => {
+            const trimmed = notes.trim();
+            return trimmed ? { ...photo, notes: trimmed } : { ...photo, notes: "" };
+          })()
+        : photo
     );
     const next: BedPhotoLogSettings = {
       ...current,
@@ -1268,12 +1273,14 @@ export default function BedsListScreen() {
                       ))}
                     </View>
                   )}
-                  <Link href={`/gardens/${gardenId}/grow`}>
-                    <AppButton
-                      label="Add more crops in Grow List"
-                      variant="primary"
-                      style={{ width: '100%' }}
-                    />
+                  <Link
+                    href={`/gardens/${gardenId}/grow`}
+                    style={[
+                      styles.growListLink,
+                      { backgroundColor: theme.primaryActionBackground, borderColor: theme.primaryActionBackground, color: theme.primaryActionText },
+                    ]}
+                  >
+                    Add more crops in Grow List
                   </Link>
                 </View>
               )}
@@ -2073,6 +2080,15 @@ const styles = StyleSheet.create({
   suggestionButtonText: { fontWeight: "700", fontSize: 12 },
   optionChip: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
   optionChipText: { textTransform: "capitalize", fontSize: 12 },
+  growListLink: {
+    marginTop: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    textAlign: "center",
+    fontWeight: "700",
+  },
   optionsScroll: { maxHeight: 170 },
   photoStrip: { gap: 8, paddingRight: 6 },
   photoCard: { borderRadius: 10, padding: 6, gap: 2, width: 120, position: "relative" },
@@ -2179,6 +2195,9 @@ const styles = StyleSheet.create({
     maxHeight: "70%",
     flex: 0,
   },
+  photoViewerContent: {
+    paddingBottom: 16,
+  },
   photoViewerHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -2230,4 +2249,3 @@ const styles = StyleSheet.create({
   },
 
 });
-
