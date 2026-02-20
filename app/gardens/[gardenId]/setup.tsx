@@ -2,11 +2,14 @@ import * as Location from "expo-location";
 import area from "@turf/area";
 import { polygon as turfPolygon } from "@turf/helpers";
 import { Link, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as ImagePicker from "expo-image-picker";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -17,7 +20,7 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Polygon, Text as SvgText } from "react-native-svg";
+import Svg, { Line, Polygon, Text as SvgText } from "react-native-svg";
 import { useQuery } from "@tanstack/react-query";
 import { SqliteGardenRepository } from "@/infra/repositories/sqlite/SqliteGardenRepository";
 import { queryClient } from "@/state/queryClient";
@@ -32,10 +35,15 @@ import type { GardenScaleCalibration } from "@/domain/entities/Garden";
 
 const BASE_CANVAS_WIDTH = 1000;
 const BASE_CANVAS_HEIGHT = 700;
+const PLAN_BOUNDARY_PADDING = 0.01;
+const PLAN_BOUNDARY_MIN_SIZE = 0.04;
 const DEFAULT_MAP_CENTER: LatLngPoint = { latitude: 37.7749, longitude: -122.4194 };
 
-type SetupMode = "map" | "measure";
+type SetupMode = "map" | "measure" | "plan";
 type NativeMapType = "standard" | "satellite" | "hybrid";
+type PlanHandle = "topLeft" | "topRight" | "bottomRight" | "bottomLeft";
+type PlanImageDraft = { uri: string; width: number; height: number };
+type RectBounds = { left: number; top: number; right: number; bottom: number };
 
 const gardenRepository = new SqliteGardenRepository();
 
@@ -62,6 +70,19 @@ export default function GardenSetupScreen() {
   // Canvas preview for measurements mode
   const [measurementCanvas, setMeasurementCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
   const [measurementZoom, setMeasurementZoom] = useState(0.8); // Start zoomed out to show padding
+  const [planImage, setPlanImage] = useState<PlanImageDraft | null>(null);
+  const [planBoundaryBounds, setPlanBoundaryBounds] = useState<RectBounds>({
+    left: 0.2,
+    top: 0.2,
+    right: 0.8,
+    bottom: 0.8,
+  });
+  const [planStep, setPlanStep] = useState<"draw" | "measure">("draw");
+  const [planReferenceMetersInput, setPlanReferenceMetersInput] = useState("");
+  const [planCanvas, setPlanCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
+  const planDragStartRef = useRef<RectBounds | null>(null);
+  const planBoundaryBoundsRef = useRef(planBoundaryBounds);
+  const planCanvasRef = useRef(planCanvas);
 
   const gardenQuery = useQuery({
     queryKey: ["garden", gardenId],
@@ -451,6 +472,333 @@ export default function GardenSetupScreen() {
     ];
   }, [manualLengthM, manualWidthM, measurementCanvas, measurementBoundary]);
 
+  const planBoundary = useMemo(() => {
+    return [
+      { x: planBoundaryBounds.left, y: planBoundaryBounds.top },
+      { x: planBoundaryBounds.right, y: planBoundaryBounds.top },
+      { x: planBoundaryBounds.right, y: planBoundaryBounds.bottom },
+      { x: planBoundaryBounds.left, y: planBoundaryBounds.bottom },
+    ];
+  }, [planBoundaryBounds]);
+
+  const planReferenceEdgePixels = useMemo(() => {
+    const baseWidth = planImage?.width ?? BASE_CANVAS_WIDTH;
+    const dx = planBoundaryBounds.right - planBoundaryBounds.left;
+    return Math.max(1e-6, dx * baseWidth);
+  }, [planBoundaryBounds.left, planBoundaryBounds.right, planImage?.width]);
+
+  useEffect(() => {
+    planBoundaryBoundsRef.current = planBoundaryBounds;
+  }, [planBoundaryBounds]);
+
+  useEffect(() => {
+    planCanvasRef.current = planCanvas;
+  }, [planCanvas]);
+
+  const planAreaPreviewSqM = useMemo(() => {
+    const referenceMeters = Number(planReferenceMetersInput);
+    if (!Number.isFinite(referenceMeters) || referenceMeters <= 0) return null;
+    const baseWidth = planImage?.width ?? BASE_CANVAS_WIDTH;
+    const baseHeight = planImage?.height ?? BASE_CANVAS_HEIGHT;
+    const metersPerPixel = referenceMeters / planReferenceEdgePixels;
+    const normalizedArea = polygonArea(planBoundary);
+    const areaSqM = normalizedArea * baseWidth * baseHeight * metersPerPixel * metersPerPixel;
+    if (!Number.isFinite(areaSqM) || areaSqM <= 0) return null;
+    return areaSqM;
+  }, [planBoundary, planImage?.height, planImage?.width, planReferenceEdgePixels, planReferenceMetersInput]);
+
+  const onPlanCanvasLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    const safeWidth = Math.max(1, Math.round(width));
+    const safeHeight = Math.max(1, Math.round(height));
+    setPlanCanvas((prev) => (prev.width === safeWidth && prev.height === safeHeight ? prev : { width: safeWidth, height: safeHeight }));
+  };
+
+  const pickPlanImage = async (source: "camera" | "library") => {
+    const permissionResult = source === "camera"
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert("Permission needed", source === "camera" ? "Camera permission is required." : "Photo library permission is required.");
+      return;
+    }
+
+    const result = source === "camera"
+      ? await ImagePicker.launchCameraAsync({
+          mediaTypes: ["images"],
+          allowsEditing: true,
+          quality: 0.9,
+        })
+      : await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ["images"],
+          allowsMultipleSelection: false,
+          allowsEditing: true,
+          quality: 0.9,
+        });
+
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset?.uri) return;
+
+    const imageWidth = Math.max(1, Math.round(asset.width ?? BASE_CANVAS_WIDTH));
+    const imageHeight = Math.max(1, Math.round(asset.height ?? BASE_CANVAS_HEIGHT));
+
+    setPlanImage({ uri: asset.uri, width: imageWidth, height: imageHeight });
+    setPlanBoundaryBounds({
+      left: 0.2,
+      top: 0.2,
+      right: 0.8,
+      bottom: 0.8,
+    });
+    setPlanReferenceMetersInput("");
+    setPlanStep("draw");
+  };
+
+  const updatePlanBoundaryForHandle = (
+    startBounds: RectBounds,
+    handle: PlanHandle,
+    deltaXNorm: number,
+    deltaYNorm: number
+  ) => {
+    let { left, right, top, bottom } = startBounds;
+    switch (handle) {
+      case "topLeft":
+        left = clamp(left + deltaXNorm, PLAN_BOUNDARY_PADDING, right - PLAN_BOUNDARY_MIN_SIZE);
+        top = clamp(top + deltaYNorm, PLAN_BOUNDARY_PADDING, bottom - PLAN_BOUNDARY_MIN_SIZE);
+        break;
+      case "topRight":
+        right = clamp(right + deltaXNorm, left + PLAN_BOUNDARY_MIN_SIZE, 1 - PLAN_BOUNDARY_PADDING);
+        top = clamp(top + deltaYNorm, PLAN_BOUNDARY_PADDING, bottom - PLAN_BOUNDARY_MIN_SIZE);
+        break;
+      case "bottomRight":
+        right = clamp(right + deltaXNorm, left + PLAN_BOUNDARY_MIN_SIZE, 1 - PLAN_BOUNDARY_PADDING);
+        bottom = clamp(bottom + deltaYNorm, top + PLAN_BOUNDARY_MIN_SIZE, 1 - PLAN_BOUNDARY_PADDING);
+        break;
+      case "bottomLeft":
+        left = clamp(left + deltaXNorm, PLAN_BOUNDARY_PADDING, right - PLAN_BOUNDARY_MIN_SIZE);
+        bottom = clamp(bottom + deltaYNorm, top + PLAN_BOUNDARY_MIN_SIZE, 1 - PLAN_BOUNDARY_PADDING);
+        break;
+    }
+    return { left, right, top, bottom };
+  };
+
+  const movePlanBoundary = (startBounds: RectBounds, deltaXNorm: number, deltaYNorm: number): RectBounds => {
+    const width = startBounds.right - startBounds.left;
+    const height = startBounds.bottom - startBounds.top;
+    const left = clamp(startBounds.left + deltaXNorm, PLAN_BOUNDARY_PADDING, 1 - PLAN_BOUNDARY_PADDING - width);
+    const top = clamp(startBounds.top + deltaYNorm, PLAN_BOUNDARY_PADDING, 1 - PLAN_BOUNDARY_PADDING - height);
+    return {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+    };
+  };
+
+  const topLeftPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          planDragStartRef.current = planBoundaryBoundsRef.current;
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const canvas = planCanvasRef.current;
+          if (canvas.width <= 0 || canvas.height <= 0) return;
+          const startBounds = planDragStartRef.current ?? planBoundaryBoundsRef.current;
+          const next = updatePlanBoundaryForHandle(
+            startBounds,
+            "topLeft",
+            gestureState.dx / canvas.width,
+            gestureState.dy / canvas.height
+          );
+          setPlanBoundaryBounds(next);
+        },
+        onPanResponderRelease: () => {
+          planDragStartRef.current = null;
+        },
+      }),
+    []
+  );
+
+  const topRightPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          planDragStartRef.current = planBoundaryBoundsRef.current;
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const canvas = planCanvasRef.current;
+          if (canvas.width <= 0 || canvas.height <= 0) return;
+          const startBounds = planDragStartRef.current ?? planBoundaryBoundsRef.current;
+          const next = updatePlanBoundaryForHandle(
+            startBounds,
+            "topRight",
+            gestureState.dx / canvas.width,
+            gestureState.dy / canvas.height
+          );
+          setPlanBoundaryBounds(next);
+        },
+        onPanResponderRelease: () => {
+          planDragStartRef.current = null;
+        },
+      }),
+    []
+  );
+
+  const bottomRightPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          planDragStartRef.current = planBoundaryBoundsRef.current;
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const canvas = planCanvasRef.current;
+          if (canvas.width <= 0 || canvas.height <= 0) return;
+          const startBounds = planDragStartRef.current ?? planBoundaryBoundsRef.current;
+          const next = updatePlanBoundaryForHandle(
+            startBounds,
+            "bottomRight",
+            gestureState.dx / canvas.width,
+            gestureState.dy / canvas.height
+          );
+          setPlanBoundaryBounds(next);
+        },
+        onPanResponderRelease: () => {
+          planDragStartRef.current = null;
+        },
+      }),
+    []
+  );
+
+  const bottomLeftPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          planDragStartRef.current = planBoundaryBoundsRef.current;
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const canvas = planCanvasRef.current;
+          if (canvas.width <= 0 || canvas.height <= 0) return;
+          const startBounds = planDragStartRef.current ?? planBoundaryBoundsRef.current;
+          const next = updatePlanBoundaryForHandle(
+            startBounds,
+            "bottomLeft",
+            gestureState.dx / canvas.width,
+            gestureState.dy / canvas.height
+          );
+          setPlanBoundaryBounds(next);
+        },
+        onPanResponderRelease: () => {
+          planDragStartRef.current = null;
+        },
+      }),
+    []
+  );
+
+  const planMovePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          planDragStartRef.current = planBoundaryBoundsRef.current;
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const canvas = planCanvasRef.current;
+          if (canvas.width <= 0 || canvas.height <= 0) return;
+          const startBounds = planDragStartRef.current ?? planBoundaryBoundsRef.current;
+          const next = movePlanBoundary(
+            startBounds,
+            gestureState.dx / canvas.width,
+            gestureState.dy / canvas.height
+          );
+          setPlanBoundaryBounds(next);
+        },
+        onPanResponderRelease: () => {
+          planDragStartRef.current = null;
+        },
+      }),
+    []
+  );
+
+  const saveUploadedPlanSetup = async () => {
+    if (!gardenId) return;
+    if (!planImage?.uri) {
+      Alert.alert("Upload a plan", "Choose a plan image first.");
+      return;
+    }
+
+    const referenceMeters = Number(planReferenceMetersInput);
+    if (!Number.isFinite(referenceMeters) || referenceMeters <= 0) {
+      Alert.alert("Missing measurement", "Enter a valid meter value for the highlighted top edge.");
+      return;
+    }
+
+    const baseWidth = planImage.width;
+    const baseHeight = planImage.height;
+    const metersPerPixel = referenceMeters / planReferenceEdgePixels;
+    const normalizedArea = polygonArea(planBoundary);
+    const boundaryAreaSqM = normalizedArea * baseWidth * baseHeight * metersPerPixel * metersPerPixel;
+
+    if (!Number.isFinite(boundaryAreaSqM) || boundaryAreaSqM <= 0) {
+      Alert.alert("Invalid boundary", "Could not calculate a valid area. Adjust the boundary and try again.");
+      return;
+    }
+    const topLeft = planBoundary[0];
+    const topRight = planBoundary[1];
+    if (!topLeft || !topRight) {
+      Alert.alert("Invalid boundary", "Boundary points are incomplete. Adjust and try again.");
+      return;
+    }
+
+    const calibration: GardenScaleCalibration = {
+      method: "reference_line",
+      p1: topLeft,
+      p2: topRight,
+      referenceMeters,
+      metersPerPixel,
+      baseWidth,
+      baseHeight,
+      boundaryPolygon: planBoundary,
+      boundaryAreaSqM,
+      showBaseImage: true,
+      showGridOverlay: false,
+      showBedMeasurements: false,
+      orientationDegrees: 0,
+    };
+
+    await gardenRepository.updatePhoto(gardenId, planImage.uri, "photo");
+    await gardenRepository.updateScaleCalibration(gardenId, calibration);
+    await queryClient.invalidateQueries({ queryKey: ["garden", gardenId] });
+    Alert.alert(
+      "Plan saved",
+      `Boundary saved from uploaded plan. Area: ${boundaryAreaSqM.toFixed(1)} sqm. You can toggle the plan image on/off in Garden Design.`
+    );
+  };
+
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.appBackground }]} edges={["left", "right"]}>
@@ -461,7 +809,7 @@ export default function GardenSetupScreen() {
         >
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
             <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Setup</Text>
-            <Text style={[styles.subtitle, { color: theme.textMuted }]}>Choose how to set up your garden layout. Map mode captures satellite imagery and location, while measurements create a basic rectangular layout.</Text>
+            <Text style={[styles.subtitle, { color: theme.textMuted }]}>Choose how to set up your garden layout. Map captures satellite imagery, Measurement creates a basic rectangle, and Upload Plan lets you calibrate from your own drawing.</Text>
 
             <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
               <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Mode</Text>
@@ -469,6 +817,7 @@ export default function GardenSetupScreen() {
                 options={[
                   { id: "map", label: "Map" },
                   { id: "measure", label: "Measurement" },
+                  { id: "plan", label: "Upload Plan" },
                 ]}
                 selectedId={setupMode}
                 onSelect={(id) => setSetupMode(id as SetupMode)}
@@ -549,7 +898,7 @@ export default function GardenSetupScreen() {
                   <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Save Map Boundary</Text>
                 </Pressable>
               </View>
-            ) : (
+            ) : setupMode === "measure" ? (
               <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
                 <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Manual Measurements (meters)</Text>
                 <Text style={[styles.cardText, { color: theme.textMuted }]}>Enter your garden dimensions for a basic rectangular layout. No satellite image or location will be saved. Once you add features or beds, you cannot return to add location data.</Text>
@@ -639,6 +988,165 @@ export default function GardenSetupScreen() {
                   <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Save Measurements</Text>
                 </Pressable>
               </View>
+            ) : (
+              <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
+                <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Upload Plan</Text>
+                <Text style={[styles.cardText, { color: theme.textMuted }]}>
+                  Upload or photograph your plan, drag the rectangle around your garden border, then enter one measured edge to calibrate scale and area.
+                </Text>
+
+                <View style={styles.zoomRow}>
+                  <Pressable
+                    style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                    onPress={() => void pickPlanImage("library")}
+                  >
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Upload Plan</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                    onPress={() => void pickPlanImage("camera")}
+                  >
+                    <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Take Photo</Text>
+                  </Pressable>
+                </View>
+
+                {planImage ? (
+                  <>
+                    <View
+                      style={[
+                        styles.planCanvas,
+                        {
+                          borderColor: theme.borderColor,
+                          backgroundColor: theme.appBackground,
+                          aspectRatio: Math.max(0.3, (planImage.width || BASE_CANVAS_WIDTH) / Math.max(1, planImage.height || BASE_CANVAS_HEIGHT)),
+                        },
+                      ]}
+                      onLayout={onPlanCanvasLayout}
+                    >
+                      <Image source={{ uri: planImage.uri }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
+                      <Svg width={planCanvas.width} height={planCanvas.height} style={StyleSheet.absoluteFillObject}>
+                        <Polygon
+                          points={planBoundary.map((p) => `${p.x * planCanvas.width},${p.y * planCanvas.height}`).join(" ")}
+                          fill={withAlpha(theme.mapBoundaryFill, 0.35)}
+                          stroke={theme.mapBoundaryStroke}
+                          strokeWidth={3}
+                        />
+                        {planStep === "measure" && (
+                          <Line
+                            x1={planBoundaryBounds.left * planCanvas.width}
+                            y1={planBoundaryBounds.top * planCanvas.height}
+                            x2={planBoundaryBounds.right * planCanvas.width}
+                            y2={planBoundaryBounds.top * planCanvas.height}
+                            stroke={theme.primaryActionBackground}
+                            strokeWidth={5}
+                          />
+                        )}
+                      </Svg>
+                      <View
+                        style={[
+                          styles.planDragArea,
+                          {
+                            left: planBoundaryBounds.left * planCanvas.width,
+                            top: planBoundaryBounds.top * planCanvas.height,
+                            width: Math.max(1, (planBoundaryBounds.right - planBoundaryBounds.left) * planCanvas.width),
+                            height: Math.max(1, (planBoundaryBounds.bottom - planBoundaryBounds.top) * planCanvas.height),
+                            borderColor: withAlpha(theme.primaryActionBackground, 0.6),
+                          },
+                        ]}
+                        {...planMovePanResponder.panHandlers}
+                      />
+                      <View
+                        style={[
+                          styles.planHandle,
+                          {
+                            left: planBoundaryBounds.left * planCanvas.width - 14,
+                            top: planBoundaryBounds.top * planCanvas.height - 14,
+                            backgroundColor: theme.primaryActionBackground,
+                          },
+                        ]}
+                        {...topLeftPanResponder.panHandlers}
+                      />
+                      <View
+                        style={[
+                          styles.planHandle,
+                          {
+                            left: planBoundaryBounds.right * planCanvas.width - 14,
+                            top: planBoundaryBounds.top * planCanvas.height - 14,
+                            backgroundColor: theme.primaryActionBackground,
+                          },
+                        ]}
+                        {...topRightPanResponder.panHandlers}
+                      />
+                      <View
+                        style={[
+                          styles.planHandle,
+                          {
+                            left: planBoundaryBounds.right * planCanvas.width - 14,
+                            top: planBoundaryBounds.bottom * planCanvas.height - 14,
+                            backgroundColor: theme.primaryActionBackground,
+                          },
+                        ]}
+                        {...bottomRightPanResponder.panHandlers}
+                      />
+                      <View
+                        style={[
+                          styles.planHandle,
+                          {
+                            left: planBoundaryBounds.left * planCanvas.width - 14,
+                            top: planBoundaryBounds.bottom * planCanvas.height - 14,
+                            backgroundColor: theme.primaryActionBackground,
+                          },
+                        ]}
+                        {...bottomLeftPanResponder.panHandlers}
+                      />
+                    </View>
+
+                    {planStep === "draw" ? (
+                      <Pressable
+                        style={[styles.button, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]}
+                        onPress={() => setPlanStep("measure")}
+                      >
+                        <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Confirm Boundary</Text>
+                      </Pressable>
+                    ) : (
+                      <>
+                        <Text style={[styles.infoText, { color: theme.infoText }]}>
+                          Enter the real length of the highlighted top edge (meters).
+                        </Text>
+                        <TextInput
+                          value={planReferenceMetersInput}
+                          onChangeText={setPlanReferenceMetersInput}
+                          keyboardType="decimal-pad"
+                          style={[styles.input, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                          placeholder="Top edge length (m)"
+                          placeholderTextColor={theme.textMuted}
+                        />
+                        <Text style={[styles.infoText, { color: theme.infoText }]}>
+                          Garden area: {planAreaPreviewSqM ? `${planAreaPreviewSqM.toFixed(1)} sqm` : "-"}
+                        </Text>
+                        <View style={styles.zoomRow}>
+                          <Pressable
+                            style={[styles.toolButton, { backgroundColor: theme.secondaryActionBackground, borderColor: theme.borderColor }]}
+                            onPress={() => setPlanStep("draw")}
+                          >
+                            <Text style={[styles.toolButtonText, { color: theme.secondaryActionText }]}>Adjust Boundary</Text>
+                          </Pressable>
+                          <Pressable
+                            style={[styles.button, { backgroundColor: theme.primaryActionBackground, borderColor: theme.borderColor }]}
+                            onPress={() => void saveUploadedPlanSetup()}
+                          >
+                            <Text style={[styles.buttonText, { color: theme.primaryActionText }]}>Save Uploaded Plan</Text>
+                          </Pressable>
+                        </View>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <Text style={[styles.cardText, { color: theme.textMuted }]}>
+                    No plan image selected yet.
+                  </Text>
+                )}
+              </View>
             )}
 
             {gardenId && (
@@ -704,6 +1212,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function withAlpha(color: string, alpha: number): string {
+  const clamped = Math.max(0, Math.min(1, alpha));
+  const hex = color.trim().replace(/^#/, "");
+  const alphaHex = Math.round(clamped * 255).toString(16).padStart(2, "0").toUpperCase();
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#${hex.toUpperCase()}${alphaHex}`;
+  if (/^[0-9a-fA-F]{8}$/.test(hex)) return `#${hex.slice(0, 6).toUpperCase()}${alphaHex}`;
+  return color;
+}
+
 function hasValidCoordinates(latitude: number, longitude: number): boolean {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
   return Math.abs(latitude) > 0.000001 || Math.abs(longitude) > 0.000001;
@@ -759,6 +1276,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     overflow: "hidden",
+  },
+  planCanvas: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 10,
+    overflow: "hidden",
+    position: "relative",
+  },
+  planHandle: {
+    position: "absolute",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    zIndex: 3,
+  },
+  planDragArea: {
+    position: "absolute",
+    borderWidth: 1,
+    borderStyle: "dashed",
+    backgroundColor: "#00000001",
+    zIndex: 2,
   },
 });
 
