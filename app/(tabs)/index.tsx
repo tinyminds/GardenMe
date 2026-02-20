@@ -445,6 +445,10 @@ export default function DashboardScreen() {
           <BedPlanPreview
             beds={bedsQuery.data ?? []}
             features={featuresQuery.data ?? []}
+            scaleCalibration={selectedGarden.scaleCalibration ?? null}
+            {...(Number.isFinite(selectedGarden.scaleCalibration?.boundaryAreaSqM)
+              ? { boundaryAreaSqM: selectedGarden.scaleCalibration?.boundaryAreaSqM }
+              : {})}
             {...(selectedGarden.scaleCalibration?.boundaryPolygon
               ? { boundaryPolygon: selectedGarden.scaleCalibration.boundaryPolygon }
               : {})}
@@ -479,6 +483,10 @@ export default function DashboardScreen() {
             <BedPlanPreview
               beds={bedsQuery.data ?? []}
               features={featuresQuery.data ?? []}
+              scaleCalibration={selectedGarden.scaleCalibration ?? null}
+              {...(Number.isFinite(selectedGarden.scaleCalibration?.boundaryAreaSqM)
+                ? { boundaryAreaSqM: selectedGarden.scaleCalibration?.boundaryAreaSqM }
+                : {})}
               {...(selectedGarden.scaleCalibration?.boundaryPolygon
                 ? { boundaryPolygon: selectedGarden.scaleCalibration.boundaryPolygon }
                 : {})}

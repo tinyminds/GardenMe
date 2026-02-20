@@ -2045,6 +2045,10 @@ export default function GardenGrowListScreen() {
         {(bedsQuery.data ?? []).length > 0 && (
           <BedPlanPreview
             beds={bedsQuery.data ?? []}
+            scaleCalibration={gardenQuery.data?.scaleCalibration ?? null}
+            {...(Number.isFinite(gardenQuery.data?.scaleCalibration?.boundaryAreaSqM)
+              ? { boundaryAreaSqM: gardenQuery.data?.scaleCalibration?.boundaryAreaSqM }
+              : {})}
             {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
               ? { boundaryPolygon: gardenQuery.data.scaleCalibration.boundaryPolygon }
               : {})}

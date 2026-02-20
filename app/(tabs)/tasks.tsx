@@ -346,6 +346,10 @@ export default function TasksTabScreen() {
       {activeGardenId && (bedsQuery.data ?? []).length > 0 && (
         <BedPlanPreview
           beds={bedsQuery.data ?? []}
+          scaleCalibration={currentGarden?.scaleCalibration ?? null}
+          {...(Number.isFinite(currentGarden?.scaleCalibration?.boundaryAreaSqM)
+            ? { boundaryAreaSqM: currentGarden?.scaleCalibration?.boundaryAreaSqM }
+            : {})}
           {...(currentGarden?.scaleCalibration?.boundaryPolygon
             ? { boundaryPolygon: currentGarden.scaleCalibration.boundaryPolygon }
             : {})}

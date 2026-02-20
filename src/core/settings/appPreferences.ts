@@ -9,11 +9,17 @@ type SettingsRow = {
 export type AppPreferences = {
   activeGardenId: string | null;
   notificationsEnabled: boolean;
+  showBedPhotos: boolean;
+  showBedNames: boolean;
+  showBedSizes: boolean;
 };
 
 const DEFAULT_PREFERENCES: AppPreferences = {
   activeGardenId: null,
   notificationsEnabled: false,
+  showBedPhotos: true,
+  showBedNames: true,
+  showBedSizes: true,
 };
 
 export async function loadAppPreferences(): Promise<AppPreferences> {
@@ -27,6 +33,9 @@ export async function loadAppPreferences(): Promise<AppPreferences> {
     return {
       activeGardenId: typeof parsed.activeGardenId === "string" ? parsed.activeGardenId : null,
       notificationsEnabled: Boolean(parsed.notificationsEnabled),
+      showBedPhotos: parsed.showBedPhotos !== false,
+      showBedNames: parsed.showBedNames !== false,
+      showBedSizes: parsed.showBedSizes !== false,
     };
   } catch {
     return DEFAULT_PREFERENCES;

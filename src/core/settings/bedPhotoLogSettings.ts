@@ -13,6 +13,7 @@ export type BedPhotoLogEntry = {
   source: "camera" | "gallery";
   createdAt: string;
   notes?: string;
+  isBedBackground?: boolean;
 };
 
 export type BedPhotoLogSettings = Record<string, BedPhotoLogEntry[]>;

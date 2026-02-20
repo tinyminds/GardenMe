@@ -37,12 +37,12 @@ export default function SettingsTabScreen() {
 
   const setActiveGarden = (gardenId: string | null) => {
     setSelectedGardenId(gardenId);
-    const existing = preferencesQuery.data ?? { activeGardenId: null, notificationsEnabled: false };
+    const existing = preferencesQuery.data ?? { activeGardenId: null, notificationsEnabled: false, showBedPhotos: true, showBedNames: true, showBedSizes: true };
     preferencesMutation.mutate({ ...existing, activeGardenId: gardenId });
   };
 
   const toggleNotifications = () => {
-    const existing = preferencesQuery.data ?? { activeGardenId: activeGardenId ?? null, notificationsEnabled: false };
+    const existing = preferencesQuery.data ?? { activeGardenId: activeGardenId ?? null, notificationsEnabled: false, showBedPhotos: true, showBedNames: true, showBedSizes: true };
     preferencesMutation.mutate({
       ...existing,
       activeGardenId: activeGardenId ?? null,
@@ -77,7 +77,7 @@ export default function SettingsTabScreen() {
             ]}
             selectedId={preferencesQuery.data?.notificationsEnabled ? "enabled" : "disabled"}
             onSelect={(mode) => {
-              const existing = preferencesQuery.data ?? { activeGardenId: activeGardenId ?? null, notificationsEnabled: false };
+              const existing = preferencesQuery.data ?? { activeGardenId: activeGardenId ?? null, notificationsEnabled: false, showBedPhotos: true, showBedNames: true, showBedSizes: true };
               preferencesMutation.mutate({
                 ...existing,
                 activeGardenId: activeGardenId ?? null,

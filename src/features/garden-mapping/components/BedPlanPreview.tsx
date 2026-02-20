@@ -1,9 +1,14 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState, type RefObject } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import Svg, { Circle, Line, Path, Polygon } from "react-native-svg";
+import Svg, { Circle, ClipPath, Defs, G, Image as SvgImage, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
+import { loadAppPreferences, saveAppPreferences } from "@/core/settings/appPreferences";
+import { loadBedPhotoLogSettings } from "@/core/settings/bedPhotoLogSettings";
 import type { Bed, Point2D } from "@/domain/entities/Bed";
+import type { GardenScaleCalibration } from "@/domain/entities/Garden";
 import { GardenFeatureType, type GardenFeature } from "@/domain/entities/GardenFeature";
 import { clipLineToPolygon } from "@/features/garden-mapping/utils/geometry";
+import { queryClient } from "@/state/queryClient";
 import { useTheme } from "@/ui/theme/ThemeProvider";
 
 type BedPreviewInfo = {
@@ -27,6 +32,8 @@ export function BedPlanPreview(props: {
   beds: Bed[];
   features?: GardenFeature[];
   boundaryPolygon?: Point2D[];
+  boundaryAreaSqM?: number | undefined;
+  scaleCalibration?: GardenScaleCalibration | null;
   previewRatio?: number;
   infoByBedId?: Record<string, BedPreviewInfo>;
   bedStatusById?: Record<string, BedStatusCounts>;
@@ -42,7 +49,38 @@ export function BedPlanPreview(props: {
   const { theme } = useTheme();
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewViewportWidth, setPreviewViewportWidth] = useState(0);
-  const [showBedNames, setShowBedNames] = useState(true);
+  const gardenId = props.beds[0]?.gardenId ?? null;
+
+  const preferencesQuery = useQuery({
+    queryKey: ["app-preferences"],
+    queryFn: loadAppPreferences,
+  });
+
+  const preferencesMutation = useMutation({
+    mutationFn: saveAppPreferences,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["app-preferences"] });
+    },
+  });
+
+  const bedPhotoLogSettingsQuery = useQuery({
+    queryKey: ["bed-photo-log-settings"],
+    queryFn: loadBedPhotoLogSettings,
+  });
+
+  const showBedPhotos = preferencesQuery.data?.showBedPhotos !== false;
+  const showBedNames = preferencesQuery.data?.showBedNames !== false;
+  const showBedSizes = preferencesQuery.data?.showBedSizes !== false;
+  const bedBackgroundImageById = useMemo(() => {
+    if (!gardenId) return {} as Record<string, string>;
+    const rows = bedPhotoLogSettingsQuery.data?.[gardenId] ?? [];
+    const byBedId: Record<string, string> = {};
+    for (const row of rows) {
+      if (!row.isBedBackground || !row.uri.trim()) continue;
+      if (!byBedId[row.bedId]) byBedId[row.bedId] = row.uri;
+    }
+    return byBedId;
+  }, [bedPhotoLogSettingsQuery.data, gardenId]);
 
   const boundary = useMemo(() => {
     if (props.boundaryPolygon && props.boundaryPolygon.length >= 3) return props.boundaryPolygon;
@@ -50,6 +88,38 @@ export function BedPlanPreview(props: {
   }, [props.boundaryPolygon]);
 
   const ratio = props.previewRatio && Number.isFinite(props.previewRatio) && props.previewRatio > 0 ? props.previewRatio : 0.66;
+  const effectiveCalibration = useMemo(() => {
+    const calibration = props.scaleCalibration;
+    if (
+      calibration &&
+      Number.isFinite(calibration.metersPerPixel) &&
+      Number.isFinite(calibration.baseWidth) &&
+      Number.isFinite(calibration.baseHeight) &&
+      calibration.metersPerPixel > 0 &&
+      calibration.baseWidth > 0 &&
+      calibration.baseHeight > 0
+    ) {
+      return {
+        metersPerPixel: calibration.metersPerPixel,
+        baseWidth: calibration.baseWidth,
+        baseHeight: calibration.baseHeight,
+      };
+    }
+    if (!Number.isFinite(props.boundaryAreaSqM) || (props.boundaryAreaSqM ?? 0) <= 0) {
+      return null;
+    }
+    const boundaryArea = polygonAreaNormalized(boundary);
+    if (boundaryArea <= 0) {
+      return null;
+    }
+    const baseWidth = 1000;
+    const baseHeight = Math.max(1, Math.round(baseWidth * ratio));
+    const metersPerPixel = Math.sqrt((props.boundaryAreaSqM ?? 0) / (boundaryArea * baseWidth * baseHeight));
+    if (!Number.isFinite(metersPerPixel) || metersPerPixel <= 0) {
+      return null;
+    }
+    return { metersPerPixel, baseWidth, baseHeight };
+  }, [boundary, props.boundaryAreaSqM, props.scaleCalibration, ratio]);
   const basePreviewWidth = Math.max(280, Math.round(previewViewportWidth || 320));
   const viewportWidth = basePreviewWidth;
   const viewportHeight = Math.round(basePreviewWidth * ratio);
@@ -86,11 +156,29 @@ export function BedPlanPreview(props: {
     Alert.alert(infoTitle, lines.join("\n"));
   };
 
+  const defaultPreferences = {
+    activeGardenId: null,
+    notificationsEnabled: false,
+    showBedPhotos: true,
+    showBedNames: true,
+    showBedSizes: true,
+  };
+
+  const updatePreferences = (patch: Partial<typeof defaultPreferences>) => {
+    const existing = preferencesQuery.data ?? {
+      ...defaultPreferences,
+    };
+    preferencesMutation.mutate({
+      ...existing,
+      ...patch,
+    });
+  };
+
   return (
     <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
       <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{props.title ?? "Garden Layout"}</Text>
       {props.subtitle ? <Text style={[styles.meta, { color: theme.textMuted }]}>{props.subtitle}</Text> : null}
-      <View style={styles.rowBetween}>
+      <View style={styles.controlsBlock}>
         <View style={styles.zoomRow}>
           <Pressable
             style={[styles.zoomButton, { backgroundColor: theme.secondaryActionBackground }]}
@@ -106,27 +194,76 @@ export function BedPlanPreview(props: {
             <Text style={[styles.zoomButtonText, { color: theme.secondaryActionText }]}>+</Text>
           </Pressable>
         </View>
-        <Pressable style={styles.bedNamesToggleWrap} onPress={() => setShowBedNames((prev) => !prev)}>
-          <Text style={[styles.bedNamesToggleLabel, { color: theme.textPrimary }]}>Bed names</Text>
-          <View
-            style={[
-              styles.bedNamesToggleTrack,
-              {
-                backgroundColor: showBedNames ? theme.toggleOnBackground : theme.toggleOffBackground,
-              },
-            ]}
-          >
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.togglesRow}
+          style={styles.togglesScroll}
+        >
+          <Pressable style={styles.toggleWrap} onPress={() => updatePreferences({ showBedNames: !showBedNames })}>
+            <Text style={[styles.toggleLabel, { color: theme.textPrimary }]}>Bed names</Text>
             <View
               style={[
-                styles.bedNamesToggleThumb,
+                styles.toggleTrack,
                 {
-                  backgroundColor: theme.toggleThumbColor,
-                  marginLeft: showBedNames ? 20 : 2,
+                  backgroundColor: showBedNames ? theme.toggleOnBackground : theme.toggleOffBackground,
                 },
               ]}
-            />
-          </View>
-        </Pressable>
+            >
+              <View
+                style={[
+                  styles.toggleThumb,
+                  {
+                    backgroundColor: theme.toggleThumbColor,
+                    marginLeft: showBedNames ? 20 : 2,
+                  },
+                ]}
+              />
+            </View>
+          </Pressable>
+          <Pressable style={styles.toggleWrap} onPress={() => updatePreferences({ showBedPhotos: !showBedPhotos })}>
+            <Text style={[styles.toggleLabel, { color: theme.textPrimary }]}>Bed photos</Text>
+            <View
+              style={[
+                styles.toggleTrack,
+                {
+                  backgroundColor: showBedPhotos ? theme.toggleOnBackground : theme.toggleOffBackground,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.toggleThumb,
+                  {
+                    backgroundColor: theme.toggleThumbColor,
+                    marginLeft: showBedPhotos ? 20 : 2,
+                  },
+                ]}
+              />
+            </View>
+          </Pressable>
+          <Pressable style={styles.toggleWrap} onPress={() => updatePreferences({ showBedSizes: !showBedSizes })}>
+            <Text style={[styles.toggleLabel, { color: theme.textPrimary }]}>Bed sizes</Text>
+            <View
+              style={[
+                styles.toggleTrack,
+                {
+                  backgroundColor: showBedSizes ? theme.toggleOnBackground : theme.toggleOffBackground,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.toggleThumb,
+                  {
+                    backgroundColor: theme.toggleThumbColor,
+                    marginLeft: showBedSizes ? 20 : 2,
+                  },
+                ]}
+              />
+            </View>
+          </Pressable>
+        </ScrollView>
       </View>
       <View
         onLayout={(event) => {
@@ -161,12 +298,45 @@ export function BedPlanPreview(props: {
               ]}
             >
               <Svg width={zoomedWidth} height={zoomedHeight} style={StyleSheet.absoluteFillObject}>
+                <Defs>
+                  {props.beds.map((bed) => {
+                    const uri = bedBackgroundImageById[bed.id];
+                    if (!showBedPhotos || !uri) return null;
+                    return (
+                      <ClipPath key={`clip-${bed.id}`} id={safeSvgId(`bed-clip-${bed.id}`)}>
+                        <Polygon points={toSvgPoints(bed.polygon, zoomedWidth, zoomedHeight)} />
+                      </ClipPath>
+                    );
+                  })}
+                </Defs>
                 <Path
                   d={`${rectPath(zoomedWidth, zoomedHeight)} ${polygonPath(boundary, zoomedWidth, zoomedHeight)}`}
                   fill={theme.mapBoundaryFill}
                   fillRule="evenodd"
                 />
                 <Polygon points={toSvgPoints(boundary, zoomedWidth, zoomedHeight)} fill="transparent" stroke={theme.mapBoundaryStroke} strokeWidth={2} />
+                {props.beds.map((bed) => {
+                  const uri = bedBackgroundImageById[bed.id];
+                  if (!showBedPhotos || !uri) return null;
+                  const bounds = getBounds(
+                    bed.polygon.map((point) => ({ x: point.x * zoomedWidth, y: point.y * zoomedHeight }))
+                  );
+                  const width = Math.max(1, bounds.maxX - bounds.minX);
+                  const height = Math.max(1, bounds.maxY - bounds.minY);
+                  return (
+                    <G key={`bed-photo-${bed.id}`} clipPath={`url(#${safeSvgId(`bed-clip-${bed.id}`)})`}>
+                      <SvgImage
+                        href={{ uri }}
+                        x={bounds.minX}
+                        y={bounds.minY}
+                        width={width}
+                        height={height}
+                        preserveAspectRatio="xMidYMid slice"
+                        opacity={0.96}
+                      />
+                    </G>
+                  );
+                })}
                 {(props.features ?? []).map((feature) => {
                   const colors = typeColors[feature.type] ?? { fill: theme.mapBedFill, stroke: theme.mapBedStroke };
                   return (
@@ -201,7 +371,13 @@ export function BedPlanPreview(props: {
                   <Polygon
                     key={`shape-${bed.id}`}
                     points={toSvgPoints(bed.polygon, zoomedWidth, zoomedHeight)}
-                    fill={bed.containsPerennials ? theme.mapPerennialBedFill : theme.mapBedFill}
+                    fill={
+                      showBedPhotos && bedBackgroundImageById[bed.id]
+                        ? withAlpha(bed.containsPerennials ? theme.mapPerennialBedFill : theme.mapBedFill, 0.2)
+                        : bed.containsPerennials
+                          ? theme.mapPerennialBedFill
+                          : theme.mapBedFill
+                    }
                     stroke={theme.mapBedStroke}
                     strokeWidth={1.4}
                     onPress={() => handleBedPress(bed)}
@@ -254,6 +430,29 @@ export function BedPlanPreview(props: {
                     />
                   ) : null
                 ))}
+                {showBedSizes && effectiveCalibration && props.beds.flatMap((bed) => {
+                  const labels = getBedMeasurementLabels(
+                    bed.polygon,
+                    zoomedWidth,
+                    zoomedHeight,
+                    effectiveCalibration
+                  );
+                  return labels.map((measurement, index) => (
+                    <SvgText
+                      key={`bed-size-${bed.id}-${index.toString()}`}
+                      x={measurement.x}
+                      y={measurement.y}
+                      textAnchor="middle"
+                      alignmentBaseline="middle"
+                      fontSize={10}
+                      fontWeight="700"
+                      fill={theme.textPrimary}
+                      transform={`rotate(${measurement.angle} ${measurement.x} ${measurement.y})`}
+                    >
+                      {measurement.label}
+                    </SvgText>
+                  ));
+                })}
                 {props.beds.map((bed) => (
                   <Polygon
                     key={`tap-${bed.id}`}
@@ -276,7 +475,7 @@ export function BedPlanPreview(props: {
                     {showBedNames && (
                       <Pressable
                         style={[
-                          styles.bedNameBadge,
+                          styles.bedInfoBadge,
                           {
                             left,
                             top,
@@ -286,12 +485,14 @@ export function BedPlanPreview(props: {
                         ]}
                         onPress={openInfo}
                       >
-                        <Text
-                          style={[styles.bedNameText, { color: theme.textPrimary, fontSize: 11 * bedNameScale }]}
-                          numberOfLines={1}
-                        >
-                          {bed.name}
-                        </Text>
+                        {showBedNames ? (
+                          <Text
+                            style={[styles.bedNameText, { color: theme.textPrimary, fontSize: 11 * bedNameScale }]}
+                            numberOfLines={1}
+                          >
+                            {bed.name}
+                          </Text>
+                        ) : null}
                       </Pressable>
                     )}
                   </View>
@@ -323,6 +524,10 @@ function toSvgPoints(points: Point2D[], width: number, height: number): string {
   return points.map((point) => `${point.x * width},${point.y * height}`).join(" ");
 }
 
+function safeSvgId(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+
 function rectPath(width: number, height: number): string {
   return `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z`;
 }
@@ -333,6 +538,110 @@ function polygonPath(points: Point2D[], width: number, height: number): string {
   const start = `M ${first.x * width} ${first.y * height}`;
   const lines = points.slice(1).map((point) => `L ${point.x * width} ${point.y * height}`).join(" ");
   return `${start} ${lines} Z`;
+}
+
+function polygonAreaNormalized(points: Point2D[]): number {
+  if (points.length < 3) return 0;
+  let total = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i]!;
+    const b = points[(i + 1) % points.length]!;
+    total += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(total) / 2;
+}
+
+function getBedMeasurementLabels(
+  polygon: Point2D[],
+  width: number,
+  height: number,
+  calibration: { metersPerPixel: number; baseWidth: number; baseHeight: number }
+): Array<{ x: number; y: number; angle: number; label: string }> {
+  if (polygon.length < 2 || width <= 0 || height <= 0) return [];
+  if (isLikelyEllipsePolygon(polygon)) return [];
+  if (isRectangleLikePolygon(polygon)) {
+    return getPolygonEdgeMeasurementLabels(polygon, width, height, calibration, [0, 1]);
+  }
+  return getPolygonEdgeMeasurementLabels(polygon, width, height, calibration);
+}
+
+function isRectangleLikePolygon(polygon: Point2D[]): boolean {
+  if (polygon.length !== 4) return false;
+  const vectors = polygon.map((point, index) => {
+    const next = polygon[(index + 1) % polygon.length]!;
+    return { x: next.x - point.x, y: next.y - point.y };
+  });
+  const lengths = vectors.map((vector) => Math.hypot(vector.x, vector.y));
+  if (lengths.some((length) => length < 1e-5)) return false;
+  const dot0 = Math.abs(vectors[0]!.x * vectors[1]!.x + vectors[0]!.y * vectors[1]!.y) / (lengths[0]! * lengths[1]!);
+  const dot1 = Math.abs(vectors[1]!.x * vectors[2]!.x + vectors[1]!.y * vectors[2]!.y) / (lengths[1]! * lengths[2]!);
+  return dot0 < 0.2 && dot1 < 0.2;
+}
+
+function isLikelyEllipsePolygon(polygon: Point2D[]): boolean {
+  if (polygon.length < 8) return false;
+  const xs = polygon.map((point) => point.x);
+  const ys = polygon.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const halfW = Math.max((maxX - minX) / 2, 1e-6);
+  const halfH = Math.max((maxY - minY) / 2, 1e-6);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const radii = polygon.map((point) => Math.hypot((point.x - centerX) / halfW, (point.y - centerY) / halfH));
+  const mean = radii.reduce((sum, value) => sum + value, 0) / radii.length;
+  const variance = radii.reduce((sum, value) => sum + (value - mean) * (value - mean), 0) / radii.length;
+  return Math.sqrt(variance) < 0.22;
+}
+
+function getPolygonEdgeMeasurementLabels(
+  polygon: Point2D[],
+  width: number,
+  height: number,
+  calibration: { metersPerPixel: number; baseWidth: number; baseHeight: number },
+  edgeIndexes?: number[]
+): Array<{ x: number; y: number; angle: number; label: string }> {
+  if (polygon.length < 2) return [];
+  const labels: Array<{ x: number; y: number; angle: number; label: string }> = [];
+  const indexes = edgeIndexes ?? polygon.map((_point, index) => index);
+  const centroid = polygon.reduce(
+    (acc, point) => ({ x: acc.x + point.x / polygon.length, y: acc.y + point.y / polygon.length }),
+    { x: 0, y: 0 }
+  );
+  const epsilon = 1e-6;
+  for (const index of indexes) {
+    const start = polygon[index];
+    const end = polygon[(index + 1) % polygon.length];
+    if (!start || !end) continue;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const pixelLength = Math.hypot(dx * calibration.baseWidth, dy * calibration.baseHeight);
+    const meters = pixelLength * calibration.metersPerPixel;
+    if (!Number.isFinite(meters) || meters < 0.05) continue;
+    const midX = ((start.x + end.x) / 2) * width;
+    const midY = ((start.y + end.y) / 2) * height;
+    const toOutsideX = midX - centroid.x * width;
+    const toOutsideY = midY - centroid.y * height;
+    const outsideLength = Math.hypot(toOutsideX, toOutsideY);
+    const offset = 12;
+    const rawX = outsideLength > epsilon ? midX + (toOutsideX / outsideLength) * offset : midX;
+    const rawY = outsideLength > epsilon ? midY + (toOutsideY / outsideLength) * offset : midY;
+    const edgeMargin = 14;
+    const x = clamp(rawX, edgeMargin, Math.max(edgeMargin, width - edgeMargin));
+    const y = clamp(rawY, edgeMargin, Math.max(edgeMargin, height - edgeMargin));
+    let angle = (Math.atan2(dy * height, dx * width) * 180) / Math.PI;
+    if (angle > 90) angle -= 180;
+    if (angle < -90) angle += 180;
+    labels.push({
+      x,
+      y,
+      angle,
+      label: `${meters.toFixed(1)}m`,
+    });
+  }
+  return labels;
 }
 
 function withAlpha(color: string, alpha: number): string {
@@ -531,27 +840,29 @@ const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
   cardTitle: { fontSize: 16, fontWeight: "800" },
   meta: { fontSize: 13 },
-  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" },
+  controlsBlock: { gap: 6 },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  togglesScroll: { width: "100%" },
+  togglesRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingRight: 6 },
   zoomButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   zoomButtonText: { fontSize: 18, fontWeight: "700" },
   zoomText: { minWidth: 52, textAlign: "center", fontWeight: "700" },
-  bedNamesToggleWrap: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
-  bedNamesToggleLabel: { fontWeight: "700", fontSize: 12 },
-  bedNamesToggleTrack: { width: 42, height: 24, borderRadius: 999, paddingVertical: 2, paddingHorizontal: 2, justifyContent: "center" },
-  bedNamesToggleThumb: { width: 18, height: 18, borderRadius: 999 },
+  toggleWrap: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
+  toggleLabel: { fontWeight: "700", fontSize: 12 },
+  toggleTrack: { width: 42, height: 24, borderRadius: 999, paddingVertical: 2, paddingHorizontal: 2, justifyContent: "center" },
+  toggleThumb: { width: 18, height: 18, borderRadius: 999 },
   previewViewport: { borderRadius: 12, overflow: "hidden", borderWidth: 1 },
   previewCanvas: { borderRadius: 12, overflow: "hidden", position: "relative" },
-  bedNameBadge: {
+  bedInfoBadge: {
     position: "absolute",
     marginLeft: -44,
-    marginTop: -11,
+    marginTop: -14,
     minWidth: 56,
-    maxWidth: 120,
+    maxWidth: 132,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 6,
-    paddingVertical: 3,
+    paddingVertical: 4,
     alignItems: "center",
   },
   bedNameText: { fontSize: 10, fontWeight: "700", flexShrink: 1, textAlign: "center" },

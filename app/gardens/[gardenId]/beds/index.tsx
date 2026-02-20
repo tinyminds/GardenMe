@@ -819,11 +819,13 @@ export default function BedsListScreen() {
       source === "camera"
         ? await ImagePicker.launchCameraAsync({
             mediaTypes: ["images"],
+            allowsEditing: true,
             quality: 0.85,
           })
         : await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ["images"],
             allowsMultipleSelection: false,
+            allowsEditing: true,
             quality: 0.85,
           });
     if (result.canceled) return;
@@ -838,6 +840,7 @@ export default function BedsListScreen() {
       uri: asset.uri,
       source,
       createdAt: new Date().toISOString(),
+      isBedBackground: false,
     };
     const next: BedPhotoLogSettings = {
       ...current,
@@ -887,6 +890,25 @@ export default function BedsListScreen() {
           })()
         : photo
     );
+    const next: BedPhotoLogSettings = {
+      ...current,
+      [gardenId]: updatedPhotos,
+    };
+    await saveBedPhotoLogSettings(next);
+    queryClient.setQueryData(["bed-photo-log-settings"], next);
+  };
+
+  const setPhotoAsBedBackground = async (bedId: string, photoId: string, enabled: boolean) => {
+    if (!gardenId) return;
+    const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
+    const current = cached ?? (await loadBedPhotoLogSettings());
+    const currentPhotos = current[gardenId] ?? [];
+    const updatedPhotos = currentPhotos.map((photo) => {
+      if (photo.bedId !== bedId) return photo;
+      if (photo.id === photoId) return { ...photo, isBedBackground: enabled };
+      if (enabled && photo.isBedBackground) return { ...photo, isBedBackground: false };
+      return photo;
+    });
     const next: BedPhotoLogSettings = {
       ...current,
       [gardenId]: updatedPhotos,
@@ -1130,6 +1152,11 @@ export default function BedsListScreen() {
                         <Pressable onPress={() => openPhotoViewer(photo, card.bed.name)}>
                           <Image source={{ uri: photo.uri }} style={[styles.photoThumb, { backgroundColor: theme.chipBackground }]} />
                         </Pressable>
+                        {photo.isBedBackground && (
+                          <View style={[styles.photoBackgroundBadge, { backgroundColor: theme.primaryActionBackground }]}>
+                            <Text style={[styles.photoBackgroundBadgeText, { color: theme.primaryActionText }]}>Bed background</Text>
+                          </View>
+                        )}
                         <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{formatDate(photo.createdAt)}</Text>
                         <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{photo.source === "camera" ? "Camera" : "Gallery"}</Text>
                         {photo.notes && (
@@ -1294,6 +1321,10 @@ export default function BedsListScreen() {
           <>
             <BedPlanPreview
               beds={beds}
+              scaleCalibration={gardenQuery.data?.scaleCalibration ?? null}
+              {...(Number.isFinite(gardenQuery.data?.scaleCalibration?.boundaryAreaSqM)
+                ? { boundaryAreaSqM: gardenQuery.data?.scaleCalibration?.boundaryAreaSqM }
+                : {})}
               {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
                 ? { boundaryPolygon: gardenQuery.data.scaleCalibration.boundaryPolygon }
                 : {})}
@@ -1400,6 +1431,11 @@ export default function BedsListScreen() {
                             <Pressable onPress={() => openPhotoViewer(photo, card.bed.name)}>
                               <Image source={{ uri: photo.uri }} style={[styles.photoThumb, { backgroundColor: theme.chipBackground }]} />
                             </Pressable>
+                            {photo.isBedBackground && (
+                              <View style={[styles.photoBackgroundBadge, { backgroundColor: theme.primaryActionBackground }]}>
+                                <Text style={[styles.photoBackgroundBadgeText, { color: theme.primaryActionText }]}>Bed background</Text>
+                              </View>
+                            )}
                             <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{formatDate(photo.createdAt)}</Text>
                             <Text style={[styles.photoMeta, { color: theme.textMuted }]}>{photo.source === "camera" ? "Camera" : "Gallery"}</Text>
                             {photo.notes && <Text style={[styles.photoNotes, { color: theme.textPrimary }]} numberOfLines={2}>{photo.notes}</Text>}
@@ -1515,6 +1551,10 @@ export default function BedsListScreen() {
         {plannerMode === "list" && (
         <BedPlanPreview
           beds={beds}
+          scaleCalibration={gardenQuery.data?.scaleCalibration ?? null}
+          {...(Number.isFinite(gardenQuery.data?.scaleCalibration?.boundaryAreaSqM)
+            ? { boundaryAreaSqM: gardenQuery.data?.scaleCalibration?.boundaryAreaSqM }
+            : {})}
           {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
             ? { boundaryPolygon: gardenQuery.data.scaleCalibration.boundaryPolygon }
             : {})}
@@ -1523,7 +1563,7 @@ export default function BedsListScreen() {
             : {})}
           infoByBedId={bedPreviewInfoById}
           bedPlantDotsById={bedPlantDotsById}
-          subtitle="No image or grid here. This is a clean bed layout."
+          subtitle=""
         />
         )}
       </ScrollView>
@@ -1620,6 +1660,21 @@ export default function BedsListScreen() {
                 <Text style={[styles.photoViewerSource, { color: theme.textMuted }]}>
                   Source: {photoViewer.photo.source === "camera" ? "Camera" : "Gallery"}
                 </Text>
+                <View style={styles.photoViewerBackgroundRow}>
+                  <Text style={[styles.photoViewerBackgroundLabel, { color: theme.textPrimary }]}>Use as bed background</Text>
+                  <SimpleToggle
+                    value={Boolean(photoViewer.photo.isBedBackground)}
+                    onToggle={(enabled) => {
+                      const current = photoViewer;
+                      if (!current) return;
+                      setPhotoViewer({
+                        ...current,
+                        photo: { ...current.photo, isBedBackground: enabled },
+                      });
+                      void setPhotoAsBedBackground(current.photo.bedId, current.photo.id, enabled);
+                    }}
+                  />
+                </View>
                 <TextInput
                   value={photoViewer.photo.notes || ""}
                   onChangeText={(text) => {
@@ -2093,6 +2148,17 @@ const styles = StyleSheet.create({
   photoStrip: { gap: 8, paddingRight: 6 },
   photoCard: { borderRadius: 10, padding: 6, gap: 2, width: 120, position: "relative" },
   photoThumb: { width: 106, height: 72, borderRadius: 7 },
+  photoBackgroundBadge: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginTop: 2,
+  },
+  photoBackgroundBadgeText: {
+    fontSize: 9,
+    fontWeight: "700",
+  },
   photoMeta: { fontSize: 10 },
   photoDeleteButton: { position: "absolute", top: 2, right: 2, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", zIndex: 1 },
   photoDeleteButtonText: { fontSize: 16, fontWeight: "800", lineHeight: 16 },
@@ -2224,6 +2290,16 @@ const styles = StyleSheet.create({
   photoViewerFooter: {
     padding: 16,
     paddingBottom: 120,
+  },
+  photoViewerBackgroundRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  photoViewerBackgroundLabel: {
+    fontSize: 13,
+    fontWeight: "700",
   },
   photoViewerNotesInput: {
     borderRadius: 8,
