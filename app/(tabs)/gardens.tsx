@@ -166,7 +166,7 @@ export default function GardensTabScreen() {
           disabled={importBackupMutation.isPending || cloneMutation.isPending || deleteMutation.isPending}
         />
       </View>
-      <Text style={[styles.noteText, { color: theme.textMuted }]}>Backups do not include bed photos.</Text>
+      <Text style={[styles.noteText, { color: theme.textMuted }]}>Backups include bed photos and base map images. Larger backups may take longer to share/import.</Text>
       {cloneMutation.isPending ? (
         <Text style={[styles.state, { color: theme.textMuted, paddingTop: 0, paddingBottom: 8 }]}>Cloning garden...</Text>
       ) : null}
@@ -403,4 +403,3 @@ const styles = StyleSheet.create({
   modalInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9, fontWeight: "600" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
 });
-

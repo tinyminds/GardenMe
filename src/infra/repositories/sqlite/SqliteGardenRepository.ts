@@ -2,6 +2,7 @@
 import type { Garden, GardenScaleCalibration } from "@/domain/entities/Garden";
 import type { GardenRepository } from "@/domain/repositories/GardenRepository";
 import { makeId } from "@/utils/id";
+import * as FileSystem from "expo-file-system";
 
 type GardenRow = {
   id: string;
@@ -118,6 +119,17 @@ type BedPhotoLogEntry = {
   uri: string;
   source: "camera" | "gallery";
   createdAt: string;
+  notes?: string;
+  isBedBackground?: boolean;
+};
+
+type GardenBackupMediaFile = {
+  id: string;
+  kind: "garden_photo" | "bed_photo";
+  base64: string;
+  mimeType: string;
+  fileExtension: string;
+  bedPhotoId?: string;
 };
 
 export type GardenBackupBundle = {
@@ -134,6 +146,9 @@ export type GardenBackupBundle = {
     gardenProgress?: GardenProgressFlags;
     bedPlanner?: GardenBedPlannerFlags;
     bedPhotoLog?: BedPhotoLogEntry[];
+  };
+  media?: {
+    files: GardenBackupMediaFile[];
   };
 };
 
@@ -474,6 +489,7 @@ export class SqliteGardenRepository implements GardenRepository {
         bedPhotoLog = parsed[gardenId];
       }
     } catch {}
+    const mediaFiles = await this.buildBackupMediaFiles(source.photo_uri, bedPhotoLog);
 
     return {
       format: "gardenme-garden-backup-v1",
@@ -502,6 +518,7 @@ export class SqliteGardenRepository implements GardenRepository {
         ...(bedPlanner ? { bedPlanner } : {}),
         ...(bedPhotoLog ? { bedPhotoLog } : {}),
       },
+      ...(mediaFiles.length > 0 ? { media: { files: mediaFiles } } : {}),
     };
   }
 
@@ -518,6 +535,7 @@ export class SqliteGardenRepository implements GardenRepository {
     const bedIdMap = new Map<string, string>();
     const entryIdMap = new Map<string, string>();
     const plantIdMap = new Map<string, string>();
+    const importedMedia = await this.restoreBackupMedia(bundle, importedGardenId);
 
     await db.withTransactionAsync(async () => {
       await db.runAsync(
@@ -530,7 +548,7 @@ export class SqliteGardenRepository implements GardenRepository {
           bundle.garden.latitude,
           bundle.garden.longitude,
           bundle.garden.locationLabel ?? null,
-          bundle.garden.photoUri ?? null,
+          importedMedia.gardenPhotoUri ?? bundle.garden.photoUri ?? null,
           bundle.garden.imageSourceType ?? null,
           bundle.garden.scaleCalibration ? JSON.stringify(bundle.garden.scaleCalibration) : null,
           now,
@@ -742,6 +760,7 @@ export class SqliteGardenRepository implements GardenRepository {
           ...row,
           id: makeId("bed-photo"),
           bedId: bedIdMap.get(row.bedId) ?? row.bedId,
+          uri: importedMedia.bedPhotoUriByPhotoId[row.id] ?? row.uri,
         }));
         const next = { ...bedPhotoParsed, [importedGardenId]: remappedPhotos };
         await db.runAsync(
@@ -759,7 +778,9 @@ export class SqliteGardenRepository implements GardenRepository {
       latitude: bundle.garden.latitude,
       longitude: bundle.garden.longitude,
       ...(bundle.garden.locationLabel ? { locationLabel: bundle.garden.locationLabel } : {}),
-      ...(bundle.garden.photoUri ? { photoUri: bundle.garden.photoUri } : {}),
+      ...(importedMedia.gardenPhotoUri ?? bundle.garden.photoUri
+        ? { photoUri: importedMedia.gardenPhotoUri ?? bundle.garden.photoUri! }
+        : {}),
       ...(bundle.garden.imageSourceType ? { imageSourceType: bundle.garden.imageSourceType } : {}),
       ...(bundle.garden.scaleCalibration ? { scaleCalibration: bundle.garden.scaleCalibration } : {}),
       createdAt: now,
@@ -772,17 +793,38 @@ export class SqliteGardenRepository implements GardenRepository {
   }
 
   async updatePhoto(id: string, photoUri: string, sourceType: "photo" | "satellite" = "photo"): Promise<void> {
-    await getDatabase().runAsync(
-      "UPDATE gardens SET photo_uri = ?, image_source_type = ?, updated_at = ? WHERE id = ?",
-      [photoUri, sourceType, new Date().toISOString(), id]
+    const db = getDatabase();
+    const existing = await db.getFirstAsync<{ photo_uri: string | null }>(
+      "SELECT photo_uri FROM gardens WHERE id = ? LIMIT 1",
+      [id]
     );
+    const persistedPhotoUri = await this.persistGardenPhotoUri(id, photoUri);
+    await db.runAsync(
+      "UPDATE gardens SET photo_uri = ?, image_source_type = ?, updated_at = ? WHERE id = ?",
+      [persistedPhotoUri, sourceType, new Date().toISOString(), id]
+    );
+    if (
+      existing?.photo_uri &&
+      existing.photo_uri !== persistedPhotoUri &&
+      this.isManagedGardenMediaUri(existing.photo_uri)
+    ) {
+      this.safeDeleteFile(existing.photo_uri);
+    }
   }
 
   async clearPhoto(id: string): Promise<void> {
-    await getDatabase().runAsync(
+    const db = getDatabase();
+    const existing = await db.getFirstAsync<{ photo_uri: string | null }>(
+      "SELECT photo_uri FROM gardens WHERE id = ? LIMIT 1",
+      [id]
+    );
+    await db.runAsync(
       "UPDATE gardens SET photo_uri = NULL, image_source_type = NULL, updated_at = ? WHERE id = ?",
       [new Date().toISOString(), id]
     );
+    if (existing?.photo_uri && this.isManagedGardenMediaUri(existing.photo_uri)) {
+      this.safeDeleteFile(existing.photo_uri);
+    }
   }
 
   async updateScaleCalibration(id: string, calibration: GardenScaleCalibration): Promise<void> {
@@ -822,6 +864,188 @@ export class SqliteGardenRepository implements GardenRepository {
     }
 
     return garden;
+  }
+
+  private async buildBackupMediaFiles(
+    gardenPhotoUri: string | null,
+    bedPhotoLog: BedPhotoLogEntry[] | undefined
+  ): Promise<GardenBackupMediaFile[]> {
+    const files: GardenBackupMediaFile[] = [];
+
+    const appendMedia = async (payload: {
+      id: string;
+      kind: "garden_photo" | "bed_photo";
+      uri: string;
+      bedPhotoId?: string;
+    }) => {
+      const base64 = await this.readFileAsBase64(payload.uri);
+      if (!base64) return;
+      const fileExtension = this.inferFileExtensionFromUri(payload.uri);
+      files.push({
+        id: payload.id,
+        kind: payload.kind,
+        base64,
+        fileExtension,
+        mimeType: this.mimeTypeFromExtension(fileExtension),
+        ...(payload.bedPhotoId ? { bedPhotoId: payload.bedPhotoId } : {}),
+      });
+    };
+
+    if (gardenPhotoUri) {
+      await appendMedia({
+        id: "garden-photo",
+        kind: "garden_photo",
+        uri: gardenPhotoUri,
+      });
+    }
+
+    const bedPhotos = bedPhotoLog ?? [];
+    for (const row of bedPhotos) {
+      if (!row?.uri) continue;
+      await appendMedia({
+        id: `bed-photo-${row.id}`,
+        kind: "bed_photo",
+        uri: row.uri,
+        bedPhotoId: row.id,
+      });
+    }
+
+    return files;
+  }
+
+  private async restoreBackupMedia(
+    bundle: GardenBackupBundle,
+    importedGardenId: string
+  ): Promise<{ gardenPhotoUri: string | null; bedPhotoUriByPhotoId: Record<string, string> }> {
+    const result: { gardenPhotoUri: string | null; bedPhotoUriByPhotoId: Record<string, string> } = {
+      gardenPhotoUri: null,
+      bedPhotoUriByPhotoId: {},
+    };
+    const mediaFiles = bundle.media?.files ?? [];
+    if (mediaFiles.length === 0) {
+      return result;
+    }
+
+    const mediaDirectory = new FileSystem.Directory(FileSystem.Paths.document, "garden-media", importedGardenId);
+    mediaDirectory.create({ idempotent: true, intermediates: true });
+
+    for (const media of mediaFiles) {
+      if (!media?.base64) continue;
+      const extension = this.normalizeFileExtension(media.fileExtension);
+      const cleanBase64 = this.stripBase64DataPrefix(media.base64);
+      try {
+        if (media.kind === "garden_photo") {
+          const target = new FileSystem.File(mediaDirectory, `garden-base.${extension}`);
+          target.create({ intermediates: true, overwrite: true });
+          target.write(cleanBase64, { encoding: "base64" });
+          result.gardenPhotoUri = target.uri;
+          continue;
+        }
+        if (media.kind === "bed_photo" && media.bedPhotoId) {
+          const target = new FileSystem.File(
+            mediaDirectory,
+            `bed-photo-${this.sanitizeIdSegment(media.bedPhotoId)}.${extension}`
+          );
+          target.create({ intermediates: true, overwrite: true });
+          target.write(cleanBase64, { encoding: "base64" });
+          result.bedPhotoUriByPhotoId[media.bedPhotoId] = target.uri;
+        }
+      } catch {
+        // Ignore media import failures and keep URI fallback paths.
+      }
+    }
+
+    return result;
+  }
+
+  private async readFileAsBase64(uri: string): Promise<string | null> {
+    try {
+      const file = new FileSystem.File(uri);
+      if (!file.exists) return null;
+      const base64 = await file.base64();
+      return base64 || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private inferFileExtensionFromUri(uri: string): string {
+    const lower = uri.toLowerCase();
+    if (lower.endsWith(".png")) return "png";
+    if (lower.endsWith(".webp")) return "webp";
+    if (lower.endsWith(".heic")) return "heic";
+    if (lower.endsWith(".heif")) return "heif";
+    return "jpg";
+  }
+
+  private normalizeFileExtension(extension?: string): string {
+    const clean = (extension ?? "").trim().toLowerCase().replace(/^\./, "");
+    if (clean === "png" || clean === "webp" || clean === "heic" || clean === "heif" || clean === "jpg" || clean === "jpeg") {
+      return clean === "jpeg" ? "jpg" : clean;
+    }
+    return "jpg";
+  }
+
+  private mimeTypeFromExtension(extension: string): string {
+    const normalized = this.normalizeFileExtension(extension);
+    if (normalized === "png") return "image/png";
+    if (normalized === "webp") return "image/webp";
+    if (normalized === "heic") return "image/heic";
+    if (normalized === "heif") return "image/heif";
+    return "image/jpeg";
+  }
+
+  private stripBase64DataPrefix(value: string): string {
+    const marker = "base64,";
+    const index = value.indexOf(marker);
+    if (index === -1) return value;
+    return value.slice(index + marker.length);
+  }
+
+  private sanitizeIdSegment(value: string): string {
+    return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+  }
+
+  private async persistGardenPhotoUri(gardenId: string, sourceUri: string): Promise<string> {
+    const extension = this.inferFileExtensionFromUri(sourceUri);
+    const mediaDirectory = new FileSystem.Directory(FileSystem.Paths.document, "garden-media", "garden-photos", gardenId);
+    mediaDirectory.create({ idempotent: true, intermediates: true });
+    const target = new FileSystem.File(
+      mediaDirectory,
+      `garden-base-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${extension}`
+    );
+
+    try {
+      const source = new FileSystem.File(sourceUri);
+      source.copy(target);
+      return target.uri;
+    } catch {
+      try {
+        const source = new FileSystem.File(sourceUri);
+        const base64 = await source.base64();
+        target.create({ intermediates: true, overwrite: true });
+        target.write(base64, { encoding: "base64" });
+        return target.uri;
+      } catch {
+        return sourceUri;
+      }
+    }
+  }
+
+  private isManagedGardenMediaUri(uri: string): boolean {
+    const lower = uri.toLowerCase();
+    return lower.includes("/garden-media/");
+  }
+
+  private safeDeleteFile(uri: string): void {
+    try {
+      const file = new FileSystem.File(uri);
+      if (file.exists) {
+        file.delete();
+      }
+    } catch {
+      // Ignore cleanup failures.
+    }
   }
 
   private async resolveCloneName(sourceName: string, requestedName?: string): Promise<string> {

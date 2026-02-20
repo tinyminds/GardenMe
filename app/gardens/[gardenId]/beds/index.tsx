@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { loadGardenBedPlannerSettings, saveGardenBedPlannerSettings, type GardenBedPlannerSettings } from "@/core/settings/gardenBedPlannerSettings";
 import { loadBedPhotoLogSettings, saveBedPhotoLogSettings, type BedPhotoLogEntry, type BedPhotoLogSettings } from "@/core/settings/bedPhotoLogSettings";
@@ -104,6 +105,7 @@ type PhotoViewerState = {
 type PlannerMode = "list" | "visual";
 
 const MAX_SUGGESTIONS_PER_BED = 2;
+const MAX_BED_PHOTOS_PER_BED = 10;
 
 export default function BedsListScreen() {
   const { theme } = useTheme();
@@ -814,6 +816,17 @@ export default function BedsListScreen() {
 
   const addBedPhoto = async (bedId: string, source: "camera" | "gallery") => {
     if (!gardenId) return;
+    const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
+    const current = cached ?? (await loadBedPhotoLogSettings());
+    const existingForBed = (current[gardenId] ?? []).filter((row) => row.bedId === bedId);
+    if (existingForBed.length >= MAX_BED_PHOTOS_PER_BED) {
+      Alert.alert(
+        "Photo limit reached",
+        `Each bed can store up to ${MAX_BED_PHOTOS_PER_BED} photos. Delete one to add another.`
+      );
+      return;
+    }
+
     if (source === "camera") {
       const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
       if (!cameraPermission.granted) {
@@ -845,12 +858,16 @@ export default function BedsListScreen() {
     const asset = result.assets?.[0];
     if (!asset?.uri) return;
 
-    const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
-    const current = cached ?? (await loadBedPhotoLogSettings());
+    const persistedUri = await persistBedPhotoUri({
+      sourceUri: asset.uri,
+      gardenId,
+      bedId,
+      ...(asset.fileName ? { suggestedFileName: asset.fileName } : {}),
+    });
     const nextRow: BedPhotoLogEntry = {
       id: `bed-photo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       bedId,
-      uri: asset.uri,
+      uri: persistedUri,
       source,
       createdAt: new Date().toISOString(),
       isBedBackground: false,
@@ -877,6 +894,7 @@ export default function BedsListScreen() {
             const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
             const current = cached ?? (await loadBedPhotoLogSettings());
             const currentPhotos = current[gardenId] ?? [];
+            const removedPhoto = currentPhotos.find((photo) => photo.id === photoId);
             const filteredPhotos = currentPhotos.filter(photo => photo.id !== photoId);
             const next: BedPhotoLogSettings = {
               ...current,
@@ -884,6 +902,16 @@ export default function BedsListScreen() {
             };
             await saveBedPhotoLogSettings(next);
             queryClient.setQueryData(["bed-photo-log-settings"], next);
+            if (removedPhoto?.uri && isManagedGardenMediaUri(removedPhoto.uri)) {
+              try {
+                const file = new FileSystem.File(removedPhoto.uri);
+                if (file.exists) {
+                  file.delete();
+                }
+              } catch {
+                // Ignore cleanup failures; metadata is already removed.
+              }
+            }
           }
         }
       ]
@@ -2038,6 +2066,57 @@ function parsePerennialPlants(csv?: string): string[] {
 
 function normalizePlantName(value: string): string {
   return value.trim().toLowerCase();
+}
+
+async function persistBedPhotoUri(input: {
+  sourceUri: string;
+  gardenId: string;
+  bedId: string;
+  suggestedFileName?: string;
+}): Promise<string> {
+  const extension = inferImageExtension(input.suggestedFileName ?? input.sourceUri);
+  const mediaDirectory = new FileSystem.Directory(
+    FileSystem.Paths.document,
+    "garden-media",
+    "bed-photos",
+    input.gardenId,
+    input.bedId
+  );
+  mediaDirectory.create({ idempotent: true, intermediates: true });
+  const destination = new FileSystem.File(
+    mediaDirectory,
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${extension}`
+  );
+
+  try {
+    const source = new FileSystem.File(input.sourceUri);
+    source.copy(destination);
+    return destination.uri;
+  } catch {
+    try {
+      const source = new FileSystem.File(input.sourceUri);
+      const base64 = await source.base64();
+      destination.create({ intermediates: true, overwrite: true });
+      destination.write(base64, { encoding: "base64" });
+      return destination.uri;
+    } catch {
+      return input.sourceUri;
+    }
+  }
+}
+
+function inferImageExtension(value: string): string {
+  const lower = value.toLowerCase();
+  if (lower.endsWith(".png")) return "png";
+  if (lower.endsWith(".webp")) return "webp";
+  if (lower.endsWith(".heic")) return "heic";
+  if (lower.endsWith(".heif")) return "heif";
+  return "jpg";
+}
+
+function isManagedGardenMediaUri(uri: string): boolean {
+  const lower = uri.toLowerCase();
+  return lower.includes("/garden-media/") && lower.includes("/bed-photos/");
 }
 
 function formatEntryName(entry: GardenCropWishlistItemView): string {
