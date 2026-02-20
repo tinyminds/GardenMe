@@ -441,10 +441,24 @@ export default function GardenMapEditorScreen() {
     } catch {
       return false;
     }
-    setPresetShape(candidate);
-    setDraftPoints(points);
-    setSelectedPointIndex(null);
-    setIsClosed(true);
+
+    const shouldUpdatePreset = !presetShape || !arePresetShapesEquivalent(presetShape, candidate);
+    const shouldUpdatePoints = !arePointArraysEquivalent(draftPoints, points);
+    const shouldResetSelection = selectedPointIndex !== null;
+    const shouldClose = !isClosed;
+
+    if (shouldUpdatePreset) {
+      setPresetShape(candidate);
+    }
+    if (shouldUpdatePoints) {
+      setDraftPoints(points);
+    }
+    if (shouldResetSelection) {
+      setSelectedPointIndex(null);
+    }
+    if (shouldClose) {
+      setIsClosed(true);
+    }
     return true;
   };
 
@@ -1488,7 +1502,8 @@ export default function GardenMapEditorScreen() {
             value={name}
             onChangeText={setName}
             placeholder={activeType === GardenFeatureType.BED ? "Bed name" : "Area name"}
-            style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+            placeholderTextColor={theme.textMuted}
+            style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
           />
 
           {activeType === GardenFeatureType.BED && (
@@ -1555,8 +1570,9 @@ export default function GardenMapEditorScreen() {
                             }
                           }}
                           placeholder="Length (m)"
+                          placeholderTextColor={theme.textMuted}
                           keyboardType="decimal-pad"
-                          style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                          style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
                         />
                       </View>
                       <View style={styles.precisionField}>
@@ -1574,8 +1590,9 @@ export default function GardenMapEditorScreen() {
                             }
                           }}
                           placeholder="Width (m)"
+                          placeholderTextColor={theme.textMuted}
                           keyboardType="decimal-pad"
-                          style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.surfaceBackground, color: theme.textPrimary }]}
+                          style={[styles.nameInput, { borderColor: theme.borderColor, backgroundColor: theme.appBackground, color: theme.textPrimary }]}
                         />
                       </View>
                     </View>
@@ -1689,26 +1706,44 @@ function VertexHandle(props: {
   onSelect: () => void;
   onDrag: (point: Point2D) => void;
 }) {
-  const panResponder = useMemo(() => {
-    let startPoint = props.point;
+  const pointRef = useRef(props.point);
+  const widthRef = useRef(props.width);
+  const heightRef = useRef(props.height);
+  const onSelectRef = useRef(props.onSelect);
+  const onDragRef = useRef(props.onDrag);
+  const dragStartRef = useRef(props.point);
 
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        startPoint = props.point;
-        props.onSelect();
-      },
-      onPanResponderMove: (_event, gestureState) => {
-        if (props.width <= 0 || props.height <= 0) return;
+  useEffect(() => {
+    pointRef.current = props.point;
+    widthRef.current = props.width;
+    heightRef.current = props.height;
+    onSelectRef.current = props.onSelect;
+    onDragRef.current = props.onDrag;
+  }, [props.height, props.onDrag, props.onSelect, props.point, props.width]);
 
-        props.onDrag({
-          x: clamp(startPoint.x + gestureState.dx / props.width, 0, 1),
-          y: clamp(startPoint.y + gestureState.dy / props.height, 0, 1),
-        });
-      },
-    });
-  }, [props]);
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          dragStartRef.current = pointRef.current;
+          onSelectRef.current();
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const width = widthRef.current;
+          const height = heightRef.current;
+          if (width <= 0 || height <= 0) return;
+
+          const start = dragStartRef.current;
+          onDragRef.current({
+            x: clamp(start.x + gestureState.dx / width, 0, 1),
+            y: clamp(start.y + gestureState.dy / height, 0, 1),
+          });
+        },
+      }),
+    []
+  );
 
   return (
     <View
@@ -1816,6 +1851,40 @@ function PickerRow(props: {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+const FLOAT_TOLERANCE = 1e-6;
+
+function nearlyEqual(a: number, b: number): boolean {
+  return Math.abs(a - b) <= FLOAT_TOLERANCE;
+}
+
+function arePointsEquivalent(a: Point2D, b: Point2D): boolean {
+  return nearlyEqual(a.x, b.x) && nearlyEqual(a.y, b.y);
+}
+
+function arePointArraysEquivalent(a: Point2D[], b: Point2D[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    const pointA = a[index];
+    const pointB = b[index];
+    if (!pointA || !pointB || !arePointsEquivalent(pointA, pointB)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function arePresetShapesEquivalent(a: PresetShapeDraft, b: PresetShapeDraft): boolean {
+  return (
+    a.kind === b.kind &&
+    arePointsEquivalent(a.center, b.center) &&
+    nearlyEqual(a.width, b.width) &&
+    nearlyEqual(a.height, b.height) &&
+    nearlyEqual(a.angleDeg ?? 0, b.angleDeg ?? 0) &&
+    a.variant === b.variant &&
+    Boolean(a.forceCircle) === Boolean(b.forceCircle)
+  );
 }
 
 function withAlpha(color: string, alpha: number): string {
@@ -2599,9 +2668,11 @@ const styles = StyleSheet.create({
   secondaryButtonTextActive: {},
   nameInput: {
     marginTop: 2,
+    borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    fontSize: 15,
   },
   metaRow: { marginTop: 8, gap: 12 },
   choiceRow: { gap: 6 },

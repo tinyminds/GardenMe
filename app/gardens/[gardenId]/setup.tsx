@@ -66,6 +66,7 @@ export default function GardenSetupScreen() {
   const [locatingUser, setLocatingUser] = useState(false);
   const [captureMapSnapshot, setCaptureMapSnapshot] = useState<(() => Promise<MapSnapshotResult>) | null>(null);
   const [locationHydrated, setLocationHydrated] = useState(false);
+  const [setupHydratedGardenId, setSetupHydratedGardenId] = useState<string | null>(null);
   
   // Canvas preview for measurements mode
   const [measurementCanvas, setMeasurementCanvas] = useState({ width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT });
@@ -97,6 +98,73 @@ export default function GardenSetupScreen() {
     // Geographic boundary display is disabled when design begins
     // Setup becomes locked after beds/features are created
   }, []);
+
+  useEffect(() => {
+    setSetupHydratedGardenId(null);
+    setLocationHydrated(false);
+  }, [gardenId]);
+
+  // Hydrate setup form from saved garden data when returning to this screen.
+  useEffect(() => {
+    if (!gardenId || !gardenQuery.isSuccess || setupHydratedGardenId === gardenId) return;
+    const garden = gardenQuery.data;
+    const calibration = garden?.scaleCalibration;
+
+    if (calibration?.method === "map_polygon") {
+      setSetupMode("map");
+      const geoBoundary = calibration.boundaryGeoPolygon ?? [];
+      if (geoBoundary.length >= 3) {
+        setMapBoundary(geoBoundary.map((point) => ({ latitude: point.latitude, longitude: point.longitude })));
+        setIsMapClosed(true);
+      }
+    }
+
+    const isUploadedPlanMode =
+      calibration?.method === "reference_line" &&
+      garden?.imageSourceType === "photo" &&
+      Boolean(garden.photoUri) &&
+      calibration?.showBaseImage !== false &&
+      (calibration?.boundaryPolygon?.length ?? 0) >= 3;
+
+    if (isUploadedPlanMode && garden.photoUri && calibration) {
+      setSetupMode("plan");
+      setPlanImage({
+        uri: garden.photoUri,
+        width: Math.max(1, Math.round(calibration.baseWidth || BASE_CANVAS_WIDTH)),
+        height: Math.max(1, Math.round(calibration.baseHeight || BASE_CANVAS_HEIGHT)),
+      });
+      const boundary = calibration.boundaryPolygon ?? [];
+      if (boundary.length >= 3) {
+        const xs = boundary.map((point) => point.x);
+        const ys = boundary.map((point) => point.y);
+        const rawLeft = Math.min(...xs);
+        const rawRight = Math.max(...xs);
+        const rawTop = Math.min(...ys);
+        const rawBottom = Math.max(...ys);
+        const left = clamp(rawLeft, PLAN_BOUNDARY_PADDING, 1 - PLAN_BOUNDARY_PADDING - PLAN_BOUNDARY_MIN_SIZE);
+        const top = clamp(rawTop, PLAN_BOUNDARY_PADDING, 1 - PLAN_BOUNDARY_PADDING - PLAN_BOUNDARY_MIN_SIZE);
+        const right = clamp(rawRight, left + PLAN_BOUNDARY_MIN_SIZE, 1 - PLAN_BOUNDARY_PADDING);
+        const bottom = clamp(rawBottom, top + PLAN_BOUNDARY_MIN_SIZE, 1 - PLAN_BOUNDARY_PADDING);
+        setPlanBoundaryBounds({ left, top, right, bottom });
+      }
+      if (typeof calibration.referenceMeters === "number" && calibration.referenceMeters > 0) {
+        setPlanReferenceMetersInput(calibration.referenceMeters.toString());
+      }
+      setPlanStep("draw");
+    }
+
+    if (calibration?.method === "reference_line" && !isUploadedPlanMode) {
+      setSetupMode("measure");
+      if (typeof calibration.manualLengthM === "number" && calibration.manualLengthM > 0) {
+        setManualLengthM(calibration.manualLengthM.toString());
+      }
+      if (typeof calibration.manualWidthM === "number" && calibration.manualWidthM > 0) {
+        setManualWidthM(calibration.manualWidthM.toString());
+      }
+    }
+
+    setSetupHydratedGardenId(gardenId);
+  }, [gardenId, gardenQuery.data, gardenQuery.isSuccess, setupHydratedGardenId]);
 
   // Load saved measurements into input fields
   useEffect(() => {
@@ -296,7 +364,7 @@ export default function GardenSetupScreen() {
       baseHeight: baseHeightForCalibration,
       latitude: mapCenter.latitude,
       boundaryPolygon: boundaryForCalibration,
-      // Remove geographic polygon - setup will be locked after design begins
+      boundaryGeoPolygon: finalBoundaryGeo,
       boundaryAreaSqM,
       showBaseImage: true,
       showGridOverlay: false,
