@@ -10,6 +10,7 @@ import { SqliteGardenCropWishlistRepository } from "@/infra/repositories/sqlite/
 import { SqlitePlantCatalogRepository } from "@/infra/repositories/sqlite/SqlitePlantCatalogRepository";
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/SqliteCompanionPlantingRepository";
+import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGardenTaskRepository";
 import { fetchGrowstuffCropDetails, searchGrowstuffPlants, type GrowstuffCropDetails } from "@/features/plants/services/growstuff";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { getPlantingCalendarProfile } from "@/features/plants/services/plantingCalendar";
@@ -28,6 +29,7 @@ const wishlistRepository = new SqliteGardenCropWishlistRepository();
 const plantCatalogRepository = new SqlitePlantCatalogRepository();
 const bedRepository = new SqliteBedRepository();
 const companionRepository = new SqliteCompanionPlantingRepository();
+const taskRepository = new SqliteGardenTaskRepository();
 
 type PlantSuggestion = {
   plantCatalogId: string;
@@ -817,9 +819,23 @@ export default function GardenGrowListScreen() {
     setPlantDataDrafts((prev) => (arePlantDataDraftsEqual(prev, next) ? prev : next));
   }, [wishlistQuery.data]);
 
+  const completeOpenTasksForEntry = async (entryId: string, taskTypes: string[]) => {
+    if (!gardenId || taskTypes.length === 0) return;
+    const targetTypes = new Set(taskTypes);
+    const tasks = await taskRepository.listByGarden(gardenId);
+    const matching = tasks.filter(
+      (task) => task.status === "open" && task.entryId === entryId && targetTypes.has(task.taskType)
+    );
+    for (const task of matching) {
+      await taskRepository.setStatus(task.id, "done");
+    }
+  };
+
   const saveRowMutation = useMutation({
     mutationFn: async (item: GardenCropWishlistItemView) => {
       const entryDraft = entryDrafts[item.id];
+      const nextStatus = entryDraft?.status ?? item.status;
+      const nextStartedIndoorsAt = entryDraft?.startedIndoorsAt ?? item.startedIndoorsAt ?? null;
       if (entryDraft && hasEntryDraftChanges(item, entryDraft)) {
         await wishlistRepository.update({
           id: item.id,
@@ -846,10 +862,24 @@ export default function GardenGrowListScreen() {
           metaJson: nextMetaJson,
         });
       }
+
+      const taskTypesToComplete: string[] = [];
+      if (nextStartedIndoorsAt) {
+        taskTypesToComplete.push("start_indoors");
+      }
+      if (nextStatus === "already_growing") {
+        taskTypesToComplete.push("direct_sow", "plant_out");
+      }
+      if (taskTypesToComplete.length > 0) {
+        await completeOpenTasksForEntry(item.id, taskTypesToComplete);
+      }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
       await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["garden-tasks", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks-unseen-count", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard-task-summary", gardenId] });
     },
   });
 
@@ -1002,10 +1032,11 @@ export default function GardenGrowListScreen() {
         const supportNeeded = draft?.supportNeeded ?? item.supportNeeded;
         const quantity = Math.max(1, draft?.quantity ?? item.quantity ?? 1);
         const varietyName = (draft?.varietyName ?? item.varietyName ?? "").trim();
+        const nextStatus = action === "set_planned" ? "wanted" : action === "set_growing" ? "already_growing" : status;
 
         await wishlistRepository.update({
           id: item.id,
-          status: action === "set_planned" ? "wanted" : action === "set_growing" ? "already_growing" : status,
+          status: nextStatus,
           startedIndoorsAt,
           ...(action === "set_planned"
             ? {}
@@ -1017,12 +1048,26 @@ export default function GardenGrowListScreen() {
           supportNeeded: action === "support_on" ? true : action === "support_off" ? false : supportNeeded,
           quantity,
         });
+
+        const taskTypesToComplete: string[] = [];
+        if (startedIndoorsAt) {
+          taskTypesToComplete.push("start_indoors");
+        }
+        if (nextStatus === "already_growing") {
+          taskTypesToComplete.push("direct_sow", "plant_out");
+        }
+        if (taskTypesToComplete.length > 0) {
+          await completeOpenTasksForEntry(item.id, taskTypesToComplete);
+        }
       }
     },
     onSuccess: async () => {
       setSelectedWishlistIds({});
       await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
       await queryClient.invalidateQueries({ queryKey: ["beds", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["garden-tasks", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["tasks-unseen-count", gardenId] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard-task-summary", gardenId] });
     },
   });
 

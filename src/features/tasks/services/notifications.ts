@@ -4,6 +4,7 @@ import { getDatabase } from "@/core/db/sqlite";
 import type { GardenTask } from "@/domain/entities/GardenTask";
 
 const TASK_NOTIFICATIONS_KEY = "task_notifications_v1";
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type SettingsRow = { value_json: string };
 type NotifiedMap = Record<string, string>;
@@ -31,22 +32,29 @@ export async function notifyForOpenTasks(params: {
   const allowed = await ensureTaskNotificationPermission();
   if (!allowed) return 0;
 
-  const nowMs = Date.now();
+  const now = new Date();
+  const nowMs = now.getTime();
+  const startOfTodayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const dueSoonTasks = params.openTasks.filter((task) => {
     const dueMs = new Date(task.dueDate).getTime();
     if (!Number.isFinite(dueMs)) return false;
-    return dueMs <= nowMs + 24 * 60 * 60 * 1000;
+    return dueMs <= nowMs + DAY_MS;
   });
   if (dueSoonTasks.length === 0) return 0;
 
   const known = await loadNotifiedMap();
   let count = 0;
 
-  const urgentWeatherTasks = dueSoonTasks.filter((task) => isUrgentWeatherTask(task));
+  const urgentWeatherTasks = dueSoonTasks.filter((task) => {
+    if (!isUrgentWeatherTask(task)) return false;
+    const dueMs = new Date(task.dueDate).getTime();
+    if (!Number.isFinite(dueMs)) return false;
+    // Ignore stale weather events so users don't get a burst of old alerts at once.
+    return dueMs >= startOfTodayMs;
+  });
   for (const task of urgentWeatherTasks) {
-    const key = buildTaskNotifyKey(params.gardenId, task.id);
-    const fingerprint = `${task.status}|${task.dueDate}|${task.updatedAt}`;
-    if (known[key] === fingerprint) continue;
+    const key = buildWeatherNotifyKey(params.gardenId, task.ruleKey);
+    if (known[key]) continue;
 
     await notifications.scheduleNotificationAsync({
       content: {
@@ -57,13 +65,13 @@ export async function notifyForOpenTasks(params: {
       trigger: null,
     });
 
-    known[key] = fingerprint;
+    known[key] = now.toISOString();
     count += 1;
   }
 
   const summaryCandidates = dueSoonTasks.filter((task) => !isUrgentWeatherTask(task));
   if (summaryCandidates.length > 0) {
-    const summaryKey = buildDailySummaryKey(params.gardenId, new Date());
+    const summaryKey = buildDailySummaryKey(params.gardenId, now);
     if (!known[summaryKey]) {
       const preview = summaryCandidates
         .slice(0, 2)
@@ -81,7 +89,7 @@ export async function notifyForOpenTasks(params: {
         },
         trigger: null,
       });
-      known[summaryKey] = new Date().toISOString();
+      known[summaryKey] = now.toISOString();
       count += 1;
     }
   }
@@ -92,8 +100,8 @@ export async function notifyForOpenTasks(params: {
   return count;
 }
 
-function buildTaskNotifyKey(gardenId: string, taskId: string): string {
-  return `${gardenId}:${taskId}`;
+function buildWeatherNotifyKey(gardenId: string, ruleKey: string): string {
+  return `weather:${gardenId}:${ruleKey}`;
 }
 
 function buildDailySummaryKey(gardenId: string, now: Date): string {
