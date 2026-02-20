@@ -166,7 +166,7 @@ export default function GardensTabScreen() {
           disabled={importBackupMutation.isPending || cloneMutation.isPending || deleteMutation.isPending}
         />
       </View>
-      <Text style={[styles.noteText, { color: theme.textMuted }]}>Backups include bed photos and base map images. Larger backups may take longer to share/import.</Text>
+      <Text style={[styles.noteText, { color: theme.textMuted }]}>Backups include bed photos and garden plan/satellite images. Larger backups may take longer to share/import.</Text>
       {cloneMutation.isPending ? (
         <Text style={[styles.state, { color: theme.textMuted, paddingTop: 0, paddingBottom: 8 }]}>Cloning garden...</Text>
       ) : null}

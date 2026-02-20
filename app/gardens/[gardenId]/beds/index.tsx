@@ -1178,6 +1178,7 @@ export default function BedsListScreen() {
                     </Pressable>
                   </View>
                 </View>
+                <Text style={[styles.blockText, { color: theme.textMuted }]}>Up to 10 photos per bed.</Text>
                 {(bedPhotoRowsByBedId.get(card.bed.id) ?? []).length === 0 ? (
                   <Text style={[styles.blockText, { color: theme.textMuted }]}>No photos yet.</Text>
                 ) : (
@@ -1188,7 +1189,7 @@ export default function BedsListScreen() {
                           style={[styles.photoDeleteButton, { backgroundColor: theme.dangerActionBackground }]}
                           onPress={() => deleteBedPhoto(card.bed.id, photo.id)}
                         >
-                          <Text style={[styles.photoDeleteButtonText, { color: theme.dangerActionText }]}>×</Text>
+                          <Text style={[styles.photoDeleteButtonText, { color: theme.dangerActionText }]}>X</Text>
                         </Pressable>
                         <Pressable onPress={() => openPhotoViewer(photo, card.bed.name)}>
                           <Image source={{ uri: photo.uri }} style={[styles.photoThumb, { backgroundColor: theme.chipBackground }]} />
@@ -1457,6 +1458,7 @@ export default function BedsListScreen() {
                         </Pressable>
                       </View>
                     </View>
+                    <Text style={[styles.blockText, { color: theme.textMuted }]}>Up to 10 photos per bed.</Text>
                     {(bedPhotoRowsByBedId.get(card.bed.id) ?? []).length === 0 ? (
                       <Text style={[styles.blockText, { color: theme.textMuted }]}>No photos yet.</Text>
                     ) : (
@@ -1467,7 +1469,7 @@ export default function BedsListScreen() {
                               style={[styles.photoDeleteButton, { backgroundColor: theme.dangerActionBackground }]}
                               onPress={() => deleteBedPhoto(card.bed.id, photo.id)}
                             >
-                              <Text style={[styles.photoDeleteButtonText, { color: theme.dangerActionText }]}>×</Text>
+                              <Text style={[styles.photoDeleteButtonText, { color: theme.dangerActionText }]}>X</Text>
                             </Pressable>
                             <Pressable onPress={() => openPhotoViewer(photo, card.bed.name)}>
                               <Image source={{ uri: photo.uri }} style={[styles.photoThumb, { backgroundColor: theme.chipBackground }]} />
@@ -1686,7 +1688,7 @@ export default function BedsListScreen() {
                 style={[styles.photoViewerClose, { backgroundColor: theme.appBackground }]}
                 onPress={() => setPhotoViewer(null)}
               >
-                <Text style={[styles.photoViewerCloseText, { color: theme.textPrimary }]}>×</Text>
+                <Text style={[styles.photoViewerCloseText, { color: theme.textPrimary }]}>X</Text>
               </Pressable>
             </View>
             
@@ -2417,3 +2419,4 @@ const styles = StyleSheet.create({
   },
 
 });
+

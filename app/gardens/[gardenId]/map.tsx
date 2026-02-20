@@ -975,10 +975,10 @@ export default function GardenMapEditorScreen() {
             (bedsQuery.data && bedsQuery.data.length > 0) || (featuresQuery.data && featuresQuery.data.length > 0) ? (
               <View>
                 <Text style={[styles.setupLinkText, { color: theme.disabledActionText }]}>
-                  Garden Setup completed - no longer editable
+                  Garden Setup is locked after design starts
                 </Text>
                 <Text style={[styles.infoText, { color: theme.infoText, fontSize: 12, fontStyle: "italic" }]}>
-                  Setup locked after design begins
+                  Edit boundary and areas here instead
                 </Text>
               </View>
             ) : (
@@ -2213,7 +2213,7 @@ function getPolygonLabelPlacement(
 function truncateLabel(value: string, maxChars: number): string {
   const trimmed = value.trim();
   if (trimmed.length <= maxChars) return trimmed;
-  return `${trimmed.slice(0, Math.max(1, maxChars - 1))}�`;
+  return `${trimmed.slice(0, Math.max(1, maxChars - 3))}...`;
 }
 
 function pointsFromPresetShape(shape: PresetShapeDraft): Point2D[] {
