@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState, type RefObject } from "react";
+import { useId, useMemo, useState, type RefObject } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, ClipPath, Defs, G, Image as SvgImage, Line, Path, Polygon, Text as SvgText } from "react-native-svg";
 import { loadAppPreferences, saveAppPreferences } from "@/core/settings/appPreferences";
@@ -47,9 +47,12 @@ export function BedPlanPreview(props: {
   bedNameScale?: number;
 }) {
   const { theme } = useTheme();
+  const svgInstanceId = useId();
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewViewportWidth, setPreviewViewportWidth] = useState(0);
   const gardenId = props.beds[0]?.gardenId ?? null;
+  const svgIdPrefix = useMemo(() => safeSvgId(`bed-preview-${svgInstanceId}`), [svgInstanceId]);
+  const bedClipIdFor = (bedId: string) => `${svgIdPrefix}-bed-clip-${bedId}`;
 
   const preferencesQuery = useQuery({
     queryKey: ["app-preferences"],
@@ -303,7 +306,7 @@ export function BedPlanPreview(props: {
                     const uri = bedBackgroundImageById[bed.id];
                     if (!showBedPhotos || !uri) return null;
                     return (
-                      <ClipPath key={`clip-${bed.id}`} id={safeSvgId(`bed-clip-${bed.id}`)}>
+                      <ClipPath key={`clip-${bed.id}`} id={bedClipIdFor(bed.id)}>
                         <Polygon points={toSvgPoints(bed.polygon, zoomedWidth, zoomedHeight)} />
                       </ClipPath>
                     );
@@ -324,7 +327,7 @@ export function BedPlanPreview(props: {
                   const width = Math.max(1, bounds.maxX - bounds.minX);
                   const height = Math.max(1, bounds.maxY - bounds.minY);
                   return (
-                    <G key={`bed-photo-${bed.id}`} clipPath={`url(#${safeSvgId(`bed-clip-${bed.id}`)})`}>
+                    <G key={`bed-photo-${bed.id}`} clipPath={`url(#${bedClipIdFor(bed.id)})`}>
                       <SvgImage
                         href={{ uri }}
                         x={bounds.minX}
