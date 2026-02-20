@@ -651,24 +651,37 @@ export default function BedsListScreen() {
 
   useEffect(() => {
     if (bedCards.length === 0) return;
-    const savedByBed = gardenId
-      ? bedPlannerSettingsQuery.data?.[gardenId]?.spareSpaceByBedId ?? {}
-      : {};
+    const savedByBed = gardenId ? bedPlannerSettingsQuery.data?.[gardenId]?.spareSpaceByBedId ?? {} : {};
     setHasSpareSpaceByBed((prev) => {
       let changed = false;
-      const next = { ...prev };
+      const next: Record<string, boolean> = {};
       for (const card of bedCards) {
-        const savedValue = savedByBed[card.bed.id];
-        if (typeof savedValue === "boolean") {
-          if (next[card.bed.id] !== savedValue) {
-            next[card.bed.id] = savedValue;
-            changed = true;
-          }
+        const existing = prev[card.bed.id];
+        if (typeof existing === "boolean") {
+          next[card.bed.id] = existing;
           continue;
         }
-        if (next[card.bed.id] === undefined) {
-          next[card.bed.id] = card.growingNames.length === 0;
+        const savedValue = savedByBed[card.bed.id];
+        if (typeof savedValue === "boolean") {
+          next[card.bed.id] = savedValue;
           changed = true;
+          continue;
+        }
+        next[card.bed.id] = card.growingNames.length === 0;
+        changed = true;
+      }
+      if (!changed) {
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(next);
+        if (prevKeys.length !== nextKeys.length) {
+          changed = true;
+        } else {
+          for (const key of nextKeys) {
+            if (prev[key] !== next[key]) {
+              changed = true;
+              break;
+            }
+          }
         }
       }
       return changed ? next : prev;

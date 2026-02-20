@@ -16,6 +16,15 @@
     "plugins": [
       "expo-router",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "imageWidth": 220
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "Allow GardenMe to use your location for local weather and planting recommendations."
