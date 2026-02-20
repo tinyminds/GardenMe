@@ -10,6 +10,7 @@ export type BedPhotoLogEntry = {
   id: string;
   bedId: string;
   uri: string;
+  backgroundPreviewUri?: string;
   source: "camera" | "gallery";
   createdAt: string;
   notes?: string;

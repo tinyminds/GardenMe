@@ -117,6 +117,7 @@ type BedPhotoLogEntry = {
   id: string;
   bedId: string;
   uri: string;
+  backgroundPreviewUri?: string;
   source: "camera" | "gallery";
   createdAt: string;
   notes?: string;
@@ -756,12 +757,15 @@ export class SqliteGardenRepository implements GardenRepository {
       );
       const bedPhotoParsed = bedPhotoRow?.value_json ? (JSON.parse(bedPhotoRow.value_json) as Record<string, unknown>) : {};
       if (bundle.settings?.bedPhotoLog) {
-        const remappedPhotos = bundle.settings.bedPhotoLog.map((row) => ({
-          ...row,
-          id: makeId("bed-photo"),
-          bedId: bedIdMap.get(row.bedId) ?? row.bedId,
-          uri: importedMedia.bedPhotoUriByPhotoId[row.id] ?? row.uri,
-        }));
+        const remappedPhotos = bundle.settings.bedPhotoLog.map((row) => {
+          const { backgroundPreviewUri: _ignoredBackgroundPreviewUri, ...rest } = row;
+          return {
+            ...rest,
+            id: makeId("bed-photo"),
+            bedId: bedIdMap.get(row.bedId) ?? row.bedId,
+            uri: importedMedia.bedPhotoUriByPhotoId[row.id] ?? row.uri,
+          };
+        });
         const next = { ...bedPhotoParsed, [importedGardenId]: remappedPhotos };
         await db.runAsync(
           `INSERT INTO app_settings (key, value_json, updated_at)

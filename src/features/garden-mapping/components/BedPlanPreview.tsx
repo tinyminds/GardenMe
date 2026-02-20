@@ -79,8 +79,9 @@ export function BedPlanPreview(props: {
     const rows = bedPhotoLogSettingsQuery.data?.[gardenId] ?? [];
     const byBedId: Record<string, string> = {};
     for (const row of rows) {
-      if (!row.isBedBackground || !row.uri.trim()) continue;
-      if (!byBedId[row.bedId]) byBedId[row.bedId] = row.uri;
+      const preferredUri = row.backgroundPreviewUri?.trim() || row.uri.trim();
+      if (!row.isBedBackground || !preferredUri) continue;
+      if (!byBedId[row.bedId]) byBedId[row.bedId] = preferredUri;
     }
     return byBedId;
   }, [bedPhotoLogSettingsQuery.data, gardenId]);

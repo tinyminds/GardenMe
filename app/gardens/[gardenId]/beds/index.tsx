@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
+import * as ImageManipulator from "expo-image-manipulator";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { loadGardenBedPlannerSettings, saveGardenBedPlannerSettings, type GardenBedPlannerSettings } from "@/core/settings/gardenBedPlannerSettings";
 import { loadBedPhotoLogSettings, saveBedPhotoLogSettings, type BedPhotoLogEntry, type BedPhotoLogSettings } from "@/core/settings/bedPhotoLogSettings";
@@ -106,6 +107,8 @@ type PlannerMode = "list" | "visual";
 
 const MAX_SUGGESTIONS_PER_BED = 2;
 const MAX_BED_PHOTOS_PER_BED = 10;
+const MAX_BED_PHOTO_MAX_DIMENSION_PX = 2048;
+const MAX_BED_BACKGROUND_PREVIEW_DIMENSION_PX = 1024;
 
 export default function BedsListScreen() {
   const { theme } = useTheme();
@@ -127,6 +130,7 @@ export default function BedsListScreen() {
   const [selectedVisualBedId, setSelectedVisualBedId] = useState<string | null>(null);
   const [plannerSettingsHydratedGardenId, setPlannerSettingsHydratedGardenId] = useState<string | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backgroundPreviewMigrationInFlightRef = useRef(false);
 
   const bedsQuery = useQuery({
     queryKey: ["beds", gardenId],
@@ -181,6 +185,50 @@ export default function BedsListScreen() {
     queryKey: ["bed-photo-log-settings"],
     queryFn: loadBedPhotoLogSettings,
   });
+
+  useEffect(() => {
+    if (!gardenId || backgroundPreviewMigrationInFlightRef.current) return;
+    const rows = bedPhotoLogSettingsQuery.data?.[gardenId] ?? [];
+    const hasMissingBackgroundPreview = rows.some(
+      (row) => row.isBedBackground && row.uri.trim() && !row.backgroundPreviewUri?.trim()
+    );
+    if (!hasMissingBackgroundPreview) return;
+
+    backgroundPreviewMigrationInFlightRef.current = true;
+    void (async () => {
+      const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
+      const current = cached ?? (await loadBedPhotoLogSettings());
+      const currentRows = current[gardenId] ?? [];
+      let changed = false;
+      const nextRows: BedPhotoLogEntry[] = [];
+      for (const row of currentRows) {
+        if (row.isBedBackground && row.uri.trim() && !row.backgroundPreviewUri?.trim()) {
+          const previewUri = await persistBedBackgroundPreviewUri({
+            sourceUri: row.uri,
+            gardenId,
+            bedId: row.bedId,
+            photoId: row.id,
+          });
+          if (previewUri) {
+            nextRows.push({ ...row, backgroundPreviewUri: previewUri });
+            changed = true;
+            continue;
+          }
+        }
+        nextRows.push(row);
+      }
+      if (!changed) return;
+      const next: BedPhotoLogSettings = { ...current, [gardenId]: nextRows };
+      await saveBedPhotoLogSettings(next);
+      queryClient.setQueryData(["bed-photo-log-settings"], next);
+    })()
+      .catch(() => {
+        // Ignore preview migration failures; original full-size image URI remains available.
+      })
+      .finally(() => {
+        backgroundPreviewMigrationInFlightRef.current = false;
+      });
+  }, [bedPhotoLogSettingsQuery.data, gardenId]);
 
   const planInBedMutation = useMutation({
     mutationFn: async (payload: { entry: GardenCropWishlistItemView; bedId: string }) => {
@@ -912,6 +960,16 @@ export default function BedsListScreen() {
                 // Ignore cleanup failures; metadata is already removed.
               }
             }
+            if (removedPhoto?.backgroundPreviewUri && isManagedBedBackgroundPreviewUri(removedPhoto.backgroundPreviewUri)) {
+              try {
+                const file = new FileSystem.File(removedPhoto.backgroundPreviewUri);
+                if (file.exists) {
+                  file.delete();
+                }
+              } catch {
+                // Ignore cleanup failures; metadata is already removed.
+              }
+            }
           }
         }
       ]
@@ -944,9 +1002,30 @@ export default function BedsListScreen() {
     const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
     const current = cached ?? (await loadBedPhotoLogSettings());
     const currentPhotos = current[gardenId] ?? [];
+    let backgroundPreviewUri: string | undefined;
+    if (enabled) {
+      const targetPhoto = currentPhotos.find((photo) => photo.bedId === bedId && photo.id === photoId);
+      if (targetPhoto?.uri) {
+        backgroundPreviewUri =
+          targetPhoto.backgroundPreviewUri ??
+          (await persistBedBackgroundPreviewUri({
+            sourceUri: targetPhoto.uri,
+            gardenId,
+            bedId,
+            photoId: targetPhoto.id,
+          })) ??
+          undefined;
+      }
+    }
     const updatedPhotos = currentPhotos.map((photo) => {
       if (photo.bedId !== bedId) return photo;
-      if (photo.id === photoId) return { ...photo, isBedBackground: enabled };
+      if (photo.id === photoId) {
+        return {
+          ...photo,
+          isBedBackground: enabled,
+          ...(enabled && backgroundPreviewUri ? { backgroundPreviewUri } : {}),
+        };
+      }
       if (enabled && photo.isBedBackground) return { ...photo, isBedBackground: false };
       return photo;
     });
@@ -2076,7 +2155,8 @@ async function persistBedPhotoUri(input: {
   bedId: string;
   suggestedFileName?: string;
 }): Promise<string> {
-  const extension = inferImageExtension(input.suggestedFileName ?? input.sourceUri);
+  const optimizedSource = await optimizeImageForStorage(input.sourceUri, MAX_BED_PHOTO_MAX_DIMENSION_PX, 0.84);
+  const extension = optimizedSource.extension;
   const mediaDirectory = new FileSystem.Directory(
     FileSystem.Paths.document,
     "garden-media",
@@ -2091,12 +2171,12 @@ async function persistBedPhotoUri(input: {
   );
 
   try {
-    const source = new FileSystem.File(input.sourceUri);
+    const source = new FileSystem.File(optimizedSource.uri);
     source.copy(destination);
     return destination.uri;
   } catch {
     try {
-      const source = new FileSystem.File(input.sourceUri);
+      const source = new FileSystem.File(optimizedSource.uri);
       const base64 = await source.base64();
       destination.create({ intermediates: true, overwrite: true });
       destination.write(base64, { encoding: "base64" });
@@ -2119,6 +2199,97 @@ function inferImageExtension(value: string): string {
 function isManagedGardenMediaUri(uri: string): boolean {
   const lower = uri.toLowerCase();
   return lower.includes("/garden-media/") && lower.includes("/bed-photos/");
+}
+
+function isManagedBedBackgroundPreviewUri(uri: string): boolean {
+  const lower = uri.toLowerCase();
+  return lower.includes("/garden-media/") && lower.includes("/bed-backgrounds/");
+}
+
+async function persistBedBackgroundPreviewUri(input: {
+  sourceUri: string;
+  gardenId: string;
+  bedId: string;
+  photoId: string;
+}): Promise<string | null> {
+  const previewDirectory = new FileSystem.Directory(
+    FileSystem.Paths.document,
+    "garden-media",
+    "bed-backgrounds",
+    input.gardenId,
+    input.bedId
+  );
+  previewDirectory.create({ idempotent: true, intermediates: true });
+  const safePhotoId = input.photoId.replace(/[^A-Za-z0-9_-]/g, "_");
+  const destination = new FileSystem.File(previewDirectory, `background-${safePhotoId}.jpg`);
+  if (destination.exists) return destination.uri;
+
+  const optimizedSource = await optimizeImageForStorage(
+    input.sourceUri,
+    MAX_BED_BACKGROUND_PREVIEW_DIMENSION_PX,
+    0.72
+  );
+
+  try {
+    const source = new FileSystem.File(optimizedSource.uri);
+    source.copy(destination);
+    return destination.uri;
+  } catch {
+    try {
+      const source = new FileSystem.File(optimizedSource.uri);
+      const base64 = await source.base64();
+      destination.create({ intermediates: true, overwrite: true });
+      destination.write(base64, { encoding: "base64" });
+      return destination.uri;
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function optimizeImageForStorage(
+  sourceUri: string,
+  maxDimensionPx: number,
+  compress: number
+): Promise<{ uri: string; extension: string }> {
+  const fallbackExtension = inferImageExtension(sourceUri);
+  if (!sourceUri.trim()) return { uri: sourceUri, extension: fallbackExtension };
+  const size = await getImageSize(sourceUri);
+  if (!size) return { uri: sourceUri, extension: fallbackExtension };
+  const sourceMax = Math.max(size.width, size.height);
+  if (sourceMax <= maxDimensionPx) {
+    return { uri: sourceUri, extension: fallbackExtension };
+  }
+  const resizeAction =
+    size.width >= size.height
+      ? { resize: { width: maxDimensionPx } }
+      : { resize: { height: maxDimensionPx } };
+  try {
+    const manipulated = await ImageManipulator.manipulateAsync(
+      sourceUri,
+      [resizeAction],
+      { compress, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return { uri: manipulated.uri, extension: "jpg" };
+  } catch {
+    return { uri: sourceUri, extension: fallbackExtension };
+  }
+}
+
+function getImageSize(uri: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    Image.getSize(
+      uri,
+      (width, height) => {
+        if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+          resolve({ width, height });
+          return;
+        }
+        resolve(null);
+      },
+      () => resolve(null)
+    );
+  });
 }
 
 function formatEntryName(entry: GardenCropWishlistItemView): string {
