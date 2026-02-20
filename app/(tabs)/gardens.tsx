@@ -74,7 +74,11 @@ export default function GardensTabScreen() {
     onSuccess: async (created) => {
       setImportDraft(null);
       setSelectedGardenId(created.id);
-      await queryClient.invalidateQueries({ queryKey: ["gardens"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["gardens"] }),
+        queryClient.invalidateQueries({ queryKey: ["bed-photo-log-settings"] }),
+        queryClient.invalidateQueries({ queryKey: ["garden-bed-planner-settings"] }),
+      ]);
       Alert.alert("Garden imported", `Created "${created.name}".`);
     },
     onError: (error) => {

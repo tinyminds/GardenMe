@@ -490,7 +490,8 @@ export class SqliteGardenRepository implements GardenRepository {
         bedPhotoLog = parsed[gardenId];
       }
     } catch {}
-    const mediaFiles = await this.buildBackupMediaFiles(source.photo_uri, bedPhotoLog);
+    const normalizedBedPhotoLog = await this.normalizeBedPhotoUrisForBackup(gardenId, bedPhotoLog);
+    const mediaFiles = await this.buildBackupMediaFiles(source.photo_uri, normalizedBedPhotoLog);
 
     return {
       format: "gardenme-garden-backup-v1",
@@ -517,7 +518,7 @@ export class SqliteGardenRepository implements GardenRepository {
       settings: {
         ...(gardenProgress ? { gardenProgress } : {}),
         ...(bedPlanner ? { bedPlanner } : {}),
-        ...(bedPhotoLog ? { bedPhotoLog } : {}),
+        ...(normalizedBedPhotoLog ? { bedPhotoLog: normalizedBedPhotoLog } : {}),
       },
       ...(mediaFiles.length > 0 ? { media: { files: mediaFiles } } : {}),
     };
@@ -917,6 +918,61 @@ export class SqliteGardenRepository implements GardenRepository {
     return files;
   }
 
+  private async normalizeBedPhotoUrisForBackup(
+    gardenId: string,
+    bedPhotoLog: BedPhotoLogEntry[] | undefined
+  ): Promise<BedPhotoLogEntry[] | undefined> {
+    if (!bedPhotoLog || bedPhotoLog.length === 0) return bedPhotoLog;
+    let changed = false;
+    const normalizedRows: BedPhotoLogEntry[] = [];
+    for (const row of bedPhotoLog) {
+      const uri = row.uri?.trim();
+      if (!uri) {
+        normalizedRows.push(row);
+        continue;
+      }
+      if (this.isManagedGardenMediaUri(uri)) {
+        normalizedRows.push(row);
+        continue;
+      }
+      const persistedUri = await this.persistBedPhotoUriForBackup({
+        sourceUri: uri,
+        gardenId,
+        bedId: row.bedId,
+        photoId: row.id,
+      });
+      if (persistedUri && persistedUri !== uri) {
+        normalizedRows.push({ ...row, uri: persistedUri });
+        changed = true;
+      } else {
+        normalizedRows.push(row);
+      }
+    }
+    if (!changed) return normalizedRows;
+
+    const db = getDatabase();
+    const existingRow = await db.getFirstAsync<SettingsRow>(
+      "SELECT value_json FROM app_settings WHERE key = ? LIMIT 1",
+      ["bed_photo_log_v1"]
+    );
+    let parsed: Record<string, BedPhotoLogEntry[]> = {};
+    try {
+      if (existingRow?.value_json) {
+        parsed = JSON.parse(existingRow.value_json) as Record<string, BedPhotoLogEntry[]>;
+      }
+    } catch {
+      parsed = {};
+    }
+    const next = { ...parsed, [gardenId]: normalizedRows };
+    await db.runAsync(
+      `INSERT INTO app_settings (key, value_json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+      ["bed_photo_log_v1", JSON.stringify(next), new Date().toISOString()]
+    );
+    return normalizedRows;
+  }
+
   private async restoreBackupMedia(
     bundle: GardenBackupBundle,
     importedGardenId: string
@@ -970,6 +1026,45 @@ export class SqliteGardenRepository implements GardenRepository {
       return base64 || null;
     } catch {
       return null;
+    }
+  }
+
+  private async persistBedPhotoUriForBackup(input: {
+    sourceUri: string;
+    gardenId: string;
+    bedId: string;
+    photoId: string;
+  }): Promise<string | null> {
+    const extension = this.inferFileExtensionFromUri(input.sourceUri);
+    const mediaDirectory = new FileSystem.Directory(
+      FileSystem.Paths.document,
+      "garden-media",
+      "bed-photos",
+      input.gardenId,
+      input.bedId
+    );
+    mediaDirectory.create({ idempotent: true, intermediates: true });
+    const safePhotoId = this.sanitizeIdSegment(input.photoId);
+    const destination = new FileSystem.File(
+      mediaDirectory,
+      `${safePhotoId}-${Date.now().toString(36)}.${extension}`
+    );
+
+    try {
+      const source = new FileSystem.File(input.sourceUri);
+      source.copy(destination);
+      return destination.uri;
+    } catch {
+      try {
+        const source = new FileSystem.File(input.sourceUri);
+        const base64 = await source.base64();
+        if (!base64) return null;
+        destination.create({ intermediates: true, overwrite: true });
+        destination.write(base64, { encoding: "base64" });
+        return destination.uri;
+      } catch {
+        return null;
+      }
     }
   }
 
