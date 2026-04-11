@@ -78,8 +78,8 @@ export default function PlanTabScreen() {
 
   return (
     <ScrollView style={[styles.page, { backgroundColor: theme.appBackground }]} contentContainerStyle={styles.content}>
-      <Text style={[styles.title, { color: theme.textPrimary }]}>Workspace</Text>
-      <Text style={[styles.subtitle, { color: theme.textMuted }]}>Build and plant in order. Each step shows what is next.</Text>
+      <Text style={[styles.title, { color: theme.textPrimary }]}>Garden Flow</Text>
+      <Text style={[styles.subtitle, { color: theme.textMuted }]}>Draw the garden, add plants, then place them into beds without losing track.</Text>
 
       <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Active Garden</Text>
@@ -109,26 +109,26 @@ export default function PlanTabScreen() {
           </View>
 
           <StepCard
-            title="1. Garden Setup"
+            title="1. Draw Garden"
             helper={hasSetup ? "Boundary and scale saved." : "Set location, boundary, and scale."}
             href={`/gardens/${selectedGarden.id}/setup`}
             state={setupState}
             {...(setupLocked ? { disabled: true, disabledReason: "No longer editable - garden design has begun" } : {})}
           />
           <StepCard
-            title="2. Garden Design"
+            title="2. Map Beds"
             helper={hasDesign ? `${bedCount} beds and ${featureCount} features mapped.` : "Map your beds and garden features."}
             href={`/gardens/${selectedGarden.id}/map`}
             state={designState}
           />
           <StepCard
-            title="3. Grow List"
+            title="3. Add Plants"
             helper={growCount > 0 ? `${growCount} plants added.` : "Add the plants you want to grow."}
             href={`/gardens/${selectedGarden.id}/grow`}
             state={growState}
           />
           <StepCard
-            title="4. Bed Planner"
+            title="4. Place in Beds"
             helper={
               bedsReady
                 ? bedsDone

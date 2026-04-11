@@ -121,7 +121,7 @@ export default function TasksTabScreen() {
               id: entry.id,
               status: entry.status,
               startedIndoorsAt: entry.startedIndoorsAt ?? new Date().toISOString(),
-              ...(entry.status === "already_growing" && entry.bedId ? { bedId: entry.bedId } : {}),
+              ...(entry.bedId ? { bedId: entry.bedId } : {}),
               ...(entry.varietyName ? { varietyName: entry.varietyName } : { varietyName: "" }),
               supportNeeded: entry.supportNeeded,
               quantity: Math.max(1, entry.quantity ?? 1),
@@ -165,8 +165,15 @@ export default function TasksTabScreen() {
 
   const tasks = tasksQuery.data ?? [];
   const growList = growQuery.data ?? [];
+  const beds = bedsQuery.data ?? [];
+  const bedNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const bed of beds) map.set(bed.id, bed.name);
+    return map;
+  }, [beds]);
   const openTasks = tasks.filter((task) => task.status === "open");
   const doneTasks = tasks.filter((task) => task.status !== "open");
+  const openTaskSections = useMemo(() => groupOpenTasks(openTasks), [openTasks]);
   const currentGarden = (gardensQuery.data ?? []).find((garden) => garden.id === activeGardenId) ?? null;
 
   useEffect(() => {
@@ -263,7 +270,7 @@ export default function TasksTabScreen() {
         <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Due now</Text>
         {bedPicker ? (
           <View style={[styles.bedPickerBox, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
-            <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>Choose bed: {bedPicker.task.title}</Text>
+            <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>Choose bed for {formatTaskTitle(bedPicker.task.title)}</Text>
             <View style={styles.actions}>
               {(bedsQuery.data ?? []).map((bed) => {
                 const selected = bedPicker.bedId === bed.id;
@@ -293,7 +300,7 @@ export default function TasksTabScreen() {
                 onPress={() => setBedPicker(null)}
               />
               <AppButton
-                label="Done + Plant"
+                label="Plant here"
                 variant="primary"
                 size="sm"
                 style={styles.actionButton}
@@ -310,36 +317,63 @@ export default function TasksTabScreen() {
         {openTasks.length === 0 ? (
           <Text style={[styles.empty, { color: theme.textMuted }]}>No open tasks right now.</Text>
         ) : (
-          openTasks.map((task) => (
-            <View key={task.id} style={[styles.taskRow, { borderColor: theme.borderColor }]}>
-              <View style={styles.taskMain}>
-                <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>{cleanTaskTitle(task.title)}</Text>
-                <View style={styles.taskMetaRow}>
-                  <Text style={[styles.taskMeta, { color: theme.textMuted }]}>Due {formatDate(task.dueDate)}</Text>
-                  <TaskTypePill taskType={task.taskType} />
+          openTaskSections.map((section) => {
+            const sectionMeta = getCalendarTypeMeta({
+              type: section.taskType as any,
+              title: "",
+              detail: "",
+            });
+            return (
+              <View key={section.key} style={[styles.taskSectionCard, { borderColor: sectionMeta.border }]}>
+                <View style={[styles.taskSectionAccent, { backgroundColor: sectionMeta.background }]} />
+                <View style={styles.taskSectionBody}>
+                  <View style={styles.sectionHeader}>
+                    <TaskTypePill taskType={section.taskType} />
+                    <View style={styles.sectionHeaderMain}>
+                      <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>{section.label}</Text>
+                      <Text style={[styles.sectionCount, { color: theme.textMuted }]}>{section.tasks.length} tasks</Text>
+                    </View>
+                  </View>
+                  <View style={styles.sectionList}>
+                    {section.tasks.map((task) => (
+                      <View key={task.id} style={[styles.taskRow, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
+                        <View style={styles.taskMain}>
+                          <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>{formatTaskTitle(task.title)}</Text>
+                          <View style={styles.taskMetaRow}>
+                            <Text style={[styles.taskMeta, { color: theme.textMuted }]}>Due {formatDate(task.dueDate)}</Text>
+                            {task.bedId ? (
+                              <Text style={[styles.taskMeta, { color: theme.textMuted }]}>Bed {bedNameById.get(task.bedId) ?? "selected"}</Text>
+                            ) : (
+                              <Text style={[styles.taskMeta, { color: theme.textMuted }]}>No bed assigned</Text>
+                            )}
+                          </View>
+                          {task.detail ? <Text style={[styles.taskMeta, { color: theme.textMuted }]}>{task.detail}</Text> : null}
+                        </View>
+                        <View style={styles.actions}>
+                          <AppButton
+                            label={getOpenTaskActionLabel(task)}
+                            variant="primary"
+                            size="sm"
+                            style={styles.actionButton}
+                            onPress={() => {
+                              void handleDonePress(task);
+                            }}
+                          />
+                          <AppButton
+                            label="Dismiss"
+                            variant="danger"
+                            size="sm"
+                            style={styles.actionButton}
+                            onPress={() => statusMutation.mutate({ task, status: "dismissed" })}
+                          />
+                        </View>
+                      </View>
+                    ))}
+                  </View>
                 </View>
-                {task.detail ? <Text style={[styles.taskMeta, { color: theme.textMuted }]}>{task.detail}</Text> : null}
               </View>
-              <View style={styles.actions}>
-                <AppButton
-                  label="Done"
-                  variant="primary"
-                  size="sm"
-                  style={styles.actionButton}
-                  onPress={() => {
-                    void handleDonePress(task);
-                  }}
-                />
-                <AppButton
-                  label="Dismiss"
-                  variant="danger"
-                  size="sm"
-                  style={styles.actionButton}
-                  onPress={() => statusMutation.mutate({ task, status: "dismissed" })}
-                />
-              </View>
-            </View>
-          ))
+            );
+          })
         )}
       </View>
 
@@ -388,7 +422,7 @@ export default function TasksTabScreen() {
           doneTasks.slice(0, 24).map((task) => (
             <View key={task.id} style={[styles.taskRow, { borderColor: theme.borderColor }]}>
               <View style={styles.taskMain}>
-                <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>{task.title}</Text>
+                <Text style={[styles.taskTitle, { color: theme.textPrimary }]}>{formatTaskTitle(task.title)}</Text>
                 <Text style={[styles.taskMeta, { color: theme.textMuted }]}> 
                   {task.status === "done" ? "Completed" : "Dismissed"} | Due {formatDate(task.dueDate)}
                 </Text>
@@ -401,10 +435,92 @@ export default function TasksTabScreen() {
   );
 }
 
-function cleanTaskTitle(title: string): string {
+function formatTaskTitle(title: string): string {
   return title
-    .replace(/^(Start indoors|Direct sow|Plant out|Harvest):\s*/i, '')
+    .replace(/^(Start indoors|Direct sow|Plant out|Harvest window|Check harvest readiness|Garden watering alert|Garden frost alert):\s*/i, "")
+    .replace(/^(Weather alert:|Task:|Planted:|Started indoors:)\s*/i, "")
     .trim();
+}
+
+function getOpenTaskActionLabel(task: GardenTask): string {
+  if (task.taskType === "direct_sow" || task.taskType === "plant_out") {
+    return task.bedId ? "Plant" : "Choose bed";
+  }
+  return "Done";
+}
+
+type TaskSection = {
+  key: string;
+  taskType: GardenTask["taskType"];
+  label: string;
+  tasks: GardenTask[];
+};
+
+function groupOpenTasks(tasks: GardenTask[]): TaskSection[] {
+  const deduped = collapseDuplicateOpenTasks(tasks);
+  const orderedTypes: Array<GardenTask["taskType"]> = [
+    "start_indoors",
+    "direct_sow",
+    "plant_out",
+    "harvest_window",
+    "water_alert",
+    "manual",
+  ];
+  const labelByType: Record<GardenTask["taskType"], string> = {
+    start_indoors: "Start indoors",
+    direct_sow: "Direct sow",
+    plant_out: "Plant out",
+    harvest_window: "Harvest",
+    water_alert: "Weather",
+    manual: "Other tasks",
+  };
+  const grouped = new Map<GardenTask["taskType"], GardenTask[]>();
+  for (const task of deduped) {
+    const list = grouped.get(task.taskType) ?? [];
+    list.push(task);
+    grouped.set(task.taskType, list);
+  }
+  return orderedTypes
+    .filter((taskType) => (grouped.get(taskType) ?? []).length > 0)
+    .map((taskType) => {
+      const list = grouped.get(taskType) ?? [];
+      list.sort((a, b) => a.dueDate.localeCompare(b.dueDate) || b.priority - a.priority || a.title.localeCompare(b.title));
+      return {
+        key: taskType,
+        taskType,
+        label: labelByType[taskType],
+        tasks: list,
+      };
+    });
+}
+
+function collapseDuplicateOpenTasks(tasks: GardenTask[]): GardenTask[] {
+  const byKey = new Map<string, GardenTask>();
+  for (const task of tasks) {
+    const key = task.entryId
+      ? `${task.taskType}:${task.entryId}:${task.dueDate}`
+      : task.ruleKey || `${task.taskType}:${task.dueDate}:${formatTaskTitle(task.title).toLowerCase()}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, task);
+      continue;
+    }
+    const next = choosePreferredTask(existing, task);
+    byKey.set(key, next);
+  }
+  return Array.from(byKey.values());
+}
+
+function choosePreferredTask(a: GardenTask, b: GardenTask): GardenTask {
+  const score = (task: GardenTask): number => {
+    let value = 0;
+    if (task.bedId) value += 20;
+    if (task.detail) value += 5;
+    value += Math.min(task.priority, 20);
+    value += task.updatedAt ? 1 : 0;
+    return value;
+  };
+  return score(b) > score(a) ? b : a;
 }
 
 function TaskTypePill(props: { taskType: string }) {
@@ -427,10 +543,6 @@ function formatDate(value: string): string {
   return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function formatTaskType(value: string): string {
-  return value.replace(/_/g, " ");
-}
-
 const styles = StyleSheet.create({
   page: { flex: 1 },
   content: { padding: 14, gap: 10, paddingBottom: 110 },
@@ -448,6 +560,15 @@ const styles = StyleSheet.create({
   taskTypePill: { borderWidth: 1, borderRadius: 999, alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 4 },
   taskTypePillText: { fontWeight: "700", fontSize: 10 },
   actions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  taskSection: { gap: 8 },
+  taskSectionCard: { borderWidth: 1, borderRadius: 14, overflow: "hidden" },
+  taskSectionAccent: { height: 4 },
+  taskSectionBody: { gap: 8, padding: 10 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  sectionHeaderMain: { flex: 1, gap: 2 },
+  sectionTitle: { fontSize: 14, fontWeight: "800" },
+  sectionCount: { fontSize: 12, fontWeight: "700" },
+  sectionList: { gap: 8 },
   bedPickerBox: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 8 },
   bedPickerChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   historyHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },

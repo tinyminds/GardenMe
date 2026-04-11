@@ -29,8 +29,8 @@ export function getCalendarTypeMeta(item: Pick<CalendarPlannerItem, "type" | "ti
   if (kind === "frost") return { kind, label: "Frost", background: "#2563EB", border: "#1D4ED8", text: "#FFFFFF" };
   if (kind === "drought") return { kind, label: "Drought", background: "#C0392B", border: "#A93226", text: "#FFFFFF" };
   if (kind === "seasonal_now") return { kind, label: "Seasonal now", background: "#E69138", border: "#B96A1E", text: "#FFFFFF" };
-  if (kind === "started_indoors_done") return { kind, label: "Started indoors (done)", background: "#6D28D9", border: "#5B21B6", text: "#FFFFFF" };
-  if (kind === "planted_on") return { kind, label: "Planted (logged)", background: "#0F766E", border: "#115E59", text: "#FFFFFF" };
+  if (kind === "started_indoors_done") return { kind, label: "Started indoors", background: "#6D28D9", border: "#5B21B6", text: "#FFFFFF" };
+  if (kind === "planted_on") return { kind, label: "Planted", background: "#0F766E", border: "#115E59", text: "#FFFFFF" };
   return { kind, label: "Task", background: "#F3F4F6", border: "#D1D5DB", text: "#111827" };
 }
 

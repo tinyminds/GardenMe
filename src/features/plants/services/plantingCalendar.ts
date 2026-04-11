@@ -1,9 +1,12 @@
+import { getUkPlantingCalendarOverride } from "@/features/plants/services/ukPlantOverrides";
+
 export type PlantingCalendarProfile = {
   startIndoorsMonths: number[];
   directSowMonths: number[];
   plantOutMonths: number[];
   harvestMonths: number[];
   sourceLabel: string;
+  confidence: "high" | "medium" | "low";
 };
 
 type CalendarEntry = {
@@ -14,6 +17,7 @@ type CalendarEntry = {
   directSowMonths?: number[];
   plantOutMonths?: number[];
   harvestMonths?: number[];
+  sourceLabel?: string;
 };
 
 const CALENDAR_SOURCE_LABEL = "RHS + UK grow calendar baseline";
@@ -77,24 +81,50 @@ export function getPlantingCalendarProfile(params: {
   const sci = normalize(params.scientificName ?? "");
   if (!name && !sci) return null;
 
-  const exact = ENTRIES.find((entry) => {
+  const overrideEntry = getUkPlantingCalendarOverride(params);
+  const override = overrideEntry ? getMatch([overrideEntry], name, sci) : null;
+  const baseline = getMatch(ENTRIES, name, sci);
+  if (!override && !baseline) return null;
+
+  const startIndoorsMonths = unique([...(override?.entry.startIndoorsMonths ?? []), ...(baseline?.entry.startIndoorsMonths ?? [])]);
+  const directSowMonths = unique([...(override?.entry.directSowMonths ?? []), ...(baseline?.entry.directSowMonths ?? [])]);
+  const plantOutMonths = unique([...(override?.entry.plantOutMonths ?? []), ...(baseline?.entry.plantOutMonths ?? [])]);
+  const harvestMonths = unique([...(override?.entry.harvestMonths ?? []), ...(baseline?.entry.harvestMonths ?? [])]);
+  const sourceLabel =
+    override && baseline
+      ? `${override.entry.sourceLabel ?? "UK grow calendar override"} + ${CALENDAR_SOURCE_LABEL}`
+      : override
+        ? override.entry.sourceLabel ?? "UK grow calendar override"
+        : CALENDAR_SOURCE_LABEL;
+  const confidence = override?.exact || baseline?.exact ? "high" : "medium";
+
+  return {
+    startIndoorsMonths,
+    directSowMonths,
+    plantOutMonths,
+    harvestMonths,
+    sourceLabel,
+    confidence,
+  };
+}
+
+type CalendarMatch = {
+  entry: CalendarEntry;
+  exact: boolean;
+};
+
+function getMatch(entries: CalendarEntry[], name: string, sci: string): CalendarMatch | null {
+  const exact = entries.find((entry) => {
     const keys = getCandidateKeys(entry);
     return keys.includes(name) || keys.includes(sci);
   });
-  const partial =
-    exact ??
-    ENTRIES.find((entry) => {
-      const keys = getCandidateKeys(entry);
-      return keys.some((key) => (name && name.includes(key)) || (sci && sci.includes(key)));
-    });
-  if (!partial) return null;
-  return {
-    startIndoorsMonths: unique(partial.startIndoorsMonths ?? []),
-    directSowMonths: unique(partial.directSowMonths ?? []),
-    plantOutMonths: unique(partial.plantOutMonths ?? []),
-    harvestMonths: unique(partial.harvestMonths ?? []),
-    sourceLabel: CALENDAR_SOURCE_LABEL,
-  };
+  if (exact) return { entry: exact, exact: true };
+
+  const partial = entries.find((entry) => {
+    const keys = getCandidateKeys(entry);
+    return keys.some((key) => (name && name.includes(key)) || (sci && sci.includes(key)));
+  });
+  return partial ? { entry: partial, exact: false } : null;
 }
 
 function getCandidateKeys(entry: CalendarEntry): string[] {

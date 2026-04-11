@@ -407,7 +407,7 @@ export default function CalendarTabScreen() {
                   <Text style={[styles.dayItemBadgeText, { color: meta.text }]}>{meta.label}</Text>
                 </View>
                 <View style={styles.dayItemMain}>
-                  <Text style={[styles.dayItemTitle, { color: theme.textPrimary }]}>{item.title}</Text>
+                  <Text style={[styles.dayItemTitle, { color: theme.textPrimary }]}>{formatCalendarItemTitle(item)}</Text>
                   {item.detail ? <Text style={[styles.dayItemDetail, { color: theme.textMuted }]}>{item.detail}</Text> : null}
                   {(item.startDateIso || item.endDateIso) && (
                     <Text style={[styles.dayItemDetail, { color: theme.textMuted }]}>Range: {formatRange(item)}</Text>
@@ -490,6 +490,14 @@ function formatRange(item: CalendarPlannerItem): string {
   const s = start.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
   const e = end.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
   return s === e ? s : `${s} to ${e}`;
+}
+
+function formatCalendarItemTitle(item: CalendarPlannerItem): string {
+  return item.title
+    .replace(/^(Start indoors|Direct sow|Plant out|Harvest window|Harvest|Started indoors|Planted):\s*/i, "")
+    .replace(/^Weather alert:\s*/i, "")
+    .replace(/^UK seasonal ideas:\s*/i, "")
+    .trim();
 }
 
 const styles = StyleSheet.create({

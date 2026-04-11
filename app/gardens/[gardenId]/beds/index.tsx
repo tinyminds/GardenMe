@@ -6,6 +6,7 @@ import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, St
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
+import Svg, { ClipPath, Defs, Ellipse, G, Image as SvgImage, Line, Polygon, Rect, Text as SvgText } from "react-native-svg";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { loadGardenBedPlannerSettings, saveGardenBedPlannerSettings, type GardenBedPlannerSettings } from "@/core/settings/gardenBedPlannerSettings";
 import { loadBedPhotoLogSettings, saveBedPhotoLogSettings, type BedPhotoLogEntry, type BedPhotoLogSettings } from "@/core/settings/bedPhotoLogSettings";
@@ -27,6 +28,7 @@ import type {
   GardenCropWishlistItemView,
   PlantingEndState,
 } from "@/domain/entities/Plant";
+import type { Point2D } from "@/domain/entities/Bed";
 
 const bedRepository = new SqliteBedRepository();
 const companionRepository = new SqliteCompanionPlantingRepository();
@@ -55,6 +57,17 @@ type BedSuggestion = {
   scoreComponents: Array<{ label: string; value: number }>;
   scoreBreakdown: string[];
   fitCount?: number;
+};
+
+type BedSnapshotKind = "growing" | "planned" | "perennial" | "indoors";
+
+type BedSnapshotItem = {
+  id: string;
+  kind: BedSnapshotKind;
+  label: string;
+  quantity: number;
+  spreadCm?: number;
+  startedIndoors?: boolean;
 };
 
 type WhyNotCandidate = {
@@ -118,9 +131,9 @@ export default function BedsListScreen() {
   const [hasSpareSpaceByBed, setHasSpareSpaceByBed] = useState<Record<string, boolean>>({});
   const [historyExpandedByBed, setHistoryExpandedByBed] = useState<Record<string, boolean>>({});
   const [bedExpandedById, setBedExpandedById] = useState<Record<string, boolean>>({});
+  const [bedSnapshotPhotoVisibleByBedId, setBedSnapshotPhotoVisibleByBedId] = useState<Record<string, boolean>>({});
   const [scoreExpandedByKey, setScoreExpandedByKey] = useState<Record<string, boolean>>({});
   const [rejectedSuggestionIdsByBed, setRejectedSuggestionIdsByBed] = useState<Record<string, string[]>>({});
-  const [dismissedSpaceWarningSig, setDismissedSpaceWarningSig] = useState<string | null>(null);
   const [undoToast, setUndoToast] = useState<UndoToastState | null>(null);
   const [undoPending, setUndoPending] = useState(false);
   const [finishDialog, setFinishDialog] = useState<FinishDialogState | null>(null);
@@ -244,6 +257,25 @@ export default function BedsListScreen() {
     onSuccess: async () => {
       if (!gardenId) return;
       await QueryInvalidationPatterns.bedPlanningChange(gardenId);
+    },
+  });
+
+  const updateEntryQuantityMutation = useMutation({
+    mutationFn: async (payload: { entry: GardenCropWishlistItemView; quantity: number }) => {
+      const nextQuantity = Math.max(1, Math.floor(payload.quantity));
+      await wishlistRepository.update({
+        id: payload.entry.id,
+        status: payload.entry.status,
+        ...(payload.entry.bedId ? { bedId: payload.entry.bedId } : {}),
+        isPerennial: payload.entry.isPerennial,
+        varietyName: payload.entry.varietyName ?? "",
+        supportNeeded: payload.entry.supportNeeded,
+        quantity: nextQuantity,
+      });
+    },
+    onSuccess: async () => {
+      if (!gardenId) return;
+      await QueryInvalidationPatterns.plantingStatusChange(gardenId);
     },
   });
 
@@ -799,6 +831,64 @@ export default function BedsListScreen() {
     });
   };
 
+  const adjustEntryQuantity = async (entry: GardenCropWishlistItemView, delta: number) => {
+    const nextQuantity = Math.max(1, (entry.quantity ?? 1) + delta);
+    if (nextQuantity === entry.quantity) return;
+    try {
+      await updateEntryQuantityMutation.mutateAsync({ entry, quantity: nextQuantity });
+    } catch {
+      Alert.alert("Could not update quantity", "Please try again.");
+    }
+  };
+
+  const renderBedSnapshotBlock = (card: {
+    bed: { id: string; name: string; polygon: Point2D[]; containsPerennials?: boolean };
+    activeGrowingRows: ActiveGrowingRow[];
+    plannedInBed: GardenCropWishlistItemView[];
+  }) => {
+    const photoVisible = bedSnapshotPhotoVisibleByBedId[card.bed.id] ?? true;
+    const photoUri = bedSnapshotPhotoUriByBedId[card.bed.id] ?? null;
+    const items = bedSnapshotItemsByBedId[card.bed.id] ?? [];
+    const growingCount = card.activeGrowingRows.length;
+    const plannedCount = card.plannedInBed.length;
+    const perennialCount = items.filter((item) => item.kind === "perennial").length;
+    const indoorsCount = items.filter((item) => item.kind === "indoors").length;
+    return (
+      <View style={styles.block}>
+        <View style={styles.rowBetween}>
+          <Text style={[styles.blockTitle, { color: theme.textPrimary }]}>Bed snapshot</Text>
+          <View style={styles.row}>
+            <Text style={[styles.snapshotToggleLabel, { color: theme.textMuted }]}>Photo</Text>
+            <SimpleToggle
+              value={photoVisible}
+              onToggle={(value) =>
+                setBedSnapshotPhotoVisibleByBedId((prev) => ({
+                  ...prev,
+                  [card.bed.id]: value,
+                }))
+              }
+            />
+          </View>
+        </View>
+        <BedSnapshotPreview
+          bed={card.bed}
+          photoUri={photoVisible ? photoUri : null}
+          showPhoto={photoVisible}
+          items={items}
+          theme={theme}
+        />
+        <View style={[styles.snapshotLegendFooter, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
+          <View style={styles.snapshotLegendRow}>
+            <LegendPill color="#16A34A" label="Growing" />
+            <LegendPill color="#D97706" label="Planned" />
+            <LegendPill color="#14532D" label="Perennial" />
+            <LegendPill color="#7C3AED" label="Indoors" />
+          </View>
+        </View>
+      </View>
+    );
+  };
+
   const bedPreviewInfoById = useMemo(() => {
     const map: Record<string, { bedName: string; lines: string[] }> = {};
     for (const card of bedCards) {
@@ -807,12 +897,14 @@ export default function BedsListScreen() {
       const showSuggestions = !hasExistingPlants || hasSpareSpace;
       const growing = card.growingNames;
       const planned = card.plannedInBed.map((entry) => formatEntryName(entry));
+      const startedIndoors = card.plannedInBed.filter((entry) => Boolean(entry.startedIndoorsAt)).map((entry) => formatEntryName(entry));
       const suggestions = showSuggestions ? card.suggestions.map((entry) => formatEntryName(entry.entry)) : [];
       map[card.bed.id] = {
         bedName: card.bed.name,
         lines: [
           growing.length > 0 ? `Growing: ${growing.join(", ")}` : "Growing: none",
           planned.length > 0 ? `Planned: ${planned.join(", ")}` : "Planned: none",
+          startedIndoors.length > 0 ? `Started indoors: ${startedIndoors.join(", ")}` : "Started indoors: none",
           ...(suggestions.length > 0 ? [`Suggestions: ${suggestions.join(", ")}`] : []),
         ],
       };
@@ -861,6 +953,60 @@ export default function BedsListScreen() {
     }
     return map;
   }, [bedPhotoLogSettingsQuery.data, gardenId]);
+
+  const bedSnapshotPhotoUriByBedId = useMemo(() => {
+    const map: Record<string, string | null> = {};
+    for (const bed of beds) {
+      const rows = bedPhotoRowsByBedId.get(bed.id) ?? [];
+      const backgroundRow = rows.find((row) => row.isBedBackground);
+      const preferred = backgroundRow?.backgroundPreviewUri?.trim() || backgroundRow?.uri.trim();
+      const fallback = rows[0]?.backgroundPreviewUri?.trim() || rows[0]?.uri.trim();
+      map[bed.id] = preferred || fallback || null;
+    }
+    return map;
+  }, [bedPhotoRowsByBedId, beds]);
+
+  const bedSnapshotItemsByBedId = useMemo(() => {
+    const map: Record<string, BedSnapshotItem[]> = {};
+    for (const card of bedCards) {
+      const items: BedSnapshotItem[] = [];
+      for (const row of card.activeGrowingRows) {
+        const meta = parsePlantMeta(row.entry.plant.metaJson);
+        const spreadCm = meta.spread ?? meta.rowSpacing;
+        items.push({
+          id: `${card.bed.id}-g-${row.entry.id}`,
+          kind: row.entry.isPerennial ? "perennial" : "growing",
+          label: formatEntryName(row.entry),
+          quantity: Math.max(1, row.entry.quantity ?? 1),
+          ...(typeof spreadCm === "number" ? { spreadCm } : {}),
+          startedIndoors: Boolean(row.entry.startedIndoorsAt),
+        });
+      }
+      for (const entry of card.plannedInBed) {
+        const meta = parsePlantMeta(entry.plant.metaJson);
+        const spreadCm = meta.spread ?? meta.rowSpacing;
+        items.push({
+          id: `${card.bed.id}-p-${entry.id}`,
+          kind: entry.startedIndoorsAt ? "indoors" : "planned",
+          label: formatEntryName(entry),
+          quantity: Math.max(1, entry.quantity ?? 1),
+          ...(typeof spreadCm === "number" ? { spreadCm } : {}),
+          startedIndoors: Boolean(entry.startedIndoorsAt),
+        });
+      }
+      for (const perennialName of parsePerennialPlants(card.bed.perennialPlantsCsv)) {
+        items.push({
+          id: `${card.bed.id}-perennial-${normalizePlantName(perennialName)}`,
+          kind: "perennial",
+          label: perennialName,
+          quantity: 1,
+          spreadCm: 45,
+        });
+      }
+      map[card.bed.id] = items;
+    }
+    return map;
+  }, [bedCards]);
 
   const addBedPhoto = async (bedId: string, source: "camera" | "gallery") => {
     if (!gardenId) return;
@@ -935,8 +1081,8 @@ export default function BedsListScreen() {
       "Remove this photo from the bed log?",
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete", 
+        {
+          text: "Delete",
           style: "destructive",
           onPress: async () => {
             const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
@@ -981,7 +1127,7 @@ export default function BedsListScreen() {
     const cached = queryClient.getQueryData<BedPhotoLogSettings>(["bed-photo-log-settings"]);
     const current = cached ?? (await loadBedPhotoLogSettings());
     const currentPhotos = current[gardenId] ?? [];
-    const updatedPhotos = currentPhotos.map(photo => 
+    const updatedPhotos = currentPhotos.map(photo =>
       photo.id === photoId
         ? (() => {
             const trimmed = notes.trim();
@@ -1072,13 +1218,11 @@ export default function BedsListScreen() {
     return { overBeds, signature };
   }, [bedCards]);
 
-  const showSpaceWarning = spaceWarning.overBeds.length > 0 && dismissedSpaceWarningSig !== spaceWarning.signature;
-
   return (
     <View style={[styles.page, { backgroundColor: theme.appBackground }]}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={[styles.title, { color: theme.textPrimary }]}>Bed Planner</Text>
-        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Review beds and place crops from your grow list.</Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>List mode expands each bed in place. Visual mode lets you tap the map and inspect one bed at a time.</Text>
         <View style={styles.statsRow}>
           <StatusChip label={`Grow list ${growListCount}`} />
           <StatusChip label={`Planned ${plannedCount}`} />
@@ -1093,22 +1237,6 @@ export default function BedsListScreen() {
           selectedId={plannerMode}
           onSelect={(mode) => setPlannerMode(mode as PlannerMode)}
         />
-        {showSpaceWarning && (
-          <View style={[styles.warningCard, { backgroundColor: theme.dangerActionBackground, borderColor: theme.borderColor }]}>
-            <Text style={[styles.warningText, { color: theme.dangerActionText }]}>
-              Potential over-capacity: {spaceWarning.overBeds.join(", ")}
-            </Text>
-            <View style={styles.warningActions}>
-              <Pressable
-                style={[styles.smallActionButton, { backgroundColor: theme.appBackground }]}
-                onPress={() => setDismissedSpaceWarningSig(spaceWarning.signature)}
-              >
-                <Text style={[styles.smallActionButtonText, { color: theme.textPrimary }]}>Dismiss</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
-
         {bedsQuery.isLoading && (
           <SkeletonLoader count={2} />
         )}
@@ -1120,7 +1248,7 @@ export default function BedsListScreen() {
           />
         )}
         {!bedsQuery.isLoading && !bedsQuery.isError && bedCards.length === 0 && (
-          <EmptyStateVariants.Beds 
+          <EmptyStateVariants.Beds
             onAction={() => router.push(`/gardens/${gardenId}/map`)}
           />
         )}
@@ -1132,21 +1260,45 @@ export default function BedsListScreen() {
           const historyExpanded = Boolean(historyExpandedByBed[card.bed.id]);
           const bedExpanded = Boolean(bedExpandedById[card.bed.id]);
           const rejectedCount = card.rejectedSuggestionIds.length;
+          const startedIndoorsCount = card.plannedInBed.filter((entry) => Boolean(entry.startedIndoorsAt)).length;
 
           return (
             <View key={card.bed.id} style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
               <Pressable
-                style={[styles.bedHeader, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}
+                style={[
+                  styles.bedHeader,
+                  {
+                    backgroundColor: bedExpanded ? theme.choiceControlActiveBackground : theme.appBackground,
+                    borderColor: bedExpanded ? theme.primaryActionBackground : theme.borderColor,
+                  },
+                ]}
                 onPress={() => setBedExpandedById((prev) => ({ ...prev, [card.bed.id]: !bedExpanded }))}
               >
                 <View style={styles.bedHeaderMain}>
-                  <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{card.bed.name}</Text>
-                  <Text style={[styles.meta, { color: theme.textMuted }]}>
-                    {card.activeGrowingRows.length} growing - {card.plannedInBed.length} planned{showSuggestions ? ` - ${card.suggestions.length} suggestions` : ""}
+                  <Text
+                    style={[
+                      styles.cardTitle,
+                      { color: bedExpanded ? theme.choiceControlActiveText : theme.textPrimary },
+                    ]}
+                  >
+                    {card.bed.name}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.meta,
+                      { color: bedExpanded ? theme.choiceControlActiveText : theme.textMuted },
+                    ]}
+                  >
+                    {card.activeGrowingRows.length} growing - {card.plannedInBed.length} planned - {startedIndoorsCount} indoors{showSuggestions ? ` - ${card.suggestions.length} suggestions` : ""}
                   </Text>
                 </View>
-                <Text style={[styles.bedHeaderCaret, { color: theme.textMuted }]}>{bedExpanded ? "v" : ">"}</Text>
+                <Text style={[styles.bedHeaderCaret, { color: bedExpanded ? theme.choiceControlActiveText : theme.textMuted }]}>{bedExpanded ? "v" : ">"}</Text>
               </Pressable>
+              {spaceWarning.overBeds.includes(card.bed.name) && (
+                <Text style={[styles.capacityNote, { color: theme.textMuted }]}>
+                  May be over capacity. Check the layout reference below.
+                </Text>
+              )}
               {card.diseaseProfile.diseases.length > 0 && (
                 <View style={[styles.diseaseBanner, { backgroundColor: theme.dangerActionBackground }]}>
                   <Text style={[styles.diseaseBannerText, { color: theme.dangerActionText }]}>
@@ -1175,7 +1327,14 @@ export default function BedsListScreen() {
                 {card.activeGrowingRows.map((row) => (
                   <View key={row.entry.id} style={[styles.growingRow, { borderColor: theme.borderColor }]}>
                     <View style={styles.growingMain}>
-                      <Text style={[styles.growingName, { color: theme.textPrimary }]}>{formatEntryName(row.entry)}</Text>
+                      <View style={styles.rowBetween}>
+                        <Text style={[styles.growingName, { color: theme.textPrimary }]}>{formatEntryName(row.entry)}</Text>
+                        <QuantityStepper
+                          quantity={row.entry.quantity}
+                          onChange={(delta) => void adjustEntryQuantity(row.entry, delta)}
+                          disabled={updateEntryQuantityMutation.isPending}
+                        />
+                      </View>
                       <Text style={[styles.blockText, { color: theme.textMuted }]}>{row.plantedAt ? `Planted ${formatDate(row.plantedAt)}` : "Planted date not set"}</Text>
                     </View>
                     <View style={styles.row}>
@@ -1221,9 +1380,18 @@ export default function BedsListScreen() {
                   <View style={styles.chips}>
                     {card.plannedInBed.map((entry) => (
                       <View key={entry.id} style={[styles.planChip, { backgroundColor: theme.secondaryActionBackground }]}>
-                        <Text style={[styles.planChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text>
-                        <Pressable style={[styles.planChipPlantButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => handleMarkPlanted(entry, card.bed.id)} disabled={markPlantedMutation.isPending}><Text style={[styles.planChipPlantButtonText, { color: theme.primaryActionText }]}>Planted</Text></Pressable>
-                        <Pressable style={[styles.planChipButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => handleClearPlan(entry)} disabled={clearPlanMutation.isPending}><Text style={[styles.planChipButtonText, { color: theme.dangerActionText }]}>Clear</Text></Pressable>
+                        <View style={styles.rowBetween}>
+                          <Text style={[styles.planChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text>
+                          <QuantityStepper
+                            quantity={entry.quantity}
+                            onChange={(delta) => void adjustEntryQuantity(entry, delta)}
+                            disabled={updateEntryQuantityMutation.isPending}
+                          />
+                        </View>
+                        <View style={styles.planChipActions}>
+                          <Pressable style={[styles.planChipPlantButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => handleMarkPlanted(entry, card.bed.id)} disabled={markPlantedMutation.isPending}><Text style={[styles.planChipPlantButtonText, { color: theme.primaryActionText }]}>Planted</Text></Pressable>
+                          <Pressable style={[styles.planChipButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => handleClearPlan(entry)} disabled={clearPlanMutation.isPending}><Text style={[styles.planChipButtonText, { color: theme.dangerActionText }]}>Clear</Text></Pressable>
+                        </View>
                       </View>
                     ))}
                   </View>
@@ -1432,11 +1600,35 @@ export default function BedsListScreen() {
                   </Link>
                 </View>
               )}
+              {renderBedSnapshotBlock(card)}
                 </>
               )}
             </View>
           );
         })}
+
+        {plannerMode === "list" && (
+          <View style={styles.referenceSection}>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Bed layout reference</Text>
+            <Text style={[styles.blockText, { color: theme.textMuted }]}>This is just the map preview, kept here for orientation while you work through the list.</Text>
+            <BedPlanPreview
+              beds={beds}
+              scaleCalibration={gardenQuery.data?.scaleCalibration ?? null}
+              {...(Number.isFinite(gardenQuery.data?.scaleCalibration?.boundaryAreaSqM)
+                ? { boundaryAreaSqM: gardenQuery.data?.scaleCalibration?.boundaryAreaSqM }
+                : {})}
+              {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
+                ? { boundaryPolygon: gardenQuery.data.scaleCalibration.boundaryPolygon }
+                : {})}
+              {...(gardenQuery.data?.scaleCalibration?.baseWidth && gardenQuery.data?.scaleCalibration?.baseHeight
+                ? { previewRatio: gardenQuery.data.scaleCalibration.baseHeight / gardenQuery.data.scaleCalibration.baseWidth }
+                : {})}
+              infoByBedId={bedPreviewInfoById}
+              bedPlantDotsById={bedPlantDotsById}
+              subtitle=""
+            />
+          </View>
+        )}
 
         {plannerMode === "visual" && (
           <>
@@ -1466,11 +1658,18 @@ export default function BedsListScreen() {
               const showSuggestions = !hasExistingPlants || hasSpareSpace;
               const rejectedCount = card.rejectedSuggestionIds.length;
               return (
-                <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-                  <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>{card.bed.name}</Text>
-                  <Text style={[styles.meta, { color: theme.textMuted }]}>
-                    {card.activeGrowingRows.length} growing - {card.plannedInBed.length} planned - {showSuggestions ? `${card.suggestions.length} suggestions` : "suggestions hidden"}
-                  </Text>
+                <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.primaryActionBackground }]}>
+                  <View style={[styles.selectedBedHeader, { backgroundColor: theme.primaryActionBackground }]}>
+                    <Text style={[styles.cardTitle, { color: theme.primaryActionText }]}>{card.bed.name}</Text>
+                    <Text style={[styles.meta, { color: theme.primaryActionText }]}>
+                      {card.activeGrowingRows.length} growing - {card.plannedInBed.length} planned - {showSuggestions ? `${card.suggestions.length} suggestions` : "suggestions hidden"}
+                    </Text>
+                  </View>
+                  {spaceWarning.overBeds.includes(card.bed.name) && (
+                    <Text style={[styles.capacityNote, { color: theme.textMuted }]}>
+                      May be over capacity. Check the layout reference below.
+                    </Text>
+                  )}
                   <View style={styles.toggleRow}>
                     <Text style={[styles.toggleLabel, { color: theme.textMuted }]}>Spare space</Text>
                     <SimpleToggle
@@ -1487,7 +1686,14 @@ export default function BedsListScreen() {
                         {card.activeGrowingRows.map((row) => (
                           <View key={`visual-grow-${row.entry.id}`} style={[styles.growingRow, { borderColor: theme.borderColor }]}>
                             <View style={styles.growingMain}>
-                              <Text style={[styles.growingName, { color: theme.textPrimary }]}>{formatEntryName(row.entry)}</Text>
+                              <View style={styles.rowBetween}>
+                                <Text style={[styles.growingName, { color: theme.textPrimary }]}>{formatEntryName(row.entry)}</Text>
+                                <QuantityStepper
+                                  quantity={row.entry.quantity}
+                                  onChange={(delta) => void adjustEntryQuantity(row.entry, delta)}
+                                  disabled={updateEntryQuantityMutation.isPending}
+                                />
+                              </View>
                               <Text style={[styles.blockText, { color: theme.textMuted }]}>{row.plantedAt ? `Planted ${formatDate(row.plantedAt)}` : "Planted date not set"}</Text>
                             </View>
                             <View style={styles.row}>
@@ -1517,9 +1723,18 @@ export default function BedsListScreen() {
                       <View style={styles.chips}>
                         {card.plannedInBed.map((entry) => (
                           <View key={`visual-plan-${entry.id}`} style={[styles.planChip, { backgroundColor: theme.secondaryActionBackground }]}>
-                            <Text style={[styles.planChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text>
-                            <Pressable style={[styles.planChipPlantButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => handleMarkPlanted(entry, card.bed.id)} disabled={markPlantedMutation.isPending}><Text style={[styles.planChipPlantButtonText, { color: theme.primaryActionText }]}>Planted</Text></Pressable>
-                            <Pressable style={[styles.planChipButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => handleClearPlan(entry)} disabled={clearPlanMutation.isPending}><Text style={[styles.planChipButtonText, { color: theme.dangerActionText }]}>Clear</Text></Pressable>
+                            <View style={styles.rowBetween}>
+                              <Text style={[styles.planChipText, { color: theme.secondaryActionText }]}>{formatEntryName(entry)}</Text>
+                              <QuantityStepper
+                                quantity={entry.quantity}
+                                onChange={(delta) => void adjustEntryQuantity(entry, delta)}
+                                disabled={updateEntryQuantityMutation.isPending}
+                              />
+                            </View>
+                            <View style={styles.planChipActions}>
+                              <Pressable style={[styles.planChipPlantButton, { backgroundColor: theme.primaryActionBackground }]} onPress={() => handleMarkPlanted(entry, card.bed.id)} disabled={markPlantedMutation.isPending}><Text style={[styles.planChipPlantButtonText, { color: theme.primaryActionText }]}>Planted</Text></Pressable>
+                              <Pressable style={[styles.planChipButton, { backgroundColor: theme.dangerActionBackground }]} onPress={() => handleClearPlan(entry)} disabled={clearPlanMutation.isPending}><Text style={[styles.planChipButtonText, { color: theme.dangerActionText }]}>Clear</Text></Pressable>
+                            </View>
                           </View>
                         ))}
                       </View>
@@ -1664,30 +1879,13 @@ export default function BedsListScreen() {
                       </ScrollView>
                     )}
                   </View>
+                  {renderBedSnapshotBlock(card)}
                 </View>
               );
             })()}
           </>
         )}
 
-        {plannerMode === "list" && (
-        <BedPlanPreview
-          beds={beds}
-          scaleCalibration={gardenQuery.data?.scaleCalibration ?? null}
-          {...(Number.isFinite(gardenQuery.data?.scaleCalibration?.boundaryAreaSqM)
-            ? { boundaryAreaSqM: gardenQuery.data?.scaleCalibration?.boundaryAreaSqM }
-            : {})}
-          {...(gardenQuery.data?.scaleCalibration?.boundaryPolygon
-            ? { boundaryPolygon: gardenQuery.data.scaleCalibration.boundaryPolygon }
-            : {})}
-          {...(gardenQuery.data?.scaleCalibration?.baseWidth && gardenQuery.data?.scaleCalibration?.baseHeight
-            ? { previewRatio: gardenQuery.data.scaleCalibration.baseHeight / gardenQuery.data.scaleCalibration.baseWidth }
-            : {})}
-          infoByBedId={bedPreviewInfoById}
-          bedPlantDotsById={bedPlantDotsById}
-          subtitle=""
-        />
-        )}
       </ScrollView>
       {finishDialog && (
         <View style={[styles.dialogOverlay, { backgroundColor: theme.appBackground }]}>
@@ -1770,14 +1968,14 @@ export default function BedsListScreen() {
                 <Text style={[styles.photoViewerCloseText, { color: theme.textPrimary }]}>X</Text>
               </Pressable>
             </View>
-            
+
             <ScrollView contentContainerStyle={styles.photoViewerContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <Image 
-                source={{ uri: photoViewer.photo.uri }} 
+              <Image
+                source={{ uri: photoViewer.photo.uri }}
                 style={styles.photoViewerImage}
                 resizeMode="contain"
               />
-              
+
               <View style={styles.photoViewerFooter}>
                 <Text style={[styles.photoViewerSource, { color: theme.textMuted }]}>
                   Source: {photoViewer.photo.source === "camera" ? "Camera" : "Gallery"}
@@ -1813,10 +2011,10 @@ export default function BedsListScreen() {
                     }
                   }}
                   placeholder="Add notes about this photo..."
-                  style={[styles.photoViewerNotesInput, { 
-                    borderColor: theme.borderColor, 
-                    backgroundColor: theme.appBackground, 
-                    color: theme.textPrimary 
+                  style={[styles.photoViewerNotesInput, {
+                    borderColor: theme.borderColor,
+                    backgroundColor: theme.appBackground,
+                    color: theme.textPrimary
                   }]}
                   multiline
                   numberOfLines={4}
@@ -1851,9 +2049,747 @@ function SimpleToggle(props: {
       onPress={() => !props.disabled && props.onToggle(!props.value)}
       disabled={props.disabled}
     >
-      <View style={[styles.simpleToggleThumb, { backgroundColor: theme.toggleThumbColor }, props.value && styles.simpleToggleThumbActive]} />
+    <View style={[styles.simpleToggleThumb, { backgroundColor: theme.toggleThumbColor }, props.value && styles.simpleToggleThumbActive]} />
     </Pressable>
   );
+}
+
+function LegendPill(props: { color: string; label: string }) {
+  const { theme } = useTheme();
+  return (
+    <View style={[styles.snapshotLegendPill, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
+      <View style={[styles.snapshotLegendDot, { backgroundColor: props.color }]} />
+      <Text style={[styles.snapshotLegendText, { color: theme.textMuted }]} numberOfLines={1}>
+        {props.label}
+      </Text>
+    </View>
+  );
+}
+
+function LegendRow(props: { color: string; label: string }) {
+  const { theme } = useTheme();
+  return (
+    <View style={[styles.snapshotLegendRowItem, { borderColor: theme.borderColor }]}>
+      <View style={[styles.snapshotLegendSwatch, { backgroundColor: props.color }]} />
+      <Text style={[styles.snapshotLegendRowText, { color: theme.textMuted }]}>{props.label}</Text>
+    </View>
+  );
+}
+
+function QuantityStepper(props: {
+  quantity: number;
+  onChange: (delta: number) => void;
+  disabled?: boolean;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View style={[styles.quantityStepper, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
+      <Pressable
+        style={[styles.quantityStepButton, { backgroundColor: theme.secondaryActionBackground }]}
+        disabled={props.disabled || props.quantity <= 1}
+        onPress={() => props.onChange(-1)}
+      >
+        <Text style={[styles.quantityStepButtonText, { color: theme.secondaryActionText }]}>-</Text>
+      </Pressable>
+      <Text style={[styles.quantityValue, { color: theme.textPrimary }]}>{Math.max(1, Math.floor(props.quantity))}</Text>
+      <Pressable
+        style={[styles.quantityStepButton, { backgroundColor: theme.primaryActionBackground }]}
+        disabled={props.disabled}
+        onPress={() => props.onChange(1)}
+      >
+        <Text style={[styles.quantityStepButtonText, { color: theme.primaryActionText }]}>+</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function BedSnapshotPreview(props: {
+  bed: { id: string; polygon: Point2D[]; containsPerennials?: boolean };
+  photoUri?: string | null;
+  showPhoto: boolean;
+  items: BedSnapshotItem[];
+  theme: ReturnType<typeof useTheme>["theme"];
+}) {
+  const canvasWidth = 1000;
+  const snapshotGeometry = buildSnapshotGeometry(props.bed.polygon, canvasWidth, 0.06);
+  const canvasHeight = snapshotGeometry.canvasHeight;
+  const clipId = `bed-snapshot-${safeSvgId(props.bed.id)}`;
+  const dots = buildBedSnapshotDots({
+    polygon: snapshotGeometry.polygon,
+    items: props.items,
+  });
+  const hasPhoto = props.showPhoto && Boolean(props.photoUri);
+  const bedFill = hasPhoto
+    ? withAlpha(props.theme.mapBedFill, 0.22)
+    : props.bed.containsPerennials
+      ? props.theme.mapPerennialBedFill
+      : props.theme.mapBedFill;
+  return (
+    <View
+      style={[
+        styles.bedSnapshotFrame,
+        { borderColor: props.theme.borderColor, backgroundColor: props.theme.appBackground, aspectRatio: snapshotGeometry.aspectRatio },
+      ]}
+    >
+      <Svg width="100%" height="100%" viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}>
+        <Defs>
+          <ClipPath id={clipId}>
+            <Polygon points={pointsToSvgString(snapshotGeometry.polygon)} />
+          </ClipPath>
+        </Defs>
+        <Rect x={0} y={0} width={canvasWidth} height={canvasHeight} fill={withAlpha(props.theme.mapBoundaryFill, 0.55)} />
+        {hasPhoto && (
+          <G clipPath={`url(#${clipId})`}>
+            <SvgImage
+              href={{ uri: props.photoUri as string }}
+              x={0}
+              y={0}
+              width={canvasWidth}
+              height={canvasHeight}
+              preserveAspectRatio="xMidYMid slice"
+              opacity={0.9}
+            />
+          </G>
+        )}
+        <Polygon
+          points={pointsToSvgString(snapshotGeometry.polygon)}
+          fill={bedFill}
+          stroke={props.theme.mapBedStroke}
+          strokeWidth={1.8}
+        />
+        <G clipPath={`url(#${clipId})`}>
+          {dots.map((dot) => (
+            <G key={dot.id} transform={`translate(${dot.x} ${dot.y})`}>
+              {dot.cluster.map((plant, plantIndex) => (
+                <G
+                  key={`${dot.id}-${plantIndex}`}
+                  transform={`translate(${plant.x} ${plant.y}) rotate(${plant.rotation}) scale(${dot.r / 4.5 * plant.scale})`}
+                  opacity={plant.opacity}
+                >
+                  {renderSnapshotPlantGlyph(dot.kind, dot)}
+                </G>
+              ))}
+              {dot.quantity > 1 && (
+                <G transform={`translate(${dot.badgeX} ${dot.badgeY})`}>
+                  <Rect
+                    x={-20}
+                    y={-14}
+                    width={40}
+                    height={28}
+                    rx={12}
+                    ry={12}
+                    fill="rgba(17, 24, 39, 0.62)"
+                  />
+                  <SvgText
+                    x={0}
+                    y={1.6}
+                    textAnchor="middle"
+                    alignmentBaseline="middle"
+                    fontSize={dot.quantity >= 10 ? 28 : dot.quantity >= 6 ? 26 : 24}
+                    fontWeight="900"
+                    fill="#FFFFFF"
+                  >
+                    {dot.quantity.toString()}
+                  </SvgText>
+                </G>
+              )}
+            </G>
+          ))}
+        </G>
+      </Svg>
+    </View>
+  );
+}
+
+function buildBedSnapshotDots(params: {
+  polygon: Array<{ x: number; y: number }>;
+  items: BedSnapshotItem[];
+}): Array<{
+  id: string;
+  x: number;
+  y: number;
+  r: number;
+  cluster: Array<{ x: number; y: number; scale: number; rotation: number; opacity: number }>;
+  badgeX: number;
+  badgeY: number;
+  outerFill: string;
+  innerFill: string;
+  stroke: string;
+  indoorStroke: string;
+  startedIndoors: boolean;
+  kind: BedSnapshotKind;
+  quantity: number;
+}> {
+  const orderedItems = [...params.items].sort((a, b) => {
+    const order = { perennial: 0, growing: 1, indoors: 2, planned: 3 } as const;
+    const delta = order[a.kind] - order[b.kind];
+    if (delta !== 0) return delta;
+    return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+  });
+  if (orderedItems.length === 0 || params.polygon.length < 3) return [];
+  const pxPolygon = params.polygon;
+  const bounds = polygonBounds(pxPolygon);
+  const area = polygonAreaPx(pxPolygon);
+  if (area <= 0) return [];
+  const points = spreadPointsAcrossPolygon({
+    polygon: pxPolygon,
+    bounds,
+    targetCount: Math.max(orderedItems.length * 4, 24),
+  });
+  const center = polygonCenterPx(pxPolygon);
+  const sizedItems = orderedItems
+  .map((item) => {
+      const spreadCm = item.spreadCm ?? defaultSpreadForSnapshot(item.kind);
+      const spreadFactor = clamp(spreadCm / 28, 1.0, 2.2);
+      const overTwenty = Math.max(0, Math.floor(item.quantity) - 20);
+      const quantityFactor = 1 + clamp(overTwenty / 20, 0, 1) * 0.3;
+      const radius = clamp((Math.sqrt(area / Math.max(1, orderedItems.length)) * 0.215) * spreadFactor * quantityFactor, 11.2, 22.0);
+      const colors = getSnapshotColors(item.kind);
+      return {
+        item,
+      radius,
+      colors,
+      };
+    })
+    .sort((a, b) => b.radius - a.radius);
+
+  const selected: Array<{ x: number; y: number; r: number; item: BedSnapshotItem; colors: ReturnType<typeof getSnapshotColors> }> = [];
+  const remaining = [...points];
+  for (const entry of sizedItems) {
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const candidate = remaining[index]!;
+      const minDistance =
+        selected.length === 0
+          ? -Math.hypot(candidate.x - center.x, candidate.y - center.y)
+          : selected.reduce((best, point) => Math.min(best, Math.hypot(candidate.x - point.x, candidate.y - point.y) - point.r - entry.radius), Infinity);
+      const edgeBias = Math.min(
+        candidate.x - bounds.minX,
+        bounds.maxX - candidate.x,
+        candidate.y - bounds.minY,
+        bounds.maxY - candidate.y
+      );
+      const edgeClearance = Math.min(
+        candidate.x - bounds.minX,
+        bounds.maxX - candidate.x,
+        candidate.y - bounds.minY,
+        bounds.maxY - candidate.y
+      );
+      if (edgeClearance < entry.radius * 2.05 + 3) continue;
+      const score = minDistance + edgeBias * 0.02 + hashUnit(`${entry.item.id}:${index}`) * 0.5;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+
+    if (bestIndex === -1) {
+      const fallback = remaining.shift() ?? center;
+      selected.push({
+        x: fallback.x,
+        y: fallback.y,
+        r: entry.radius,
+        item: entry.item,
+        colors: entry.colors,
+      });
+      continue;
+    }
+
+    selected.push({
+      ...remaining.splice(bestIndex, 1)[0]!,
+      r: entry.radius,
+      item: entry.item,
+      colors: entry.colors,
+    });
+  }
+
+  return selected.map((point) => ({
+    id: point.item.id,
+    x: point.x,
+    y: point.y,
+    r: point.r,
+    cluster: buildSnapshotCluster(point.item.id, point.r, point.item.quantity, distanceToPolygonEdgePx(point, pxPolygon)),
+    ...buildSnapshotBadgePosition(point, pxPolygon),
+    outerFill: point.colors.outerFill,
+    innerFill: point.colors.innerFill,
+    stroke: point.colors.stroke,
+    indoorStroke: point.colors.indoorStroke,
+    startedIndoors: Boolean(point.item.startedIndoors),
+    kind: point.item.kind,
+    quantity: point.item.quantity,
+  }));
+}
+
+function buildSnapshotGeometry(
+  polygon: Point2D[],
+  canvasWidth: number,
+  padding: number
+): { polygon: Array<{ x: number; y: number }>; aspectRatio: number; canvasHeight: number } {
+  if (polygon.length === 0) {
+    return { polygon: [], aspectRatio: 1, canvasHeight: canvasWidth };
+  }
+  const center = polygonCenterPx(polygon);
+  const angles = [0, 90, 180, 270];
+  const safePadding = clamp(padding, 0, 0.18);
+
+  let best: { polygon: Array<{ x: number; y: number }>; aspectRatio: number; canvasHeight: number } | null = null;
+  let bestScore = -Infinity;
+
+  for (const angle of angles) {
+    const rotated = rotatePolygonPx(polygon, center, angle);
+    const bounds = polygonBounds(rotated);
+    const width = Math.max(bounds.maxX - bounds.minX, 1e-6);
+    const height = Math.max(bounds.maxY - bounds.minY, 1e-6);
+    const aspectRatio = clamp(width / height, 0.22, 4.5);
+    const canvasHeight = Math.max(88, Math.round(canvasWidth / aspectRatio));
+    const usableWidth = canvasWidth * (1 - safePadding * 2);
+    const usableHeight = canvasHeight * (1 - safePadding * 2);
+    const scale = Math.min(usableWidth / width, usableHeight / height);
+    const offsetX = (canvasWidth - width * scale) / 2 - bounds.minX * scale;
+    const offsetY = (canvasHeight - height * scale) / 2 - bounds.minY * scale;
+    const fittedPolygon = rotated.map((point) => ({
+      x: point.x * scale + offsetX,
+      y: point.y * scale + offsetY,
+    }));
+    const score = aspectRatio - Math.abs(width - height) * 0.0001;
+    if (score > bestScore) {
+      bestScore = score;
+      best = { polygon: fittedPolygon, aspectRatio, canvasHeight };
+    }
+  }
+
+  return best ?? { polygon, aspectRatio: 1, canvasHeight: canvasWidth };
+}
+
+function buildSnapshotCluster(seed: string, radius: number, quantity: number, fitRadius: number) {
+  const count = Math.max(1, Math.floor(quantity));
+  if (count === 1) {
+    return [{ x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 }];
+  }
+
+  const rotationSeed = hashUnit(`${seed}:cluster-rotation`);
+  const spreadFactor = clamp(Math.min(count, 12) / 12, 0.45, 1);
+  const postTwenty = clamp((count - 20) / 20, 0, 1);
+  const extraGrowth = postTwenty * 2.1;
+  const clusterRadius = clamp(
+    radius * (0.96 + spreadFactor * 0.34 + extraGrowth),
+    8.2,
+    fitRadius * (0.8 + spreadFactor * 0.2 + extraGrowth * 1.08)
+  );
+
+  if (count === 2) {
+    const offset = clusterRadius * 0.48;
+    return [
+      { x: -offset, y: -offset * 0.1, scale: 1.02, rotation: -6, opacity: 1 },
+      { x: offset, y: offset * 0.1, scale: 0.94, rotation: 8, opacity: 0.96 },
+    ];
+  }
+
+  if (count === 3) {
+    const offset = clusterRadius * 0.42;
+    return [
+      { x: 0, y: 0, scale: 1.02, rotation: (rotationSeed - 0.5) * 10, opacity: 1 },
+      { x: -offset, y: offset * 0.28, scale: 0.92, rotation: -12, opacity: 0.96 },
+      { x: offset, y: offset * 0.16, scale: 0.9, rotation: 12, opacity: 0.96 },
+    ];
+  }
+
+  if (count <= 5) {
+    const ring = clusterRadius * 0.44;
+    const cluster = [
+      { x: 0, y: 0, scale: 1.03, rotation: (rotationSeed - 0.5) * 10, opacity: 1 },
+    ];
+    const offsets = [
+      { angle: -28, radius: ring * 1.08, scale: 0.92 },
+      { angle: 34, radius: ring * 1.14, scale: 0.9 },
+      { angle: 142, radius: ring * 1.0, scale: 0.88 },
+      { angle: -138, radius: ring * 0.96, scale: 0.86 },
+    ];
+    for (let index = 1; index < count; index += 1) {
+      const offset = offsets[index - 1]!;
+      const angle = ((offset.angle + (hashUnit(`${seed}:${index}:angle`) - 0.5) * 14) * Math.PI) / 180;
+      cluster.push({
+        x: Math.cos(angle) * offset.radius,
+        y: Math.sin(angle) * offset.radius * 0.88,
+        scale: clamp(offset.scale + (hashUnit(`${seed}:${index}:scale`) - 0.5) * 0.06, 0.82, 1.04),
+        rotation: (hashUnit(`${seed}:${index}:rotation`) - 0.5) * 18,
+        opacity: 0.96,
+      });
+    }
+    return cluster.sort((a, b) => a.scale - b.scale || Math.abs(b.x) + Math.abs(b.y) - (Math.abs(a.x) + Math.abs(a.y)));
+  }
+
+  if (count > 12) {
+    const visibleCount = Math.min(count, 40);
+    const cluster = [
+      {
+        x: 0,
+        y: 0,
+        scale: clamp(1.0 - Math.min(0.1, (count - 1) * 0.003), 0.88, 1.0),
+        rotation: (rotationSeed - 0.5) * 10,
+        opacity: 1,
+      },
+    ];
+    const bands =
+      count > 30
+        ? [0.16, 0.32, 0.5, 0.68, 0.86, 1.0, 1.12]
+        : count > 24
+          ? [0.18, 0.36, 0.54, 0.72, 0.88, 1.02, 1.1]
+          : [0.2, 0.42, 0.62, 0.8, 0.96, 1.06];
+    for (let index = 1; index < visibleCount; index += 1) {
+      const bandIndex = Math.min(bands.length - 1, Math.floor((index - 1) / Math.max(1, Math.ceil((visibleCount - 1) / bands.length))));
+      const band = bands[bandIndex]!;
+      const angle = rotationSeed * Math.PI * 2 + index * 1.61803398875 + (hashUnit(`${seed}:${index}:angle`) - 0.5) * (count > 20 ? 1.18 : 0.9);
+      const radiusJitter = 0.76 + hashUnit(`${seed}:${index}:radius`) * (count > 20 ? 0.58 : 0.2);
+      const distance = clusterRadius * band * radiusJitter;
+      cluster.push({
+        x: Math.cos(angle) * distance,
+        y: Math.sin(angle) * distance * 0.9,
+        scale: clamp(0.9 + (hashUnit(`${seed}:${index}:scale`) - 0.5) * (count > 20 ? 0.22 : 0.14), 0.76, 1.1),
+        rotation: (hashUnit(`${seed}:${index}:rotation`) - 0.5) * 20,
+        opacity: 0.96,
+      });
+    }
+    return cluster.sort((a, b) => a.scale - b.scale || Math.abs(b.x) + Math.abs(b.y) - (Math.abs(a.x) + Math.abs(a.y)));
+  }
+
+  const spread = clusterRadius / Math.max(0.62, Math.sqrt(count) * 0.52);
+  const cluster = [
+    {
+      x: 0,
+      y: 0,
+      scale: clamp(1.0 - Math.min(0.08, (count - 1) * 0.008), 0.9, 1.0),
+      rotation: (rotationSeed - 0.5) * 10,
+      opacity: 1,
+    },
+  ];
+
+  for (let index = 1; index < count; index += 1) {
+    const angle = rotationSeed * Math.PI * 2 + index * 2.39996322973 + (hashUnit(`${seed}:${index}:angle`) - 0.5) * 0.8;
+    const radialBase = spread * (0.92 + Math.pow(index / Math.max(1, count - 1), 0.66) * 1.18);
+    const radiusOffset = radialBase * (1.12 + hashUnit(`${seed}:${index}:radius`) * 0.9);
+    const x = Math.cos(angle) * radiusOffset;
+    const y = Math.sin(angle) * radiusOffset * 0.92;
+    cluster.push({
+      x,
+      y,
+      scale: clamp(1.0 + (hashUnit(`${seed}:${index}:scale`) - 0.5) * 0.14, 0.86, 1.12),
+      rotation: (hashUnit(`${seed}:${index}:rotation`) - 0.5) * 22,
+      opacity: 0.95,
+    });
+  }
+
+  return cluster.sort((a, b) => a.scale - b.scale || Math.abs(b.x) + Math.abs(b.y) - (Math.abs(a.x) + Math.abs(a.y)));
+}
+
+function buildSnapshotBadgePosition(point: { x: number; y: number; r: number }, polygon: Array<{ x: number; y: number }>) {
+  const center = polygonCenterPx(polygon);
+  const angle = Math.atan2(center.y - point.y, center.x - point.x);
+  const edgeDistance = distanceToPolygonEdgePx(point, polygon);
+  const offset = clamp(Math.max(point.r * 0.58, Math.min(point.r * 0.9, edgeDistance * 0.45)), 12, Math.max(12, edgeDistance - 8));
+  return {
+    badgeX: Math.cos(angle) * offset,
+    badgeY: Math.sin(angle) * offset,
+  };
+}
+
+function renderSnapshotPlantGlyph(kind: BedSnapshotKind, dot: { outerFill: string; stroke: string; innerFill: string; indoorStroke: string }) {
+  if (kind === "planned") {
+    return (
+      <>
+        <Line x1={0} y1={8.8} x2={0} y2={-2.0} stroke={dot.stroke} strokeWidth={1.35} strokeLinecap="round" />
+        <Ellipse cx={-3.6} cy={-1.3} rx={4.9} ry={2.6} fill={dot.outerFill} stroke={dot.stroke} strokeWidth={1} transform="rotate(-38 -3.6 -1.3)" />
+        <Ellipse cx={3.3} cy={-2.0} rx={3.2} ry={1.7} fill={dot.outerFill} stroke={dot.stroke} strokeWidth={1} transform="rotate(18 3.3 -2.0)" />
+      </>
+    );
+  }
+
+  if (kind === "perennial") {
+    return (
+      <>
+        <Line x1={0} y1={8.8} x2={0} y2={-2.0} stroke={dot.stroke} strokeWidth={1.25} strokeLinecap="round" />
+        <Ellipse cx={-3.9} cy={-1.8} rx={5.1} ry={3.1} fill={dot.outerFill} stroke={dot.stroke} strokeWidth={1} transform="rotate(-22 -3.9 -1.8)" />
+        <Ellipse cx={3.9} cy={-1.8} rx={5.1} ry={3.1} fill={dot.outerFill} stroke={dot.stroke} strokeWidth={1} transform="rotate(22 3.9 -1.8)" />
+      </>
+    );
+  }
+
+  if (kind === "indoors") {
+    return (
+      <>
+        <Line x1={0} y1={9.2} x2={0} y2={-2.2} stroke={dot.stroke} strokeWidth={1.3} strokeLinecap="round" />
+        <Ellipse cx={-3.0} cy={-1.4} rx={4.7} ry={2.7} fill={dot.outerFill} stroke={dot.stroke} strokeWidth={1} transform="rotate(-30 -3.0 -1.4)" />
+        <Ellipse cx={3.0} cy={-1.4} rx={4.7} ry={2.7} fill={dot.outerFill} stroke={dot.stroke} strokeWidth={1} transform="rotate(30 3.0 -1.4)" />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Line x1={0} y1={9.6} x2={0} y2={-2.4} stroke={dot.stroke} strokeWidth={1.35} strokeLinecap="round" />
+      <Ellipse cx={-4.1} cy={-1.7} rx={5.4} ry={3.0} fill={dot.outerFill} stroke={dot.stroke} strokeWidth={1} transform="rotate(-28 -4.1 -1.7)" />
+      <Ellipse cx={4.1} cy={-1.7} rx={5.4} ry={3.0} fill={dot.outerFill} stroke={dot.stroke} strokeWidth={1} transform="rotate(28 4.1 -1.7)" />
+    </>
+  );
+}
+
+function defaultSpreadForSnapshot(kind: BedSnapshotKind): number {
+  switch (kind) {
+    case "perennial":
+      return 45;
+    case "growing":
+      return 34;
+    case "indoors":
+      return 30;
+    case "planned":
+    default:
+      return 26;
+  }
+}
+
+function spreadPointsAcrossPolygon(params: {
+  polygon: Array<{ x: number; y: number }>;
+  bounds: { minX: number; maxX: number; minY: number; maxY: number };
+  targetCount: number;
+}): Array<{ x: number; y: number }> {
+  const { polygon, bounds, targetCount } = params;
+  const points: Array<{ x: number; y: number }> = [];
+  const center = polygonCenterPx(polygon);
+  const columns = Math.max(3, Math.round(Math.sqrt(targetCount * 1.6)));
+  const rows = Math.max(3, Math.ceil(targetCount / columns) + 1);
+  const cellW = (bounds.maxX - bounds.minX) / columns;
+  const cellH = (bounds.maxY - bounds.minY) / rows;
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const baseX = bounds.minX + (column + 0.5) * cellW;
+      const baseY = bounds.minY + (row + 0.5) * cellH;
+      const jitterX = (hashUnit(`${row}:${column}:x`) - 0.5) * cellW * 0.68;
+      const jitterY = (hashUnit(`${row}:${column}:y`) - 0.5) * cellH * 0.68;
+      const candidate = { x: baseX + jitterX, y: baseY + jitterY };
+      if (isPointInsidePolygonPx(candidate, polygon)) points.push(candidate);
+    }
+  }
+
+  if (points.length === 0) {
+    return Array.from({ length: targetCount }, (_, index) => {
+      const fx = fract((index + 1) * 0.61803398875);
+      const fy = fract((index + 1) * 0.75487766625);
+      return {
+        x: bounds.minX + (bounds.maxX - bounds.minX) * fx,
+        y: bounds.minY + (bounds.maxY - bounds.minY) * fy,
+      };
+    });
+  }
+  return points.slice(0, targetCount);
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value);
+}
+
+function hashUnit(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) % 10000) / 10000;
+}
+
+function getSnapshotColors(kind: BedSnapshotKind): { outerFill: string; innerFill: string; stroke: string; indoorStroke: string } {
+  switch (kind) {
+    case "perennial":
+      return {
+        outerFill: withAlpha("#14532D", 0.84),
+        innerFill: "#4ADE80",
+        stroke: withAlpha("#052E16", 0.95),
+        indoorStroke: withAlpha("#86EFAC", 0.88),
+      };
+    case "indoors":
+      return {
+        outerFill: withAlpha("#6D28D9", 0.82),
+        innerFill: "#C4B5FD",
+        stroke: withAlpha("#4C1D95", 0.95),
+        indoorStroke: withAlpha("#C4B5FD", 0.9),
+      };
+    case "planned":
+      return {
+        outerFill: withAlpha("#D97706", 0.74),
+        innerFill: "#F59E0B",
+        stroke: withAlpha("#92400E", 0.9),
+        indoorStroke: withAlpha("#FED7AA", 0.92),
+      };
+    case "growing":
+    default:
+      return {
+        outerFill: withAlpha("#16A34A", 0.8),
+        innerFill: "#4ADE80",
+        stroke: withAlpha("#14532D", 0.9),
+        indoorStroke: withAlpha("#DCFCE7", 0.9),
+      };
+  }
+}
+
+function jitterPointInPolygon(seed: number, bounds: { minX: number; maxX: number; minY: number; maxY: number }, polygon: Point2D[]) {
+  const width = Math.max(1, bounds.maxX - bounds.minX);
+  const height = Math.max(1, bounds.maxY - bounds.minY);
+  const fx = ((seed * 37) % 100) / 100;
+  const fy = ((seed * 53) % 100) / 100;
+  const candidate = {
+    x: bounds.minX + width * (0.18 + fx * 0.64),
+    y: bounds.minY + height * (0.22 + fy * 0.56),
+  };
+  if (isPointInsidePolygonPx(candidate, polygon)) return candidate;
+  return polygonCenterPx(polygon);
+}
+
+function getPolygonAspectRatio(polygon: Point2D[]): number {
+  const bounds = polygonBounds(polygon);
+  const width = Math.max(0.35, bounds.maxX - bounds.minX);
+  const height = Math.max(0.22, bounds.maxY - bounds.minY);
+  return clamp(height / width, 0.09, 1.15);
+}
+
+function normalizePolygonForSnapshot(
+  polygon: Point2D[],
+  bounds?: { minX: number; maxX: number; minY: number; maxY: number },
+  padding = 0
+): Point2D[] {
+  if (polygon.length === 0) return [];
+  const currentBounds = bounds ?? polygonBounds(polygon);
+  const width = Math.max(currentBounds.maxX - currentBounds.minX, 1e-6);
+  const height = Math.max(currentBounds.maxY - currentBounds.minY, 1e-6);
+  const safePadding = clamp(padding, 0, 0.18);
+  return polygon.map((point) => ({
+    x: clamp(safePadding + ((point.x - currentBounds.minX) / width) * (1 - safePadding * 2), safePadding, 1 - safePadding),
+    y: clamp(safePadding + ((point.y - currentBounds.minY) / height) * (1 - safePadding * 2), safePadding, 1 - safePadding),
+  }));
+}
+
+function getPolygonAspectRatioFromBounds(bounds: { minX: number; maxX: number; minY: number; maxY: number }): number {
+  const width = Math.max(0.35, bounds.maxX - bounds.minX);
+  const height = Math.max(0.22, bounds.maxY - bounds.minY);
+  return clamp(width / height, 0.22, 4.5);
+}
+
+function rotatePolygonPx(points: Point2D[], center: { x: number; y: number }, angleDeg: number): Point2D[] {
+  const radians = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return points.map((point) => {
+    const dx = point.x - center.x;
+    const dy = point.y - center.y;
+    return {
+      x: center.x + dx * cos - dy * sin,
+      y: center.y + dx * sin + dy * cos,
+    };
+  });
+}
+
+function polygonBounds(points: Point2D[]): { minX: number; maxX: number; minY: number; maxY: number } {
+  if (points.length === 0) {
+    return { minX: 0, maxX: 1, minY: 0, maxY: 1 };
+  }
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
+}
+
+function polygonCenterPx(points: Array<{ x: number; y: number }>): { x: number; y: number } {
+  if (points.length === 0) return { x: 0, y: 0 };
+  const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+  return { x: sum.x / points.length, y: sum.y / points.length };
+}
+
+function polygonAreaPx(points: Array<{ x: number; y: number }>): number {
+  if (points.length < 3) return 0;
+  let total = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index]!;
+    const next = points[(index + 1) % points.length]!;
+    total += current.x * next.y - next.x * current.y;
+  }
+  return Math.abs(total) / 2;
+}
+
+function isPointInsidePolygonPx(point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>): boolean {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+    const current = polygon[index]!;
+    const prior = polygon[previous]!;
+    const intersects =
+      current.y > point.y !== prior.y > point.y &&
+      point.x < ((prior.x - current.x) * (point.y - current.y)) / ((prior.y - current.y) || 1e-6) + current.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function safeSvgId(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+
+function withAlpha(color: string, alpha: number): string {
+  const normalized = Math.max(0, Math.min(1, alpha));
+  if (color.startsWith("#")) {
+    const hex = color.slice(1);
+    const expanded = hex.length === 3 ? hex.split("").map((char) => `${char}${char}`).join("") : hex;
+    if (expanded.length === 6) {
+      const red = Number.parseInt(expanded.slice(0, 2), 16);
+      const green = Number.parseInt(expanded.slice(2, 4), 16);
+      const blue = Number.parseInt(expanded.slice(4, 6), 16);
+      return `rgba(${red}, ${green}, ${blue}, ${normalized})`;
+    }
+  }
+  return color;
+}
+
+function toSvgPoints(points: Point2D[], width: number, height: number): string {
+  return points.map((point) => `${point.x * width},${point.y * height}`).join(" ");
+}
+
+function distanceToPolygonEdgePx(point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>): number {
+  if (polygon.length < 2) return Infinity;
+  let best = Infinity;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const current = polygon[index]!;
+    const next = polygon[(index + 1) % polygon.length]!;
+    const distance = distancePointToSegment(point, current, next);
+    if (distance < best) best = distance;
+  }
+  return best;
+}
+
+function distancePointToSegment(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared <= 1e-6) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+  const t = clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0, 1);
+  const projX = start.x + t * dx;
+  const projY = start.y + t * dy;
+  return Math.hypot(point.x - projX, point.y - projY);
+}
+
+function pointsToSvgString(points: Array<{ x: number; y: number }>): string {
+  return points.map((point) => `${point.x},${point.y}`).join(" ");
 }
 
 function scoreSuggestion(params: {
@@ -2344,6 +3280,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cardTitle: { fontSize: 16, fontWeight: "800" },
+  capacityNote: { fontSize: 12, fontWeight: "600" },
   bedHeader: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   bedHeaderMain: { flex: 1, gap: 2 },
   bedHeaderCaret: { fontSize: 16, fontWeight: "700" },
@@ -2371,16 +3308,52 @@ const styles = StyleSheet.create({
   toggleChipText: { fontWeight: "700" },
   toggleChipTextActive: {},
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  planChip: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  planChipText: { fontWeight: "700", fontSize: 12 },
+  planChip: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 8,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    width: "100%",
+  },
+  planChipText: { fontWeight: "700", fontSize: 12, flexShrink: 1, flexWrap: "wrap" },
+  planChipActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "flex-start" },
   planChipPlantButton: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   planChipPlantButtonText: { fontWeight: "700", fontSize: 11 },
   planChipButton: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   planChipButtonText: { fontWeight: "700", fontSize: 11 },
+  quantityStepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  quantityStepButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quantityStepButtonText: {
+    fontSize: 16,
+    fontWeight: "800",
+    lineHeight: 16,
+  },
+  quantityValue: {
+    minWidth: 18,
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   smallActionButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   smallActionButtonText: { fontWeight: "700", fontSize: 11 },
   suggestionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9 },
-  suggestionMain: { flex: 1, gap: 2 },
+  suggestionMain: { flex: 1, gap: 2, minWidth: 0 },
   suggestionName: { fontWeight: "700" },
   suggestionScore: { fontSize: 11, fontWeight: "700" },
   scoreChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
@@ -2413,6 +3386,76 @@ const styles = StyleSheet.create({
   photoStrip: { gap: 8, paddingRight: 6 },
   photoCard: { borderRadius: 10, padding: 6, gap: 2, width: 120, position: "relative" },
   photoThumb: { width: 106, height: 72, borderRadius: 7 },
+  selectedBedHeader: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+    marginBottom: 2,
+  },
+  bedSnapshotFrame: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 14,
+    overflow: "hidden",
+    marginTop: 4,
+  },
+  snapshotLegendRow: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    gap: 4,
+  },
+  snapshotLegendFooter: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 0,
+    marginTop: 6,
+  },
+  snapshotLegendRowItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    flexShrink: 1,
+  },
+  snapshotLegendSwatch: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  snapshotLegendRowText: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  snapshotLegendPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    flexShrink: 1,
+  },
+  snapshotLegendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  snapshotLegendText: {
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  snapshotToggleLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
   photoBackgroundBadge: {
     alignSelf: "flex-start",
     borderRadius: 999,
@@ -2427,6 +3470,7 @@ const styles = StyleSheet.create({
   photoMeta: { fontSize: 10 },
   photoDeleteButton: { position: "absolute", top: 2, right: 2, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", zIndex: 1 },
   photoDeleteButtonText: { fontSize: 16, fontWeight: "800", lineHeight: 16 },
+  referenceSection: { gap: 8, marginTop: 8 },
   linkText: { fontWeight: "700", marginTop: 2 },
   zoomRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   zoomButton: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
@@ -2590,4 +3634,3 @@ const styles = StyleSheet.create({
   },
 
 });
-

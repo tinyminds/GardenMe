@@ -11,7 +11,9 @@ import { SqlitePlantCatalogRepository } from "@/infra/repositories/sqlite/Sqlite
 import { SqliteBedRepository } from "@/infra/repositories/sqlite/SqliteBedRepository";
 import { SqliteCompanionPlantingRepository } from "@/infra/repositories/sqlite/SqliteCompanionPlantingRepository";
 import { SqliteGardenTaskRepository } from "@/infra/repositories/sqlite/SqliteGardenTaskRepository";
+import type { PlantCatalogRepository } from "@/domain/repositories/PlantCatalogRepository";
 import { fetchGrowstuffCropDetails, searchGrowstuffPlants, type GrowstuffCropDetails } from "@/features/plants/services/growstuff";
+import { searchExternalPlantCatalogEntries } from "@/features/plants/services/plantSources";
 import { BedPlanPreview } from "@/features/garden-mapping/components/BedPlanPreview";
 import { getPlantingCalendarProfile } from "@/features/plants/services/plantingCalendar";
 import { queryClient } from "@/state/queryClient";
@@ -40,9 +42,6 @@ type PlantSuggestion = {
   familyName?: string;
   imageUrl?: string;
   metaJson?: string;
-  sourceLabel: "Growstuff" | "Manual";
-  detailLine?: string;
-  descriptionSnippet?: string;
 };
 
 type CropEntryDraft = {
@@ -91,7 +90,7 @@ type GrowListCsvRow = {
   isPerennial: boolean;
 };
 
-type ListStatusFilter = Set<"planned" | "growing" | "started_indoors" | "perennial" | "annual" | "unassigned_beds">;
+type ListStatusFilter = Set<"planned" | "growing" | "started_indoors" | "perennial" | "annual" | "assigned_beds" | "unassigned_beds">;
 type SuggestionTab = "companions" | "common" | "unusual";
 
 const COMMON_CROP_SUGGESTIONS = [
@@ -190,6 +189,7 @@ export default function GardenGrowListScreen() {
   const [bulkImportUnmatchedNames, setBulkImportUnmatchedNames] = useState<string[]>([]);
   const [listTransferMessage, setListTransferMessage] = useState<string | null>(null);
   const [timingRefreshMessage, setTimingRefreshMessage] = useState<string | null>(null);
+  const [catalogRefreshMessage, setCatalogRefreshMessage] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const listNameCollator = useMemo(
     () =>
@@ -246,75 +246,56 @@ export default function GardenGrowListScreen() {
     queryKey: ["companion-relations"],
     queryFn: async () => companionRepository.listAll(),
   });
+  const growList = wishlistQuery.data ?? [];
+  const assignedBedCount = useMemo(() => growList.filter((item) => Boolean(item.bedId)).length, [growList]);
+  const growingNowCount = useMemo(() => growList.filter((item) => item.status === "already_growing").length, [growList]);
+  const startedIndoorsCount = useMemo(
+    () => growList.filter((item) => item.status === "wanted" && Boolean(item.startedIndoorsAt)).length,
+    [growList]
+  );
+  const needsBedCount = useMemo(
+    () => growList.filter((item) => item.status === "wanted" && !item.bedId).length,
+    [growList]
+  );
+  const plannedInBedCount = useMemo(
+    () => growList.filter((item) => item.status === "wanted" && Boolean(item.bedId)).length,
+    [growList]
+  );
 
   const suggestionsQuery = useQuery({
     queryKey: ["plant-suggestions", debouncedSearch],
     enabled: debouncedSearch.length >= 2,
     queryFn: async () => {
       const query = debouncedSearch.trim().toLowerCase();
-      const localMatches = (await plantCatalogRepository.searchByName(debouncedSearch, 20)).filter(
-        (item) => item.source === "growstuff" || item.source === "manual"
-      );
-      let remoteMatches: PlantCatalogEntry[] = [];
+      const searchTerms = buildPlantSearchTerms(debouncedSearch);
+      const localMatches = await collectLocalPlantMatches(searchTerms, plantCatalogRepository, 20);
+      const remoteMatches = await searchExternalPlantCatalogEntries(debouncedSearch, plantCatalogRepository, 16);
 
-      try {
-        const growstuffHits = await searchGrowstuffPlants(debouncedSearch, 1, 24);
-        const growstuffMatches = await Promise.all(
-          growstuffHits.map(async (hit) => {
-            const existing = await plantCatalogRepository.getBySourceExternalId("growstuff", hit.externalId);
-            return plantCatalogRepository.upsert({
-              source: "growstuff",
-              externalId: hit.externalId,
-              commonName: hit.commonName,
-              ...(hit.scientificName ? { scientificName: hit.scientificName } : {}),
-              ...(hit.familyName ? { familyName: hit.familyName } : {}),
-              ...(hit.imageUrl ? { imageUrl: hit.imageUrl } : {}),
-              metaJson: existing?.metaJson ?? hit.rawJson,
-            });
-          })
-        );
-        remoteMatches = [...remoteMatches, ...growstuffMatches];
-      } catch {
-        // Keep local fallback only.
-      }
-
-      const mergedById = new Map<string, PlantCatalogEntry>();
+      const mergedById = new Map<string, { entry: PlantCatalogEntry; rank: number; priority: number }>();
       for (const entry of [...remoteMatches, ...localMatches]) {
-        if (!mergedById.has(entry.id)) mergedById.set(entry.id, entry);
+        const rank = getPlantMatchRank(query, entry);
+        const priority = sourcePriority(entry.source);
+        const existing = mergedById.get(entry.id);
+        if (!existing || rank < existing.rank || (rank === existing.rank && priority < existing.priority)) {
+          mergedById.set(entry.id, { entry, rank, priority });
+        }
       }
 
-      const sourcePriority = (source: PlantCatalogEntry["source"]): number => {
-        if (source === "growstuff") return 0;
-        if (source === "manual") return 1;
+      function sourcePriority(source: PlantCatalogEntry["source"]): number {
+        if (source === "manual") return 0;
+        if (source === "gbif") return 1;
+        if (source === "wikidata") return 2;
+        if (source === "growstuff") return 3;
         return 9;
-      };
-
-      const relevanceScore = (entry: PlantCatalogEntry): number => {
-        const common = normalizeSearchText(entry.commonName);
-        const scientific = normalizeSearchText(entry.scientificName ?? "");
-        if (!query) return 0;
-        const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const wordMatch = new RegExp(`\\b${escapedQuery}\\b`);
-        let score = 0;
-        if (common === query) score += 120;
-        if (wordMatch.test(common)) score += 95;
-        if (common.startsWith(query)) score += 85;
-        if (common.includes(query)) score += 45;
-        if (scientific === query) score += 55;
-        if (wordMatch.test(scientific)) score += 40;
-        if (scientific.startsWith(query)) score += 35;
-        if (scientific.includes(query)) score += 20;
-        if (isSingularPluralEquivalent(common, query)) score += 30;
-        if (isLikelySpecificVarietyName(entry.commonName, query)) score -= 35;
-        return score;
-      };
+      }
 
       return Array.from(mergedById.values())
+        .map((row) => row.entry)
         .sort((a, b) => {
+          const rankOrder = getPlantMatchRank(query, a) - getPlantMatchRank(query, b);
+          if (rankOrder !== 0) return rankOrder;
           const sourceOrder = sourcePriority(a.source) - sourcePriority(b.source);
           if (sourceOrder !== 0) return sourceOrder;
-          const scoreOrder = relevanceScore(b) - relevanceScore(a);
-          if (scoreOrder !== 0) return scoreOrder;
           const lengthOrder = a.commonName.trim().length - b.commonName.trim().length;
           if (lengthOrder !== 0) return lengthOrder;
           return a.commonName.localeCompare(b.commonName);
@@ -326,7 +307,6 @@ export default function GardenGrowListScreen() {
   const suggestions = useMemo<PlantSuggestion[]>(() => {
     const dedupedByName = new Map<string, PlantSuggestion>();
     for (const entry of suggestionsQuery.data ?? []) {
-      // Deduplicate by common name so a Growstuff hit replaces an older manual placeholder.
       const key = entry.commonName.trim().toLowerCase();
       if (dedupedByName.has(key)) continue;
       dedupedByName.set(key, {
@@ -338,8 +318,6 @@ export default function GardenGrowListScreen() {
         ...(entry.familyName ? { familyName: entry.familyName } : {}),
         ...(entry.imageUrl ? { imageUrl: entry.imageUrl } : {}),
         ...(entry.metaJson ? { metaJson: entry.metaJson } : {}),
-        sourceLabel: entry.source === "growstuff" ? "Growstuff" : "Manual",
-        ...extractSuggestionDetails(entry.metaJson),
       });
     }
     return Array.from(dedupedByName.values());
@@ -518,9 +496,15 @@ export default function GardenGrowListScreen() {
 
       const matched = await findBestPlantMatchForBulk(name, plantCatalogRepository);
       if (matched) {
+        const enrichedMatch = await enrichCatalogEntryWithCalendarIfMissing(
+          matched,
+          plantCatalogRepository,
+          gardenQuery.data?.latitude
+        );
         const matchedName = normalizeSearchText(matched.commonName);
         const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const strictMatch = matchedName === normalized || (escaped.length > 0 && new RegExp(`\\b${escaped}\\b`).test(matchedName));
+        const strictMatch =
+          matchedName === normalized || (escaped.length > 0 && new RegExp(`\\b${escaped}\\b`).test(matchedName));
         if (!strictMatch) {
           const manualEntry = await plantCatalogRepository.upsert({
             source: "manual",
@@ -533,11 +517,11 @@ export default function GardenGrowListScreen() {
           });
           return { status: "added" as const };
         }
-        const duplicate = existing.some((item) => item.plantCatalogId === matched.id);
+        const duplicate = existing.some((item) => item.plantCatalogId === enrichedMatch.id);
         if (duplicate) return { status: "exists" as const };
         await wishlistRepository.add({
           gardenId,
-          plantCatalogId: matched.id,
+          plantCatalogId: enrichedMatch.id,
           status: "wanted",
         });
         return { status: "added" as const };
@@ -634,8 +618,13 @@ export default function GardenGrowListScreen() {
           unmatchedNames.push(name);
           continue;
         }
+        const enrichedMatch = await enrichCatalogEntryWithCalendarIfMissing(
+          matched,
+          plantCatalogRepository,
+          gardenQuery.data?.latitude
+        );
 
-        if (existingPlantIds.has(matched.id)) {
+        if (existingPlantIds.has(enrichedMatch.id)) {
           skipped += 1;
           continue;
         }
@@ -643,24 +632,24 @@ export default function GardenGrowListScreen() {
         try {
           await wishlistRepository.add({
             gardenId,
-            plantCatalogId: matched.id,
+            plantCatalogId: enrichedMatch.id,
             status: "wanted",
           });
-          if (matched.source === "growstuff" && matched.externalId) {
+          if (enrichedMatch.source === "growstuff" && enrichedMatch.externalId) {
             try {
-              const details = await fetchGrowstuffCropDetails(matched.externalId);
+              const details = await fetchGrowstuffCropDetails(enrichedMatch.externalId);
               if (details) {
-                const preferredScientificName = pickScientificName(details) || matched.scientificName;
+                const preferredScientificName = pickScientificName(details) || enrichedMatch.scientificName;
                 const updated = await plantCatalogRepository.upsert({
                   source: "growstuff",
-                  externalId: matched.externalId,
-                  commonName: details.name?.trim() || matched.commonName,
+                  externalId: enrichedMatch.externalId,
+                  commonName: details.name?.trim() || enrichedMatch.commonName,
                   ...(preferredScientificName ? { scientificName: preferredScientificName } : {}),
-                  ...(matched.familyName ? { familyName: matched.familyName } : {}),
-                  ...(details.thumbnail_url?.trim() || matched.imageUrl
-                    ? { imageUrl: details.thumbnail_url?.trim() || matched.imageUrl }
+                  ...(enrichedMatch.familyName ? { familyName: enrichedMatch.familyName } : {}),
+                  ...(details.thumbnail_url?.trim() || enrichedMatch.imageUrl
+                    ? { imageUrl: details.thumbnail_url?.trim() || enrichedMatch.imageUrl }
                     : {}),
-                  metaJson: buildGrowstuffMetaJson(matched.metaJson, details),
+                  metaJson: buildGrowstuffMetaJson(enrichedMatch.metaJson, details),
                 });
                 await enrichCatalogEntryWithCalendarIfMissing(
                   updated,
@@ -671,13 +660,8 @@ export default function GardenGrowListScreen() {
             } catch {
               // Keep added plant even if detail enrichment fails.
             }
-            await enrichCatalogEntryWithCalendarIfMissing(
-              matched,
-              plantCatalogRepository,
-              gardenQuery.data?.latitude
-            );
           }
-          existingPlantIds.add(matched.id);
+          existingPlantIds.add(enrichedMatch.id);
           added += 1;
         } catch {
           skipped += 1;
@@ -721,12 +705,8 @@ export default function GardenGrowListScreen() {
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index]!;
         const beforeMeta = item.plant.metaJson ?? "";
-        let next = await enrichCatalogEntryWithGrowstuffDetailsIfMissing(
+        const next = await refreshCatalogEntryWithBestAvailableData(
           item.plant,
-          plantCatalogRepository
-        );
-        next = await enrichCatalogEntryWithCalendarIfMissing(
-          next,
           plantCatalogRepository,
           gardenQuery.data?.latitude
         );
@@ -742,6 +722,51 @@ export default function GardenGrowListScreen() {
     },
     onError: () => {
       setTimingRefreshMessage("Timing refresh failed. Try again.");
+    },
+  });
+
+  const refreshCatalogMutation = useMutation({
+    onMutate: () => {
+      setCatalogRefreshMessage(null);
+    },
+    mutationFn: async (): Promise<{ updated: number; total: number }> => {
+      const items = await plantCatalogRepository.listAll();
+      let updated = 0;
+
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index]!;
+        const before = {
+          commonName: item.commonName,
+          scientificName: item.scientificName ?? "",
+          familyName: item.familyName ?? "",
+          imageUrl: item.imageUrl ?? "",
+          metaJson: item.metaJson ?? "",
+        };
+        const next = await refreshCatalogEntryWithBestAvailableData(
+          item,
+          plantCatalogRepository,
+          gardenQuery.data?.latitude
+        );
+        const after = {
+          commonName: next.commonName,
+          scientificName: next.scientificName ?? "",
+          familyName: next.familyName ?? "",
+          imageUrl: next.imageUrl ?? "",
+          metaJson: next.metaJson ?? "",
+        };
+        if (JSON.stringify(before) !== JSON.stringify(after)) updated += 1;
+        if (index < items.length - 1) await waitMs(55);
+      }
+
+      return { updated, total: items.length };
+    },
+    onSuccess: async ({ updated, total }) => {
+      setCatalogRefreshMessage(`Plant catalog refresh complete: updated ${updated} of ${total}.`);
+      await queryClient.invalidateQueries({ queryKey: ["plant-suggestions"] });
+      await queryClient.invalidateQueries({ queryKey: ["garden-grow-list", gardenId] });
+    },
+    onError: () => {
+      setCatalogRefreshMessage("Plant catalog refresh failed. Try again.");
     },
   });
 
@@ -841,7 +866,7 @@ export default function GardenGrowListScreen() {
           id: item.id,
           status: entryDraft.status,
           startedIndoorsAt: entryDraft.startedIndoorsAt,
-          ...(entryDraft.status === "already_growing" && entryDraft.bedId ? { bedId: entryDraft.bedId } : {}),
+          ...((entryDraft.bedId ?? item.bedId) ? { bedId: entryDraft.bedId ?? item.bedId } : {}),
           isPerennial: entryDraft.isPerennial ?? item.isPerennial,
           ...(entryDraft.varietyName.trim() ? { varietyName: entryDraft.varietyName.trim() } : { varietyName: "" }),
           ...(entryDraft.supportNeeded ? { supportNeeded: true } : { supportNeeded: false }),
@@ -970,6 +995,7 @@ export default function GardenGrowListScreen() {
       if (listStatusFilter.has("started_indoors") && !effectiveStartedIndoorsAt) return false;
       if (listStatusFilter.has("perennial") && !effectiveIsPerennial) return false;
       if (listStatusFilter.has("annual") && effectiveIsPerennial) return false;
+      if (listStatusFilter.has("assigned_beds") && !item.bedId) return false;
       if (listStatusFilter.has("unassigned_beds") && item.bedId) return false;
       
       // Apply search filter to items that passed the status/type filters
@@ -1183,7 +1209,7 @@ export default function GardenGrowListScreen() {
                   <Text style={[styles.loadingText, { color: theme.textMuted }]}>Searching plants...</Text>
                 </View>
               )}
-              {!suggestionsQuery.isLoading && suggestions.length === 0 && (
+              {!suggestionsQuery.isLoading && visibleSuggestions.length === 0 && (
                 <Text style={[styles.emptySuggestion, { color: theme.textMuted }]}>No matches.</Text>
               )}
               {visibleSuggestions.map((item) => (
@@ -1195,11 +1221,7 @@ export default function GardenGrowListScreen() {
                 >
                   <View style={styles.suggestionMain}>
                     <Text style={[styles.suggestionName, { color: theme.textPrimary }]}>{item.commonName}</Text>
-                    {item.scientificName && <Text style={[styles.suggestionMeta, { color: theme.textMuted }]}>{item.scientificName}</Text>}
-                    {item.familyName && <Text style={[styles.suggestionMeta, { color: theme.textMuted }]}>Family: {item.familyName}</Text>}
-                    {item.detailLine && <Text style={[styles.suggestionMeta, { color: theme.textMuted }]}>{item.detailLine}</Text>}
                   </View>
-                  <Text style={[styles.suggestionTag, { backgroundColor: theme.statusChipBackground, color: theme.statusChipText }]}>{item.sourceLabel}</Text>
                 </Pressable>
               ))}
               {suggestions.length > 12 && (
@@ -1235,7 +1257,16 @@ export default function GardenGrowListScreen() {
               onPress={() => refreshTimingMutation.mutate()}
             />
           </View>
+          <View style={styles.addRow}>
+            <AppButton
+              label={refreshCatalogMutation.isPending ? "Refreshing catalog..." : "Refresh all plant data"}
+              variant="secondary"
+              disabled={refreshCatalogMutation.isPending}
+              onPress={() => refreshCatalogMutation.mutate()}
+            />
+          </View>
           {timingRefreshMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{timingRefreshMessage}</Text>}
+          {catalogRefreshMessage && <Text style={[styles.helper, { color: theme.textMuted }]}>{catalogRefreshMessage}</Text>}
           {bulkImportOpen && (
             <View style={styles.importSection}>
               <Text style={[styles.helper, { color: theme.textMuted }]}>Paste comma/newline/semicolon separated plant names.</Text>
@@ -1312,6 +1343,18 @@ export default function GardenGrowListScreen() {
 
         <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
           <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Plant List</Text>
+          <View style={styles.summaryBlock}>
+            <View style={styles.summaryChips}>
+              <StatusChip label={`Assigned ${assignedBedCount}`} />
+              <StatusChip label={`Needs bed ${needsBedCount}`} />
+              <StatusChip label={`Started indoors ${startedIndoorsCount}`} />
+              <StatusChip label={`Growing now ${growingNowCount}`} />
+              <StatusChip label={`Planned in beds ${plannedInBedCount}`} />
+            </View>
+            <Text style={[styles.summaryText, { color: theme.textMuted }]}>
+              Use the chips below to narrow the list. Each row now shows its bed and indoor status up front.
+            </Text>
+          </View>
           <View style={styles.listControls}>
             <View style={[styles.searchContainer, { borderColor: theme.borderColor, backgroundColor: theme.appBackground }]}>
               <TextInput
@@ -1401,6 +1444,16 @@ export default function GardenGrowListScreen() {
               />
             </View>
             <View style={styles.configChips}>
+              <FilterPill 
+                label="Assigned beds" 
+                selected={listStatusFilter.has("assigned_beds")} 
+                onPress={() => setListStatusFilter(prev => {
+                  const next = new Set(prev);
+                  if (next.has("assigned_beds")) next.delete("assigned_beds"); 
+                  else next.add("assigned_beds");
+                  return next;
+                })} 
+              />
               <FilterPill 
                 label="Perennial" 
                 selected={listStatusFilter.has("perennial")} 
@@ -1502,15 +1555,13 @@ export default function GardenGrowListScreen() {
                 />
                 <View style={styles.compactHeaderMain}>
                   <Text style={[styles.wishName, { color: theme.textPrimary }]}>{item.plant.commonName}</Text>
-                  <Text style={[styles.compactHeaderMeta, { color: theme.textMuted }]}>
-                    {(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"}
+                  <View style={styles.compactBadgeRow}>
+                    <StatusChip label={(entryDrafts[item.id]?.status ?? item.status) === "already_growing" ? "Growing now" : "Planned"} />
+                    <StatusChip label={item.bedName ? `Bed ${item.bedName}` : "No bed assigned"} />
                     {((entryDrafts[item.id]?.startedIndoorsAt ?? item.startedIndoorsAt) &&
-                    (entryDrafts[item.id]?.status ?? item.status) === "wanted")
-                      ? " - Started indoors"
-                      : ""}
-                    {item.bedName ? ` - ${item.bedName}` : ""}
-                    {` - Qty ${Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}`}
-                  </Text>
+                      (entryDrafts[item.id]?.status ?? item.status) === "wanted") ? <StatusChip label="Started indoors" /> : null}
+                    <StatusChip label={`Qty ${Math.max(1, entryDrafts[item.id]?.quantity ?? item.quantity ?? 1)}`} />
+                  </View>
                 </View>
                 <Text style={[styles.compactHeaderCaret, { color: theme.textMuted }]}>
                   {Boolean(expandedWishlistRows[item.id]) ? "v" : ">"}
@@ -1555,6 +1606,7 @@ export default function GardenGrowListScreen() {
                   const isPlantDataExpanded = Boolean(expandedPlantData[item.id]);
                   const plantDataDraft = plantDataDrafts[item.id] ?? getPlantDataDraft(item.plant.metaJson);
                   const missingLabels = getMissingPlantDataLabels(plantDataDraft);
+                  const timingSummary = extractPlantTimingSummary(item.plant.metaJson);
                   return (
                     <>
                       <Pressable
@@ -1578,12 +1630,14 @@ export default function GardenGrowListScreen() {
                       {isPlantDataExpanded && (
                         <View style={[styles.dataPanel, { backgroundColor: theme.appBackground, borderColor: theme.borderColor }]}>
                           <View style={styles.statusChipRow}>
-                            {(() => {
-                              const timingStatus = extractTimingStatus(item.plant.metaJson);
-                              if (!timingStatus) return null;
-                              return <StatusChip label={timingStatus} />;
-                            })()}
+                            <StatusChip label={`Catalog: ${getPlantSourceLabel(item.plant.source)}`} />
+                            <StatusChip label={`Calendar: ${timingSummary.sourceLabel}`} />
+                            <StatusChip label={`Confidence: ${formatConfidenceLabel(timingSummary.confidenceLabel)}`} />
+                            <StatusChip label={missingLabels.length > 0 ? `Missing ${missingLabels.length}` : "Data complete"} />
                           </View>
+                          <Text style={[styles.helper, { color: theme.textMuted }]}>
+                            {timingSummary.summaryLine}
+                          </Text>
                           <View style={styles.dataField}>
                             <Text style={[styles.dataLabel, { color: theme.textPrimary }]}>Sun requirements</Text>
                             <TextInput
@@ -2290,28 +2344,14 @@ async function findBestPlantMatchForBulk(
   if (!query) return null;
 
   const localCandidates = (await repository.searchByName(query, 20)).filter(
-    (entry) => entry.source === "growstuff" || entry.source === "manual"
+    (entry) => entry.source === "growstuff" || entry.source === "manual" || entry.source === "gbif" || entry.source === "wikidata"
   );
   const bestLocal = pickBestPlantMatch(query, localCandidates);
   if (bestLocal && bestLocal.score >= 95) return bestLocal.entry;
 
   if (query.length >= 2) {
     try {
-      const remoteHits = await searchGrowstuffPlants(query, 1, 8);
-      const remoteCandidates = await Promise.all(
-        remoteHits.map(async (hit) => {
-          const existing = await repository.getBySourceExternalId("growstuff", hit.externalId);
-          return repository.upsert({
-            source: "growstuff",
-            externalId: hit.externalId,
-            commonName: hit.commonName,
-            ...(hit.scientificName ? { scientificName: hit.scientificName } : {}),
-            ...(hit.familyName ? { familyName: hit.familyName } : {}),
-            ...(hit.imageUrl ? { imageUrl: hit.imageUrl } : {}),
-            metaJson: existing?.metaJson ?? hit.rawJson,
-          });
-        })
-      );
+      const remoteCandidates = await searchExternalPlantCatalogEntries(query, repository, 8);
       const bestRemote = pickBestPlantMatch(query, remoteCandidates);
       if (bestRemote && bestRemote.score >= 70) return bestRemote.entry;
       if (bestLocal) return bestLocal.entry;
@@ -2333,7 +2373,7 @@ function pickBestPlantMatch(
     .map((entry) => ({
       entry,
       score: computePlantMatchScore(query, entry),
-      sourcePriority: entry.source === "growstuff" ? 0 : 1,
+      sourcePriority: entry.source === "growstuff" ? 0 : entry.source === "gbif" ? 1 : entry.source === "wikidata" ? 2 : 3,
     }))
     .sort((a, b) => {
       if (a.score !== b.score) return b.score - a.score;
@@ -2694,6 +2734,16 @@ async function enrichCatalogEntryWithCalendarIfMissing(
   });
 }
 
+async function refreshCatalogEntryWithBestAvailableData(
+  entry: PlantCatalogEntry,
+  repository: SqlitePlantCatalogRepository,
+  latitude?: number
+): Promise<PlantCatalogEntry> {
+  let next = await enrichCatalogEntryWithGrowstuffDetailsIfMissing(entry, repository);
+  next = await enrichCatalogEntryWithCalendarIfMissing(next, repository, latitude);
+  return next;
+}
+
 async function enrichCatalogEntryWithGrowstuffDetailsIfMissing(
   entry: PlantCatalogEntry,
   repository: SqlitePlantCatalogRepository
@@ -2782,6 +2832,7 @@ function buildCalendarMetaJson(
     ...gardenme,
     taskMonths: nextTaskMonths,
     calendarSource: profile.sourceLabel,
+    calendarConfidence: profile.confidence,
   };
 
   const nextRoot: Record<string, unknown> = {
@@ -2917,8 +2968,21 @@ function extractPlantTaskTiming(metaJson?: string): {
   }
 }
 
-function extractTimingStatus(metaJson?: string): string | undefined {
-  if (!metaJson) return undefined;
+function extractPlantTimingSummary(metaJson?: string): {
+  lines: string[];
+  sourceLabel: string;
+  confidenceLabel: "high" | "medium" | "low";
+  summaryLine: string;
+} {
+  if (!metaJson) {
+    return {
+      lines: ["No timing data"],
+      sourceLabel: "Unknown",
+      confidenceLabel: "low",
+      summaryLine: "No timing data",
+    };
+  }
+
   try {
     const parsed = JSON.parse(metaJson) as {
       growth_months?: unknown;
@@ -2933,21 +2997,67 @@ function extractTimingStatus(metaJson?: string): string | undefined {
           harvest?: unknown;
         };
         daysToFirstHarvest?: unknown;
+        calendarSource?: unknown;
+        calendarConfidence?: unknown;
       };
     };
 
-    const hasWindows = hasPlanningWindowData(metaJson);
-    const hasHarvestDays =
-      typeof parsed.gardenme?.daysToFirstHarvest === "number" ||
-      typeof parsed.days_to_harvest === "number" ||
-      typeof parsed.median_days_to_first_harvest === "number";
-    if (hasWindows && hasHarvestDays) return "Timing data: planning windows + harvest estimate";
-    if (hasWindows) return "Timing data: planning windows present";
-    if (hasHarvestDays) return "Timing data: harvest estimate only";
-    if (hasTimingData(metaJson)) return "Timing data: present";
-    return "Timing data: missing";
+    const startIndoors = parseMonthInput(parsed.gardenme?.taskMonths?.startIndoors);
+    const directSow = parseMonthInput(parsed.gardenme?.taskMonths?.directSow);
+    const plantOut = parseMonthInput(parsed.gardenme?.taskMonths?.plantOut);
+    const harvest = Array.from(
+      new Set([
+        ...parseMonthInput(parsed.gardenme?.taskMonths?.harvest),
+        ...parseMonthInput(parsed.fruit_months),
+        ...parseMonthInput(parsed.growth_months),
+      ])
+    ).sort((a, b) => a - b);
+
+    const harvestDaysRaw =
+      parsed.gardenme?.daysToFirstHarvest ?? parsed.days_to_harvest ?? parsed.median_days_to_first_harvest;
+    const harvestDays =
+      typeof harvestDaysRaw === "number" && Number.isFinite(harvestDaysRaw) && harvestDaysRaw > 0
+        ? Math.round(harvestDaysRaw)
+        : undefined;
+
+    const sourceLabel =
+      typeof parsed.gardenme?.calendarSource === "string" && parsed.gardenme.calendarSource.trim()
+        ? parsed.gardenme.calendarSource.trim()
+        : startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0
+          ? "Manual/custom"
+          : "Unknown";
+    const confidenceLabel = parseTimingConfidence(parsed.gardenme?.calendarConfidence, {
+      hasPlanningWindows: startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0 || harvest.length > 0,
+      hasHarvestDays: typeof harvestDays === "number",
+    });
+    const hasAnyTimingData =
+      startIndoors.length > 0 ||
+      directSow.length > 0 ||
+      plantOut.length > 0 ||
+      harvest.length > 0 ||
+      typeof harvestDays === "number";
+
+    const lines: string[] = [];
+    if (!hasAnyTimingData) {
+      lines.push("No timing data");
+    }
+    if (startIndoors.length > 0) lines.push(`Start indoors: ${startIndoors.join(", ")}`);
+    if (directSow.length > 0) lines.push(`Direct sow: ${directSow.join(", ")}`);
+    if (plantOut.length > 0) lines.push(`Plant out: ${plantOut.join(", ")}`);
+    if (harvest.length > 0) lines.push(`Harvest months: ${harvest.join(", ")}`);
+    if (typeof harvestDays === "number") lines.push(`Days to harvest: ~${harvestDays}`);
+    lines.push(`Source: ${sourceLabel}`);
+    lines.push(`Confidence: ${formatConfidenceLabel(confidenceLabel)}`);
+
+    const summaryLine = lines.length > 0 ? lines[0]! : "No timing data";
+    return { lines, sourceLabel, confidenceLabel, summaryLine };
   } catch {
-    return undefined;
+    return {
+      lines: ["No timing data"],
+      sourceLabel: "Unknown",
+      confidenceLabel: "low",
+      summaryLine: "No timing data",
+    };
   }
 }
 
@@ -2988,92 +3098,37 @@ function hasTimingData(metaJson?: string): boolean {
 }
 
 function hasPlanningWindowData(metaJson?: string): boolean {
-  if (!metaJson) return false;
-  try {
-    const parsed = JSON.parse(metaJson) as {
-      growth_months?: unknown;
-      fruit_months?: unknown;
-      gardenme?: {
-        taskMonths?: {
-          startIndoors?: unknown;
-          directSow?: unknown;
-          plantOut?: unknown;
-          harvest?: unknown;
-        };
-      };
-    };
-    return (
-      parseMonthInput(parsed.gardenme?.taskMonths?.startIndoors).length > 0 ||
-      parseMonthInput(parsed.gardenme?.taskMonths?.directSow).length > 0 ||
-      parseMonthInput(parsed.gardenme?.taskMonths?.plantOut).length > 0 ||
-      parseMonthInput(parsed.gardenme?.taskMonths?.harvest).length > 0 ||
-      parseMonthInput(parsed.growth_months).length > 0 ||
-      parseMonthInput(parsed.fruit_months).length > 0
-    );
-  } catch {
-    return false;
-  }
+  return extractPlantTimingSummary(metaJson).lines.some((line) => line.startsWith("Start indoors:") || line.startsWith("Direct sow:") || line.startsWith("Plant out:") || line.startsWith("Harvest months:"));
 }
 
 function extractTimingDisplayLines(metaJson?: string): string[] {
-  if (!metaJson) return ["No timing data"];
-  try {
-    const parsed = JSON.parse(metaJson) as {
-      growth_months?: unknown;
-      fruit_months?: unknown;
-      days_to_harvest?: unknown;
-      median_days_to_first_harvest?: unknown;
-      gardenme?: {
-        taskMonths?: {
-          startIndoors?: unknown;
-          directSow?: unknown;
-          plantOut?: unknown;
-          harvest?: unknown;
-        };
-        daysToFirstHarvest?: unknown;
-        calendarSource?: unknown;
-      };
-    };
+  return extractPlantTimingSummary(metaJson).lines;
+}
 
-    const startIndoors = parseMonthInput(parsed.gardenme?.taskMonths?.startIndoors);
-    const directSow = parseMonthInput(parsed.gardenme?.taskMonths?.directSow);
-    const plantOut = parseMonthInput(parsed.gardenme?.taskMonths?.plantOut);
-    const harvest = Array.from(
-      new Set([
-        ...parseMonthInput(parsed.gardenme?.taskMonths?.harvest),
-        ...parseMonthInput(parsed.fruit_months),
-        ...parseMonthInput(parsed.growth_months),
-      ])
-    ).sort((a, b) => a - b);
-
-    const harvestDaysRaw =
-      parsed.gardenme?.daysToFirstHarvest ?? parsed.days_to_harvest ?? parsed.median_days_to_first_harvest;
-    const harvestDays =
-      typeof harvestDaysRaw === "number" && Number.isFinite(harvestDaysRaw) && harvestDaysRaw > 0
-        ? Math.round(harvestDaysRaw)
-        : undefined;
-
-    const lines: string[] = [];
-    if (startIndoors.length > 0) lines.push(`Start indoors: ${startIndoors.join(", ")}`);
-    if (directSow.length > 0) lines.push(`Direct sow: ${directSow.join(", ")}`);
-    if (plantOut.length > 0) lines.push(`Plant out: ${plantOut.join(", ")}`);
-    if (harvest.length > 0) lines.push(`Harvest months: ${harvest.join(", ")}`);
-    if (typeof harvestDays === "number") lines.push(`Days to harvest: ~${harvestDays}`);
-    const sourceLabel =
-      typeof parsed.gardenme?.calendarSource === "string" && parsed.gardenme.calendarSource.trim()
-        ? parsed.gardenme.calendarSource.trim()
-        : startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0
-          ? "Manual/custom"
-          : "Unknown";
-    const hasPlanningWindows = startIndoors.length > 0 || directSow.length > 0 || plantOut.length > 0 || harvest.length > 0;
-    const confidence = hasPlanningWindows ? "high" : typeof harvestDays === "number" ? "low" : "low";
-    lines.push(`Source: ${sourceLabel}`);
-    lines.push(`Confidence: ${confidence}`);
-    if (lines.length === 0) lines.push("No timing data");
-    return lines;
-  } catch {
-    return ["No timing data"];
+function parseTimingConfidence(
+  rawConfidence: unknown,
+  context: { hasPlanningWindows: boolean; hasHarvestDays: boolean }
+): "high" | "medium" | "low" {
+  if (rawConfidence === "high" || rawConfidence === "medium" || rawConfidence === "low") {
+    return rawConfidence;
   }
+  if (context.hasPlanningWindows && context.hasHarvestDays) return "high";
+  if (context.hasPlanningWindows) return "medium";
+  if (context.hasHarvestDays) return "low";
+  return "low";
+}
+
+function formatConfidenceLabel(value: "high" | "medium" | "low"): string {
+  if (value === "high") return "High";
+  if (value === "medium") return "Medium";
+  return "Low";
+}
+
+function getPlantSourceLabel(source: PlantCatalogEntry["source"]): string {
+  if (source === "growstuff") return "Growstuff";
+  if (source === "gbif") return "GBIF";
+  if (source === "wikidata") return "Wikidata";
+  return "Manual";
 }
 
 function monthArrayToCsv(value: unknown): string | undefined {
@@ -3175,6 +3230,96 @@ function extractSuggestionDetails(metaJson?: string): {
   }
 }
 
+function extractSuggestionAliases(
+  metaJson: string | undefined,
+  commonName: string,
+  scientificName?: string
+): {
+  aliasLine?: string;
+} {
+  const aliases = extractPlantSearchTerms(metaJson);
+  const common = normalizeSearchText(commonName);
+  const scientific = normalizeSearchText(scientificName ?? "");
+  const unique = Array.from(
+    new Set(
+      aliases
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .filter((value) => {
+          const normalized = normalizeSearchText(value);
+          return normalized !== common && normalized !== scientific;
+        })
+    )
+  );
+  if (unique.length === 0) return {};
+  return { aliasLine: `Also known as: ${unique.slice(0, 2).join(", ")}` };
+}
+
+function extractPlantSearchTerms(metaJson?: string): string[] {
+  if (!metaJson) return [];
+  try {
+    const parsed = JSON.parse(metaJson) as {
+      gardenme?: {
+        searchTerms?: unknown;
+      };
+      gbif?: {
+        vernacularName?: unknown;
+        canonicalName?: unknown;
+        scientificName?: unknown;
+      };
+      wikidata?: {
+        label?: unknown;
+        description?: unknown;
+        aliases?: Record<string, Array<{ value?: unknown }>>;
+        scientificName?: unknown;
+      };
+      aliases?: unknown;
+      common_names?: unknown;
+      commonNames?: unknown;
+      vernacular_names?: unknown;
+      vernacularNames?: unknown;
+      description?: unknown;
+    };
+    const values: string[] = [];
+    const pushValue = (value: unknown) => {
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed) values.push(trimmed);
+      } else if (Array.isArray(value)) {
+        for (const item of value) pushValue(item);
+      } else if (value && typeof value === "object") {
+        for (const nested of Object.values(value as Record<string, unknown>)) pushValue(nested);
+      }
+    };
+
+    pushValue(parsed.gardenme?.searchTerms);
+    pushValue(parsed.gbif?.vernacularName);
+    pushValue(parsed.gbif?.canonicalName);
+    pushValue(parsed.gbif?.scientificName);
+    pushValue(parsed.wikidata?.label);
+    pushValue(parsed.wikidata?.description);
+    pushValue(parsed.wikidata?.scientificName);
+    pushValue(parsed.wikidata?.aliases);
+    pushValue(parsed.aliases);
+    pushValue(parsed.common_names);
+    pushValue(parsed.commonNames);
+    pushValue(parsed.vernacular_names);
+    pushValue(parsed.vernacularNames);
+    pushValue(parsed.description);
+
+    return Array.from(
+      new Set(
+        values
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .flatMap((value) => [value, ...expandUkAliases(value)])
+      )
+    );
+  } catch {
+    return [];
+  }
+}
+
 function normalizeSearchText(value: string): string {
   return value
     .trim()
@@ -3182,6 +3327,71 @@ function normalizeSearchText(value: string): string {
     .replace(/[()[\],.:;'"`]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function buildPlantSearchTerms(query: string): string[] {
+  const variants = new Set<string>();
+  const add = (value: string) => {
+    const normalized = normalizeSearchText(value);
+    if (normalized) variants.add(normalized);
+  };
+
+  add(query);
+  for (const alias of expandUkAliases(query)) add(alias);
+  for (const familyTerm of expandAutocompleteFamilyTerms(query)) add(familyTerm);
+  add(query.replace(/[()[\],.:;'"'"'`]/g, " "));
+  add(query.replace(/[^a-z0-9\s-]/g, " "));
+  add(query.replace(/-/g, " "));
+  add(stripTrailingPlural(query));
+  add(stripTrailingPlural(query.replace(/[()[\],.:;'"'"'`]/g, " ")));
+
+  return Array.from(variants);
+}
+
+async function collectLocalPlantMatches(
+  variants: string[],
+  repository: SqlitePlantCatalogRepository,
+  limit: number
+): Promise<PlantCatalogEntry[]> {
+  const seen = new Map<string, PlantCatalogEntry>();
+  for (const variant of variants.slice(0, 5)) {
+    const rows = await repository.searchByName(variant, limit);
+    for (const row of rows) {
+      if (!seen.has(row.id)) seen.set(row.id, row);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+function getPlantMatchRank(query: string, entry: PlantCatalogEntry): number {
+  const normalizedQuery = normalizeSearchText(query);
+  const common = normalizeSearchText(entry.commonName);
+  const scientific = normalizeSearchText(entry.scientificName ?? "");
+  const aliases = extractPlantSearchTerms(entry.metaJson).map(normalizeSearchText);
+  if (!normalizedQuery) return 3;
+  const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const wordMatch = new RegExp(`\\b${escapedQuery}\\b`);
+  const prefixMatch =
+    common.startsWith(normalizedQuery) ||
+    scientific.startsWith(normalizedQuery) ||
+    aliases.some((alias) => alias.startsWith(normalizedQuery));
+  if (prefixMatch) return 0;
+
+  const wordMatchFound =
+    wordMatch.test(common) ||
+    wordMatch.test(scientific) ||
+    aliases.some((alias) => wordMatch.test(alias));
+  if (wordMatchFound) return 1;
+
+  const substringMatch =
+    common.includes(normalizedQuery) ||
+    scientific.includes(normalizedQuery) ||
+    aliases.some((alias) => alias.includes(normalizedQuery)) ||
+    isSingularPluralEquivalent(common, normalizedQuery);
+  if (substringMatch) return 2;
+
+  if (isLikelySpecificVarietyName(entry.commonName, normalizedQuery)) return 3;
+  return 3;
 }
 
 function formatEntryLabel(entry: GardenCropWishlistItemView): string {
@@ -3213,6 +3423,77 @@ function isLikelySpecificVarietyName(commonName: string, query: string): boolean
 
   return hasVarietyKeyword || hasDelimiter || tokenCount >= 3;
 }
+
+function expandUkAliases(query: string): string[] {
+  const normalized = normalizeSearchText(query);
+  if (!normalized) return [];
+  return UK_ALIAS_MAP[normalized] ?? [];
+}
+
+function expandAutocompleteFamilyTerms(query: string): string[] {
+  const normalized = normalizeSearchText(query);
+  if (!normalized) return [];
+  const terms = new Set<string>();
+  for (const [prefix, values] of Object.entries(AUTOCOMPLETE_FAMILY_MAP)) {
+    if (!normalized.startsWith(prefix)) continue;
+    for (const value of values) terms.add(value);
+  }
+  return Array.from(terms);
+}
+
+function stripTrailingPlural(value: string): string {
+  const trimmed = value.trim();
+  const parts = trimmed.split(/\s+/g);
+  if (parts.length === 0) return trimmed;
+  const last = parts[parts.length - 1] ?? "";
+  if (last.length > 3 && last.endsWith("es")) {
+    parts[parts.length - 1] = last.slice(0, -2);
+    return parts.join(" ");
+  }
+  if (last.length > 2 && last.endsWith("s")) {
+    parts[parts.length - 1] = last.slice(0, -1);
+    return parts.join(" ");
+  }
+  return trimmed;
+}
+
+const UK_ALIAS_MAP: Record<string, string[]> = {
+  aubergine: ["eggplant"],
+  eggplant: ["aubergine"],
+  courgette: ["zucchini"],
+  zucchini: ["courgette"],
+  rocket: ["arugula"],
+  arugula: ["rocket"],
+  coriander: ["cilantro"],
+  cilantro: ["coriander"],
+  "spring onion": ["scallion", "green onion"],
+  scallion: ["spring onion", "green onion"],
+  "green onion": ["spring onion", "scallion"],
+  beetroot: ["beet"],
+  beet: ["beetroot"],
+  swede: ["rutabaga"],
+  rutabaga: ["swede"],
+  sweetcorn: ["corn"],
+  corn: ["sweetcorn"],
+  "french bean": ["green bean"],
+  "green bean": ["french bean"],
+  "pak choi": ["bok choy"],
+  "bok choy": ["pak choi"],
+};
+
+const AUTOCOMPLETE_FAMILY_MAP: Record<string, string[]> = {
+  cour: ["courgette", "zucchini", "summer squash", "marrow", "pattypan squash", "tromboncino", "crookneck squash"],
+  bean: ["bean", "French bean", "runner bean", "broad bean", "haricot bean"],
+  pea: ["pea", "garden pea", "mangetout", "sugar snap pea"],
+  tom: ["tomato", "cherry tomato", "plum tomato", "beefsteak tomato"],
+  onion: ["onion", "spring onion", "salad onion", "red onion"],
+  lett: ["lettuce", "leaf lettuce", "cos lettuce", "romaine lettuce"],
+  cabb: ["cabbage", "kale", "brassica", "broccoli"],
+  spin: ["spinach", "baby leaf spinach", "perpetual spinach"],
+  beet: ["beetroot", "beet"],
+  carrots: ["carrot"],
+  carro: ["carrot"],
+};
 
 function Checkbox(props: {
   checked: boolean;
@@ -3330,6 +3611,9 @@ const styles = StyleSheet.create({
   configRow: { gap: 6 },
   configLabel: { fontWeight: "700" },
   configChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  summaryBlock: { gap: 8 },
+  summaryChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  summaryText: { fontSize: 12 },
   bulkDivider: { height: 1, width: "100%", marginVertical: 2 },
   suggestionsBox: {
     borderWidth: 1,
@@ -3339,6 +3623,8 @@ const styles = StyleSheet.create({
   loadingRow: { flexDirection: "row", alignItems: "center", gap: 8, padding: 10 },
   loadingText: {},
   emptySuggestion: { padding: 10 },
+  relatedHeader: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
+  relatedDivider: { height: 1, width: "100%" },
   suggestionRow: {
     flexDirection: "row",
     gap: 10,
@@ -3385,6 +3671,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   compactHeaderMain: { flex: 1, gap: 2 },
+  compactBadgeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   compactHeaderMeta: { fontSize: 12 },
   compactHeaderCaret: { fontSize: 16, fontWeight: "700" },
   rowSelector: {

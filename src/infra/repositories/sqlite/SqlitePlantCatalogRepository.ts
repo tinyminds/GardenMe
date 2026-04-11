@@ -24,17 +24,28 @@ export class SqlitePlantCatalogRepository implements PlantCatalogRepository {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return [];
 
-    const rows = await getDatabase().getAllAsync<PlantCatalogRow>(
-      `SELECT *
-       FROM plant_catalog_cache
-       WHERE LOWER(common_name) LIKE ?
-          OR LOWER(COALESCE(scientific_name, '')) LIKE ?
-       ORDER BY updated_at DESC
-       LIMIT ?`,
-      [`%${normalized}%`, `%${normalized}%`, limit]
-    );
+    const variants = buildSearchVariants(normalized);
+    const rowsById = new Map<string, PlantCatalogRow>();
+    for (const variant of variants) {
+      const rows = await getDatabase().getAllAsync<PlantCatalogRow>(
+        `SELECT *
+         FROM plant_catalog_cache
+         WHERE LOWER(common_name) LIKE ?
+            OR LOWER(COALESCE(scientific_name, '')) LIKE ?
+            OR LOWER(COALESCE(meta_json, '')) LIKE ?
+         ORDER BY updated_at DESC
+         LIMIT ?`,
+        [`%${variant}%`, `%${variant}%`, `%${variant}%`, limit * 2]
+      );
+      for (const row of rows) {
+        if (!rowsById.has(row.id)) rowsById.set(row.id, row);
+      }
+    }
 
-    return rows.map(toPlantCatalogEntity);
+    return Array.from(rowsById.values())
+      .sort((a, b) => scoreSearchCandidate(normalized, a) - scoreSearchCandidate(normalized, b))
+      .slice(0, limit)
+      .map(toPlantCatalogEntity);
   }
 
   async getBySourceExternalId(source: PlantSource, externalId: string): Promise<PlantCatalogEntry | null> {
@@ -43,6 +54,13 @@ export class SqlitePlantCatalogRepository implements PlantCatalogRepository {
       [source, externalId]
     );
     return row ? toPlantCatalogEntity(row) : null;
+  }
+
+  async listAll(): Promise<PlantCatalogEntry[]> {
+    const rows = await getDatabase().getAllAsync<PlantCatalogRow>(
+      "SELECT * FROM plant_catalog_cache ORDER BY updated_at DESC, common_name COLLATE NOCASE ASC"
+    );
+    return rows.map(toPlantCatalogEntity);
   }
 
   async upsert(input: PlantCatalogUpsertInput): Promise<PlantCatalogEntry> {
@@ -218,3 +236,166 @@ function toPlantCatalogEntity(row: PlantCatalogRow): PlantCatalogEntry {
   if (row.meta_json) item.metaJson = row.meta_json;
   return item;
 }
+
+function buildSearchVariants(query: string): string[] {
+  const variants = new Set<string>();
+  const add = (value: string) => {
+    const normalized = value.trim().toLowerCase();
+    if (normalized) variants.add(normalized);
+  };
+
+  add(query);
+  for (const alias of expandUkAliases(query)) add(alias);
+  for (const familyTerm of expandAutocompleteFamilyTerms(query)) add(familyTerm);
+  add(query.replace(/[()[\],.:;'"'"'`]/g, " "));
+  add(query.replace(/[^a-z0-9\s-]/g, " "));
+  add(query.replace(/-/g, " "));
+  add(stripTrailingPlural(query));
+  add(stripTrailingPlural(query.replace(/[()[\],.:;'"'"'`]/g, " ")));
+
+  return Array.from(variants);
+}
+
+function stripTrailingPlural(value: string): string {
+  const trimmed = value.trim();
+  const parts = trimmed.split(/\s+/g);
+  if (parts.length === 0) return trimmed;
+  const last = parts[parts.length - 1] ?? "";
+  if (last.length > 3 && last.endsWith("es")) {
+    parts[parts.length - 1] = last.slice(0, -2);
+    return parts.join(" ");
+  }
+  if (last.length > 2 && last.endsWith("s")) {
+    parts[parts.length - 1] = last.slice(0, -1);
+    return parts.join(" ");
+  }
+  return trimmed;
+}
+
+function scoreSearchCandidate(query: string, entry: PlantCatalogRow): number {
+  const normalizedQuery = query.trim().toLowerCase();
+  const common = entry.common_name.trim().toLowerCase();
+  const scientific = (entry.scientific_name ?? "").trim().toLowerCase();
+  const aliases = extractSearchTermsFromMeta(entry).map((value) => value.trim().toLowerCase());
+  if (!normalizedQuery) return 3;
+  const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const wordMatch = new RegExp(`\\b${escapedQuery}\\b`);
+  const prefixMatch =
+    common.startsWith(normalizedQuery) ||
+    scientific.startsWith(normalizedQuery) ||
+    aliases.some((alias) => alias.startsWith(normalizedQuery));
+  if (prefixMatch) return 0;
+
+  const wordMatchFound =
+    wordMatch.test(common) ||
+    wordMatch.test(scientific) ||
+    aliases.some((alias) => wordMatch.test(alias));
+  if (wordMatchFound) return 1;
+
+  const substringMatch =
+    common.includes(normalizedQuery) ||
+    scientific.includes(normalizedQuery) ||
+    aliases.some((alias) => alias.includes(normalizedQuery));
+  if (substringMatch) return 2;
+
+  return 3;
+}
+
+function expandUkAliases(query: string): string[] {
+  const normalized = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) return [];
+  return UK_ALIAS_MAP[normalized] ?? [];
+}
+
+function expandAutocompleteFamilyTerms(query: string): string[] {
+  const normalized = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) return [];
+  const terms = new Set<string>();
+  for (const [prefix, values] of Object.entries(AUTOCOMPLETE_FAMILY_MAP)) {
+    if (!normalized.startsWith(prefix)) continue;
+    for (const value of values) terms.add(value);
+  }
+  return Array.from(terms);
+}
+
+function extractSearchTermsFromMeta(entry: PlantCatalogRow): string[] {
+  if (!entry.meta_json) return [];
+  try {
+    const parsed = JSON.parse(entry.meta_json) as {
+      gardenme?: { searchTerms?: unknown };
+      gbif?: { vernacularName?: unknown; canonicalName?: unknown; scientificName?: unknown };
+      wikidata?: { label?: unknown; description?: unknown; scientificName?: unknown; aliases?: unknown };
+      aliases?: unknown;
+      common_names?: unknown;
+      commonNames?: unknown;
+      vernacular_names?: unknown;
+      vernacularNames?: unknown;
+      description?: unknown;
+    };
+    const terms = new Set<string>();
+    const push = (value: unknown) => {
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed) terms.add(trimmed);
+      } else if (Array.isArray(value)) {
+        for (const item of value) push(item);
+      } else if (value && typeof value === "object") {
+        for (const nested of Object.values(value as Record<string, unknown>)) push(nested);
+      }
+    };
+    push(parsed.gardenme?.searchTerms);
+    push(parsed.gbif?.vernacularName);
+    push(parsed.gbif?.canonicalName);
+    push(parsed.gbif?.scientificName);
+    push(parsed.wikidata?.label);
+    push(parsed.wikidata?.description);
+    push(parsed.wikidata?.scientificName);
+    push(parsed.wikidata?.aliases);
+    push(parsed.aliases);
+    push(parsed.common_names);
+    push(parsed.commonNames);
+    push(parsed.vernacular_names);
+    push(parsed.vernacularNames);
+    push(parsed.description);
+    return Array.from(terms);
+  } catch {
+    return [];
+  }
+}
+
+const UK_ALIAS_MAP: Record<string, string[]> = {
+  aubergine: ["eggplant"],
+  eggplant: ["aubergine"],
+  courgette: ["zucchini"],
+  zucchini: ["courgette"],
+  rocket: ["arugula"],
+  arugula: ["rocket"],
+  coriander: ["cilantro"],
+  cilantro: ["coriander"],
+  "spring onion": ["scallion", "green onion"],
+  scallion: ["spring onion", "green onion"],
+  "green onion": ["spring onion", "scallion"],
+  beetroot: ["beet"],
+  beet: ["beetroot"],
+  swede: ["rutabaga"],
+  rutabaga: ["swede"],
+  sweetcorn: ["corn"],
+  corn: ["sweetcorn"],
+  "french bean": ["green bean"],
+  "green bean": ["french bean"],
+  "pak choi": ["bok choy"],
+  "bok choy": ["pak choi"],
+};
+
+const AUTOCOMPLETE_FAMILY_MAP: Record<string, string[]> = {
+  cour: ["courgette", "zucchini", "summer squash", "marrow", "pattypan squash", "tromboncino", "crookneck squash"],
+  bean: ["bean", "French bean", "runner bean", "broad bean", "haricot bean"],
+  pea: ["pea", "garden pea", "mangetout", "sugar snap pea"],
+  tom: ["tomato", "cherry tomato", "plum tomato", "beefsteak tomato"],
+  onion: ["onion", "spring onion", "salad onion", "red onion"],
+  lett: ["lettuce", "leaf lettuce", "cos lettuce", "romaine lettuce"],
+  cabb: ["cabbage", "kale", "brassica", "broccoli"],
+  spin: ["spinach", "baby leaf spinach", "perpetual spinach"],
+  beet: ["beetroot", "beet"],
+  carro: ["carrot"],
+};

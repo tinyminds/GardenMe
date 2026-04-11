@@ -22,6 +22,7 @@ export function PersistentNav() {
     },
   });
   const unseenCount = unseenCountQuery.data ?? 0;
+  const gardenRootHref = selectedGardenId ? `/gardens/${selectedGardenId}` : "/(tabs)/gardens";
 
   return (
     <View
@@ -35,9 +36,10 @@ export function PersistentNav() {
       ]}
     >
       <View style={styles.row}>
-        <Link href="/(tabs)" style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Home</Text></Link>
-        <Link href="/(tabs)/plan" style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Workspace</Text></Link>
+        <Link href="/(tabs)" style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Overview</Text></Link>
         <Link href="/(tabs)/calendar" style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Calendar</Text></Link>
+        <Link href={`${gardenRootHref}/grow`} style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Grow</Text></Link>
+        <Link href={`${gardenRootHref}/beds`} style={styles.link}><Text style={[styles.text, { color: theme.textPrimary }]}>Beds</Text></Link>
         <Link href="/(tabs)/tasks" style={styles.link}>
           <View style={styles.taskLink}>
             <Text style={[styles.text, { color: theme.textPrimary }]}>Tasks</Text>
