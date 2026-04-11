@@ -157,7 +157,6 @@ export default function TasksTabScreen() {
 
   useEffect(() => {
     if (!activeGardenId) return;
-    generateMutation.mutate(activeGardenId);
     void taskRepository.markSeenByGarden(activeGardenId).then(async () => {
       await queryClient.invalidateQueries({ queryKey: ["tasks-unseen-count", activeGardenId] });
     });
@@ -254,11 +253,12 @@ export default function TasksTabScreen() {
         {currentGarden ? `Active garden: ${currentGarden.name}` : "Choose a garden to see task alerts."}
       </Text>
       <Text style={[styles.subtitle, { color: theme.textMuted }]}>Notifications: {preferencesQuery.data?.notificationsEnabled ? "on" : "off"} (manage in Settings)</Text>
+      <Text style={[styles.subtitle, { color: theme.textMuted }]}>Tasks stay put until you refresh them from the garden.</Text>
 
       {gardensQuery.isLoading && <Text style={[styles.empty, { color: theme.textMuted }]}>Loading gardens...</Text>}
       {activeGardenId && (
         <AppButton
-          label={generateMutation.isPending ? "Refreshing tasks..." : "Refresh tasks"}
+          label={generateMutation.isPending ? "Refreshing garden tasks..." : "Refresh from garden"}
           variant="secondary"
           size="sm"
           style={styles.button}
