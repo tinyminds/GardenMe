@@ -137,8 +137,6 @@ export default function DashboardScreen() {
   const placedCount = growList.filter((entry) => Boolean(entry.bedId)).length;
   const plannedCount = growList.filter((entry) => entry.status === "wanted").length;
   const growingCount = growList.filter((entry) => entry.status === "already_growing").length;
-  const startedIndoorsCount = growList.filter((entry) => entry.status === "wanted" && Boolean(entry.startedIndoorsAt)).length;
-  const unassignedCount = growList.filter((entry) => entry.status === "wanted" && !entry.bedId).length;
   const hasSetup = Boolean(selectedGarden?.scaleCalibration);
   const hasDesign = bedCount + featureCount > 0;
   const isBedPlannerReady = bedCount > 0 && growCount > 0;
@@ -207,25 +205,6 @@ export default function DashboardScreen() {
     }
     return map;
   }, [bedsQuery.data, growList]);
-  const bedOverviewRows = useMemo(() => {
-    return (bedsQuery.data ?? []).map((bed) => {
-      const bedEntries = growList.filter((entry) => entry.bedId === bed.id);
-      const growing = bedEntries.filter((entry) => entry.status === "already_growing").map((entry) => entry.plant.commonName);
-      const planned = bedEntries.filter((entry) => entry.status === "wanted").map((entry) => entry.plant.commonName);
-      return {
-        id: bed.id,
-        name: bed.name,
-        growing,
-        planned,
-      };
-    });
-  }, [bedsQuery.data, growList]);
-  const indoorStarts = useMemo(() => {
-    return growList
-      .filter((entry) => entry.status === "wanted" && Boolean(entry.startedIndoorsAt))
-      .map((entry) => formatEntryLabel(entry))
-      .slice(0, 5);
-  }, [growList]);
   const seasonalDiscoveryNames = useMemo(() => {
     const month = new Date().getMonth() + 1;
     const names = SEASONAL_DISCOVERY_BY_MONTH[month] ?? [];
@@ -407,43 +386,6 @@ export default function DashboardScreen() {
           >
             Open Tasks
           </Link>
-        </View>
-      ) : null}
-
-      {selectedGarden ? (
-        <View style={[styles.card, { backgroundColor: theme.surfaceBackground, borderColor: theme.borderColor }]}>
-          <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>At a glance</Text>
-          <View style={styles.metricsRow}>
-            <StatusChip label={`Started indoors ${startedIndoorsCount}`} />
-            <StatusChip label={`Growing ${growingCount}`} />
-            <StatusChip label={`Planned ${plannedCount}`} />
-            <StatusChip label={`Unassigned ${unassignedCount}`} />
-          </View>
-          <Text style={[styles.helper, { color: theme.textMuted }]}>
-            Beds keep their plan, even when a crop starts indoors.
-          </Text>
-          <View style={styles.overviewList}>
-            {indoorStarts.length === 0 ? (
-              <Text style={[styles.overviewText, { color: theme.textMuted }]}>No crops are marked as started indoors yet.</Text>
-            ) : (
-              <Text style={[styles.overviewText, { color: theme.textMuted }]}>Indoors: {indoorStarts.join(", ")}</Text>
-            )}
-            {bedOverviewRows.length === 0 ? (
-              <Text style={[styles.overviewText, { color: theme.textMuted }]}>Add a bed to see growing and planned crops here.</Text>
-            ) : (
-              bedOverviewRows.slice(0, 4).map((row) => (
-                <View key={row.id} style={[styles.overviewBedRow, { borderColor: theme.borderColor }]}>
-                  <Text style={[styles.overviewBedName, { color: theme.textPrimary }]}>{row.name}</Text>
-                  <Text style={[styles.overviewText, { color: theme.textMuted }]}>
-                    Growing: {row.growing.length > 0 ? row.growing.join(", ") : "none"}
-                  </Text>
-                  <Text style={[styles.overviewText, { color: theme.textMuted }]}>
-                    Planned: {row.planned.length > 0 ? row.planned.join(", ") : "none"}
-                  </Text>
-                </View>
-              ))
-            )}
-          </View>
         </View>
       ) : null}
 
